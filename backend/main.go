@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"napscan-be/src/middleware"
 	"napscan-be/src/routes"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,11 @@ func main() {
 
 	sslyzeRoutes := routes.SslyzeRoutes{}
 	sslyzeRoutes.SetupRoutes(api)
+
+	openvasRoutes := routes.OpenVasRoutes{}
+	openvasRoutes.SetupRoutes(api)
+
+	router.Use(middleware.CORSMiddleware())
 
 	// Start server in background
 	go func() {

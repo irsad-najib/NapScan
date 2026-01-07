@@ -17,6 +17,15 @@ ENV PATH="/root/.local/bin:$PATH"
 
 RUN pipx install sslyze
 
+# Create a non-root user used specifically for gvm-cli (gvm-tools forbids root)
+RUN useradd -m -s /bin/bash napscan
+
+# gvm-tools provides gvm-cli for talking to gvmd (OpenVAS/GMP)
+# Use pipx into a shared bin dir so `runuser -u napscan -- gvm-cli ...` works
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
+RUN pipx install gvm-tools
+
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 
 
 WORKDIR /app

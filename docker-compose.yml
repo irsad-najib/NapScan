@@ -7,12 +7,14 @@ services:
       - "5000:5000"
     environment:
       - GIN_MODE=release
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
     cap_add:
       - NET_RAW
       - NET_ADMIN
     restart: unless-stopped
-    
-# OpenVAS
+
+  # OpenVAS
   vulnerability-tests:
     image: registry.community.greenbone.net/community/vulnerability-tests
     environment:
