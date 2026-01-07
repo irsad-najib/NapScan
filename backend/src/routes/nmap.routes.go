@@ -30,10 +30,10 @@ type CombinedScanResponse struct {
 
 func (nr *NmapRoutes) executeScan(target string, scanType string, args ...string) (models.NmapRun, error) {
 	baseArgs := append([]string{scanType,"-n", "-T4", "-oX", "-"}, args...)
-	baseArgs = append([]string{"nmap"}, baseArgs...)
+	// baseArgs = append([]string{"nmap"}, baseArgs...)
 	baseArgs = append(baseArgs, target)
 
-	cmd := exec.Command("sudo", baseArgs...)
+	cmd := exec.Command("nmap", baseArgs...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

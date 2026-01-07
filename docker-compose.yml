@@ -1,0 +1,13 @@
+services:
+  napscan-backend:
+    build:
+      context: ./backend
+    container_name: napscan-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - GIN_MODE=release
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
