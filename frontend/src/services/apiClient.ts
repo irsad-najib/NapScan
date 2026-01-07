@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 
 // Get API base URL from environment or use default
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://barotropic-clifford-sparklike.ngrok-free.dev';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://3e3e5983218e.ngrok-free.app/';
 
 // Create axios instance
 const axiosInstance: AxiosInstance = axios.create({
@@ -9,7 +9,7 @@ const axiosInstance: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 1000000,
 });
 
 // Add request interceptor for auth token

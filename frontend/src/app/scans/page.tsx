@@ -3,11 +3,14 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { scanApi } from '@/services/api';
+import axiosInstance from '@/services/apiClient';
 
 export default function ScansPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedScanDetails, setSelectedScanDetails] = useState<any>(null);
+  const [selectedTarget, setSelectedTarget] = useState<any>(null);
   const [formData, setFormData] = useState({
     targetId: '',
     scanName: '',
@@ -16,7 +19,7 @@ export default function ScansPage() {
     scheduledTime: '',
     selectedTools: {
       nmap: false,
-      owasp_zap: false,
+      zap: false,
       openvas: false,
       nuclei: false,
       sslyze: false,
@@ -61,19 +64,20 @@ export default function ScansPage() {
       progress: 0,
     },
   ];
-
   const targets = [
     { id: 1, name: 'api.company-prod.com', type: 'Web Application', lastScanned: 'Oct 20, 2023' },
     { id: 2, name: '192.168.10.55', type: 'Network/Server', lastScanned: 'Oct 21, 2023' },
     { id: 3, name: 'staging.web.app', type: 'Web Application', lastScanned: 'Oct 22, 2023' },
     { id: 4, name: 'api.internal.local', type: 'API', lastScanned: 'Oct 23, 2023' },
+    { id: 5, name: 'cms.ayolari.net', type: 'Web Application', lastScanned: 'Oct 24, 2023' },
   ];
 
+
   const handleStartScan = async () => {
-    if (!formData.targetId) {
-      alert('Please select a target');
-      return;
-    }
+      // if (!formData.targetId) {
+      //   alert('Please select a target');
+      //   return;
+      // }
 
     const selectedTools = Object.entries(formData.selectedTools)
       .filter(([_, selected]) => selected)
@@ -91,35 +95,19 @@ export default function ScansPage() {
 
     setIsSubmitting(true);
     try {
-      const scanPayload = {
-        target: formData.targetId,
-        scanType: 'comprehensive',
-        tools: selectedTools,
-        timing: formData.scanTiming,
-        scheduledDate: formData.scanTiming === 'scheduled' ? formData.scheduledDate : undefined,
-        scheduledTime: formData.scanTiming === 'scheduled' ? formData.scheduledTime : undefined,
-        status: 'pending',
-      };
+      console.log('Starting scan with data:', selectedTarget);
 
-      const response = await scanApi.create(scanPayload);
+      const selectedTools = Object.entries(formData.selectedTools)
+        .filter(([_, selected]) => selected)
+        .map(([tool]) => tool);
 
-      console.log('Scan created successfully:', response);
+      for (const tool of selectedTools) {
+        const response = await axiosInstance.post(`/api/${tool}/scan`, {
+          target:  selectedTarget,
+        });
+        console.log(`${tool} scan response:`, response);
+      }
       
-      // Reset form
-      setFormData({
-        targetId: '',
-        scanName: '',
-        scanTiming: 'now',
-        scheduledDate: '',
-        scheduledTime: '',
-        selectedTools: {
-          nmap: false,
-          owasp_zap: false,
-          openvas: false,
-          nuclei: false,
-          sslyze: false,
-        },
-      });
       setShowNewScanForm(false);
       alert('✅ Scan initiated! Job queued for execution.');
     } catch (error) {
@@ -297,18 +285,31 @@ export default function ScansPage() {
                     <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
                       Target to Scan <span className="text-red-500">*</span>
                     </label>
-                    <select
+                    {/* <select
                       value={formData.targetId}
-                      onChange={(e) => setFormData({ ...formData, targetId: e.target.value })}
+                      onChange={(e) => {
+                      const selectedId = e.target.value;
+                      const selected = targets.find(t => t.id.toString() === selectedId);
+                      setFormData({ ...formData, targetId: selectedId });
+                      setSelectedTarget(selected?.name || null);
+                      }}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                     >
                       <option value="">-- Select a target --</option>
                       {targets.map((target) => (
-                        <option key={target.id} value={target.id}>
-                          {target.name} ({target.type})
-                        </option>
+                      <option key={target.id} value={target.id}>
+                        {target.name} ({target.type})
+                      </option>
                       ))}
-                    </select>
+                    </select> */}
+                    <input
+                      type="text"
+                      list="targets-list"
+                      value={selectedTarget || ''}
+                      onChange={(e) => {setSelectedTarget(e.target.value);}}
+                      placeholder="Type or select a target..."
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    />
                   </div>
 
                   {/* Scanner Tools Selection */}
@@ -318,11 +319,11 @@ export default function ScansPage() {
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       {[
-                        { id: 'nmap', name: 'Nmap', icon: 'radar' },
-                        { id: 'owasp_zap', name: 'OWASP ZAP', icon: 'security' },
-                        { id: 'openvas', name: 'OpenVAS', icon: 'shield' },
-                        { id: 'nuclei', name: 'Nuclei', icon: 'bug_report' },
-                        { id: 'sslyze', name: 'SSLyze', icon: 'lock' },
+                        { id: 'nmap', name: 'Nmap'},
+                        { id: 'zap', name: 'OWASP ZAP'},
+                        { id: 'openvas', name: 'OpenVAS' },
+                        { id: 'nuclei', name: 'Nuclei' },
+                        { id: 'sslyze', name: 'SSLyze' },
                       ].map((tool) => (
                         <label
                           key={tool.id}
@@ -439,7 +440,7 @@ export default function ScansPage() {
                         .map(([tool]) => {
                           const toolNames: Record<string, string> = {
                             nmap: 'Nmap',
-                            owasp_zap: 'OWASP ZAP',
+                            zap: 'OWASP ZAP',
                             openvas: 'OpenVAS',
                             nuclei: 'Nuclei',
                             sslyze: 'SSLyze',
@@ -513,7 +514,10 @@ export default function ScansPage() {
                           <td className="py-4 px-6 text-slate-700 dark:text-slate-300 text-sm font-mono font-bold">{scan.vulnerabilities}</td>
                           <td className="py-4 px-6 text-slate-700 dark:text-slate-300 text-sm">{scan.date}</td>
                           <td className="py-4 px-6 text-right whitespace-nowrap">
-                            <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-slate-700 dark:hover:bg-slate-600 p-2 rounded-lg transition-all transform hover:scale-110">
+                            <button 
+                              onClick={() => setSelectedScanDetails(scan)}
+                              className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-slate-700 dark:hover:bg-slate-600 p-2 rounded-lg transition-all transform hover:scale-110"
+                            >
                               <span className="material-symbols-outlined text-[20px]">more_vert</span>
                             </button>
                           </td>
@@ -542,4 +546,172 @@ export default function ScansPage() {
           </div>
         </main>
       </div>
-    </div>)}
+    
+
+      {/* Scan Details Modal */}
+      {selectedScanDetails && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-3xl my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                  {selectedScanDetails.name}
+                </h2>
+                <p className="text-slate-600 dark:text-slate-400 text-sm mt-1">
+                  Scan Details & Metadata
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedScanDetails(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              >
+                <span className="material-symbols-outlined text-2xl">close</span>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 max-h-[70vh] overflow-y-auto">
+              {/* Risks Overview */}
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Risks Overview</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="bg-red-50 dark:bg-red-500/10 rounded-lg p-4 border border-red-200 dark:border-red-500/30">
+                    <p className="text-2xl font-bold text-red-600 dark:text-red-400">0</p>
+                    <p className="text-xs text-red-600 dark:text-red-400 font-semibold">Critical</p>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-500/10 rounded-lg p-4 border border-orange-200 dark:border-orange-500/30">
+                    <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">0</p>
+                    <p className="text-xs text-orange-600 dark:text-orange-400 font-semibold">High</p>
+                  </div>
+                  <div className="bg-yellow-50 dark:bg-yellow-500/10 rounded-lg p-4 border border-yellow-200 dark:border-yellow-500/30">
+                    <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{selectedScanDetails.vulnerabilities}</p>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 font-semibold">Medium</p>
+                  </div>
+                  <div className="bg-blue-50 dark:bg-blue-500/10 rounded-lg p-4 border border-blue-200 dark:border-blue-500/30">
+                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">0</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold">Low</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-500/10 rounded-lg p-4 border border-slate-200 dark:border-slate-500/30">
+                    <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">0</p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 font-semibold">Info</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mb-8">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Scan Progress</h3>
+                  <span className="text-sm font-bold text-slate-600 dark:text-slate-400">{selectedScanDetails.progress}%</span>
+                </div>
+                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-blue-500 to-cyan-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${selectedScanDetails.progress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Metadata */}
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Scan Metadata</h3>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-4 pb-3 border-b border-slate-200 dark:border-slate-700">
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">ID</p>
+                      <p className="text-sm font-mono text-slate-900 dark:text-white break-all">{selectedScanDetails.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Type</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">Full Scan</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Status</p>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold ${selectedScanDetails.statusColor}`}>
+                        {selectedScanDetails.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Target</p>
+                      <p className="text-sm text-slate-900 dark:text-white font-medium">{selectedScanDetails.target}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Risk Level</p>
+                      <span className={`text-sm font-bold ${selectedScanDetails.riskColor}`}>{selectedScanDetails.riskLevel}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Created At</p>
+                      <p className="text-sm text-slate-900 dark:text-white">{selectedScanDetails.date}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Updated At</p>
+                      <p className="text-sm text-slate-900 dark:text-white">{selectedScanDetails.date}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 py-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Is Agent</p>
+                      <p className="text-sm text-slate-900 dark:text-white font-medium">false</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Total Vulnerabilities</p>
+                      <p className="text-sm text-slate-900 dark:text-white font-bold">{selectedScanDetails.vulnerabilities}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vulnerabilities Found */}
+              {selectedScanDetails.vulnerabilities > 0 && (
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Vulnerabilities Found</h3>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      {selectedScanDetails.vulnerabilities} vulnerability item(s) detected during scan execution
+                    </p>
+                    <div className="mt-4 space-y-2">
+                      {[...Array(Math.min(selectedScanDetails.vulnerabilities, 3))].map((_, i) => (
+                        <div key={i} className="flex items-start gap-3 p-3 bg-white dark:bg-slate-700/30 rounded-lg border border-slate-200 dark:border-slate-700">
+                          <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-lg mt-1">warning</span>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Medium Severity Issue #{i + 1}</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">CVSS Score: 5.{i}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {selectedScanDetails.vulnerabilities > 3 && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400 text-center py-2">
+                          +{selectedScanDetails.vulnerabilities - 3} more vulnerabilities
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <button
+                onClick={() => setSelectedScanDetails(null)}
+                className="px-6 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-semibold rounded-lg transition-all"
+              >
+                Close
+              </button>
+              <button className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all">
+                Export Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+)}
