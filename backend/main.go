@@ -24,6 +24,10 @@ func main() {
 
 	// Use Gin's default logger and recovery middleware
 	router := gin.New()
+	// CRITICAL ORDER: CORS → Logger → Recovery
+	// Put CORS FIRST (outermost) so it runs for every request and can short-circuit preflight.
+	// Also ensures CORS headers are set even when Recovery generates an error response.
+	router.Use(middleware.CORSMiddleware())
 	router.Use(gin.Logger(), gin.Recovery())
 
 	api := router.Group("/api")
@@ -35,6 +39,9 @@ func main() {
 
 	// Configure server
 	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5000"
+	}
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -59,8 +66,6 @@ func main() {
 
 	openvasRoutes := routes.OpenVasRoutes{}
 	openvasRoutes.SetupRoutes(api)
-
-	router.Use(middleware.CORSMiddleware())
 
 	// Start server in background
 	go func() {
