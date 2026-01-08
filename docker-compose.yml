@@ -19,6 +19,15 @@ services:
       - gvmd
     restart: unless-stopped
 
+  
+  # MobSF
+  mobsf-client:
+    image: opensecurity/mobile-security-framework-mobsf:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - MOBSF_API_KEY=${MOBSF_API_KEY}
+
   # OpenVAS
   vulnerability-tests:
     image: registry.community.greenbone.net/community/vulnerability-tests
