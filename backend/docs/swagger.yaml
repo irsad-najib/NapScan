@@ -1,0 +1,398 @@
+basePath: /api
+definitions:
+  models.Address:
+    properties:
+      addr:
+        type: string
+    type: object
+  models.Host:
+    properties:
+      addresses:
+        items:
+          $ref: '#/definitions/models.Address'
+        type: array
+      ports:
+        $ref: '#/definitions/models.Ports'
+    type: object
+  models.NmapRun:
+    properties:
+      hosts:
+        items:
+          $ref: '#/definitions/models.Host'
+        type: array
+    type: object
+  models.Port:
+    properties:
+      port:
+        type: string
+      protocol:
+        type: string
+      service:
+        $ref: '#/definitions/models.Service'
+      state:
+        $ref: '#/definitions/models.State'
+    type: object
+  models.Ports:
+    properties:
+      ports:
+        items:
+          $ref: '#/definitions/models.Port'
+        type: array
+    type: object
+  models.Service:
+    properties:
+      name:
+        type: string
+    type: object
+  models.State:
+    properties:
+      state:
+        type: string
+    type: object
+  response.Response:
+    properties:
+      data: {}
+      error: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+  service.CombinedScanResponse:
+    properties:
+      tcp:
+        $ref: '#/definitions/models.NmapRun'
+      udp:
+        $ref: '#/definitions/models.NmapRun'
+    type: object
+info:
+  contact:
+    name: API Support
+  description: Security Scanning API
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Napscan API
+  version: "1.0"
+paths:
+  /ffuf/scan:
+    post:
+      consumes:
+      - application/json
+      description: Run directory fuzzing using FFUF
+      parameters:
+      - description: Target URL
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start FFUF Scan
+      tags:
+      - FFUF
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Checks if the server is running
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health Check
+      tags:
+      - Health
+  /mobsf/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload APK/IPA/ZIP file for analysis
+      parameters:
+      - description: File to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Upload file for MobSF
+      tags:
+      - MobSF
+  /nmap/scan:
+    post:
+      consumes:
+      - application/json
+      description: Run parallel TCP and UDP Nmap scans on a target
+      parameters:
+      - description: Target IP or Hostname
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.CombinedScanResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start Nmap Full Scan
+      tags:
+      - Nmap
+  /nuclei/scan:
+    post:
+      consumes:
+      - application/json
+      description: Run Nuclei scan on a target
+      parameters:
+      - description: Target URL or Hostname
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start Nuclei Scan
+      tags:
+      - Nuclei
+  /openvas/report/{reportId}:
+    get:
+      consumes:
+      - application/json
+      description: Get report details parsed as JSON
+      parameters:
+      - description: Report ID
+        in: path
+        name: reportId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Get Scan Report
+      tags:
+      - OpenVAS
+  /openvas/scan:
+    post:
+      consumes:
+      - application/json
+      description: Create target, task, and start scan
+      parameters:
+      - description: Scan parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start OpenVAS Scan
+      tags:
+      - OpenVAS
+  /openvas/task/{taskId}/status:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a task especially progress and report ID
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Get Task Status
+      tags:
+      - OpenVAS
+  /openvas/version:
+    get:
+      consumes:
+      - application/json
+      description: Check OpenVAS connectivity and version
+      produces:
+      - text/xml
+      responses:
+        "200":
+          description: XML response
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Get OpenVAS Version
+      tags:
+      - OpenVAS
+  /sslyze/scan:
+    post:
+      consumes:
+      - application/json
+      description: Run SSL/TLS configuration analysis
+      parameters:
+      - description: Target Host:Port
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start SSLyze Scan
+      tags:
+      - SSLyze
+  /zap/scan:
+    post:
+      consumes:
+      - application/json
+      description: Run ZAP Spider and Active Scan
+      parameters:
+      - description: Target URL
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start ZAP Scan
+      tags:
+      - ZAP
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
