@@ -38,6 +38,7 @@ func (s *FfufService) ExecuteScan(ctx context.Context, target string) (interface
 		"ffuf",
 		"-u", target+"/FUZZ",
 		"-w", wordlistPath,
+		"-fc", "404,307",
 		"-of", "json",
 		"-o", tmpFile,
 		"-s", // silent mode

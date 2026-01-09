@@ -37,8 +37,14 @@ func main() {
 	}
 
 	app := fiber.New(fiber.Config{
+		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
+		BodyLimit: 100 * 1024 * 1024,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			return c.Status(code).JSON(fiber.Map{
 				"success": false,
 				"message": err.Error(),
 			})
