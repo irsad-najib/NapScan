@@ -23,8 +23,8 @@ services:
   # MobSF
   mobsf-client:
     image: opensecurity/mobile-security-framework-mobsf:latest
-    ports:
-      - "8000:8000"
+    # ports:
+    #   - "8000:8000"
     environment:
       - MOBSF_API_KEY=${MOBSF_API_KEY}
 
@@ -122,8 +122,8 @@ services:
   gsa:
     image: registry.community.greenbone.net/community/gsa:stable
     restart: on-failure
-    ports:
-      - 127.0.0.1:9392:80
+    # ports:
+    #   - 127.0.0.1:9392:80
     volumes:
       - gvmd_socket_vol:/run/gvmd
     depends_on:
