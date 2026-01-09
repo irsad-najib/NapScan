@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   viewport: "width=device-width, initial-scale=1.0",
 };
 
+import { ScanProvider } from "@/context/ScanContext";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -47,7 +49,9 @@ export default function RootLayout({
         `}</style>
       </head>
       <body className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-white antialiased overflow-hidden">
-        {children}
+        <ScanProvider>
+          {children}
+        </ScanProvider>
       </body>
     </html>
   );
