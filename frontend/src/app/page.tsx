@@ -328,7 +328,7 @@ export default function Home() {
               {/* Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
-                  All Targets
+                  Results
                 </h3>
                 <div className="flex items-center gap-3">
                   <div className="relative group">

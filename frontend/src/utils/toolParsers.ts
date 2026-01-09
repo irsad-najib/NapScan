@@ -10,40 +10,11 @@ import { ToolKey } from "@/services/api";
 export { parseNmapResults, parseNmapAuto, parseRawNmapScan } from "./nmapParser";
 export type { ParsedNmapScanSummary, ParsedNmapHost, ParsedNmapPort } from "./nmapParser";
 
-/**
- * Parse OWASP ZAP results
- */
-export function parseZapResults(rawResult: any): ScanVulnerability[] {
-    const vulnerabilities: ScanVulnerability[] = [];
+// Re-export ZAP parser
+export { parseZapResults, parseZapAuto, parseZapResultsDetailed, analyzeZapRisk } from "./zapParser";
+export type { ParsedZapVulnerability, ZapRiskSummary, ZapAlert } from "./zapParser";
 
-    try {
-        const alerts = rawResult?.alertsRaw || rawResult?.alerts || [];
-        const alertArray = Array.isArray(alerts) ? alerts : [];
-
-        alertArray.forEach((alert: any, idx: number) => {
-            const risk = alert.risk?.toLowerCase() || alert.riskdesc?.toLowerCase() || "low";
-            let severity: "Critical" | "High" | "Medium" | "Low" | "Info" = "Info";
-
-            if (risk.includes("high")) severity = "High";
-            else if (risk.includes("medium")) severity = "Medium";
-            else if (risk.includes("low")) severity = "Low";
-            else if (risk.includes("informational")) severity = "Info";
-
-            vulnerabilities.push({
-                id: `zap-${idx}`,
-                name: alert.alert || alert.name || "Unknown ZAP Finding",
-                severity,
-                description: alert.desc || alert.description || "No description available",
-                tool: "zap",
-            });
-        });
-
-        return vulnerabilities;
-    } catch (error) {
-        console.error("Error parsing ZAP results:", error);
-        return [];
-    }
-}
+// Note: parseZapResults is now exported from ./zapParser
 
 /**
  * Parse OpenVAS results
@@ -224,7 +195,8 @@ export function parseToolResults(tool: ToolKey, rawResult: any): ScanVulnerabili
                 const { parseNmapAuto } = require("./nmapParser");
                 return parseNmapAuto(rawResult);
             case "zap":
-                return parseZapResults(rawResult);
+                const { parseZapAuto } = require("./zapParser");
+                return parseZapAuto(rawResult);
             case "openvas":
                 return parseOpenVasResults(rawResult);
             case "nuclei":
