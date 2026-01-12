@@ -44,8 +44,8 @@ export default function ScanDetailPage() {
     }
 
     // Calculate overall progress from tools
-    const toolKeys = Object.keys(scan.tools);
-    const totalProgress = toolKeys.reduce((acc, key) => acc + (scan.tools[key as any].progress || 0), 0);
+    const toolKeys = Object.keys(scan.tools) as Array<keyof typeof scan.tools>;
+    const totalProgress = toolKeys.reduce((acc, key) => acc + (scan.tools[key]?.progress || 0), 0);
     const avgProgress = toolKeys.length > 0 ? Math.round(totalProgress / toolKeys.length) : 0;
 
     // Override progress with 100 if status is completed
@@ -89,8 +89,8 @@ export default function ScanDetailPage() {
                             </p>
                         </div>
                         <div className={`ml-4 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${scan.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
-                                scan.status === 'running' ? 'bg-blue-100 text-blue-700' :
-                                    'bg-slate-100 text-slate-700'
+                            scan.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                'bg-slate-100 text-slate-700'
                             }`}>
                             {scan.status}
                         </div>

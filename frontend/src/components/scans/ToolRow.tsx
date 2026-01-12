@@ -98,7 +98,11 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                         <span className={`material-symbols-outlined text-sm ${data.status === 'running' ? 'animate-spin' : ''}`}>
                             {getStatusIcon(data.status)}
                         </span>
-                        <span className="capitalize">{data.status}</span>
+                        <span className="capitalize">
+                            {data.status === 'running' && data.progress !== undefined
+                                ? `${data.progress}%`
+                                : data.status}
+                        </span>
                     </div>
                 </div>
 

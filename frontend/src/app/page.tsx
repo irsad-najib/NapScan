@@ -3,10 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { request } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import { LoginButton, UserMenu } from "@/components/auth";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const { isAuthenticated, loading: authLoading } = useAuth();
 
   const handleHealthCheck = async () => {
     const res = await request<{ status?: string }>({
@@ -180,20 +183,20 @@ export default function Home() {
                   key={item.label}
                   href={item.href}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${item.active
-                      ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
-                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
+                    ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
                     }`}>
                   <span
                     className={`material-symbols-outlined text-xl transition-transform ${item.active
-                        ? "fill-current scale-110"
-                        : "group-hover:scale-110"
+                      ? "fill-current scale-110"
+                      : "group-hover:scale-110"
                       }`}>
                     {item.icon}
                   </span>
                   <span
                     className={`text-sm font-semibold tracking-wide ${item.active
-                        ? "text-white"
-                        : "text-slate-700 dark:text-slate-300"
+                      ? "text-white"
+                      : "text-slate-700 dark:text-slate-300"
                       }`}>
                     {item.label}
                   </span>
@@ -207,26 +210,18 @@ export default function Home() {
             </nav>
           </div>
 
-          {/* User Profile Bottom */}
-          <div className="flex items-center gap-3 px-4 py-4 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/50 cursor-pointer border-t border-slate-200 dark:border-slate-800 pt-5 transition-colors">
-            <div
-              className="bg-center bg-no-repeat bg-cover rounded-lg size-9 shrink-0 ring-2 ring-blue-500/20"
-              style={{
-                backgroundImage: `url("https://lh3.googleusercontent.com/aida-public/AB6AXuCh8uYRP-HT-F-XERcS5Eey8codaekqO8OB2xh0uUpbbudDU-w4poJggQ538EII8_qWXNp9iiyhXdDmfvAFNQ_Ltqpn0_ri0HezeEd7kMC8x_Fh_-u_SZv0CWyIVLh5PKGuQbhdq8cFikywQ0HXMRN1VgQ6oyQXarl8BpM2_kF72N_hlRRja1UW2llExWmJLu0bhPiU2qzRO5BxFCB7bx3baPcDNCVQeLdn2NI3ftYREJ9mOBGbZJ-FW_qnKINaOaiRIo2sAQazNTqt")`,
-              }}
-            />
-            <div className="flex flex-col min-w-0 flex-1">
-              <p className="text-slate-900 dark:text-white text-sm font-semibold truncate">
-                Alex Morgan
-              </p>
-              <p className="text-slate-500 dark:text-slate-500 text-xs truncate">
-                Security Analyst
-              </p>
+          {/* User Profile / Login */}
+          {authLoading ? (
+            <div className="flex items-center justify-center px-4 py-4 border-t border-slate-200 dark:border-slate-800">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
             </div>
-            <span className="material-symbols-outlined text-slate-600 dark:text-slate-400 text-lg">
-              expand_more
-            </span>
-          </div>
+          ) : isAuthenticated ? (
+            <UserMenu />
+          ) : (
+            <div className="px-4 py-4 border-t border-slate-200 dark:border-slate-800">
+              <LoginButton />
+            </div>
+          )}
         </div>
       </aside>
 
@@ -311,8 +306,8 @@ export default function Home() {
                   </div>
                   <div
                     className={`flex items-center gap-2 text-sm font-semibold ${stat.trendUp
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-red-600 dark:text-red-400"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
                       }`}>
                     <span className="material-symbols-outlined text-base">
                       {stat.trendUp ? "trending_up" : "trending_down"}
@@ -459,8 +454,8 @@ export default function Home() {
                                   </span>
                                   <span
                                     className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${target.riskLevel === "High"
-                                        ? "bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400"
-                                        : "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                                      ? "bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400"
+                                      : "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                                       }`}>
                                     {target.riskScore}
                                   </span>

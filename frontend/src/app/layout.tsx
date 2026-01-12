@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,6 +9,7 @@ export const metadata: Metadata = {
 };
 
 import { ScanProvider } from "@/context/ScanContext";
+import { AuthProvider } from "@/context/AuthContext";
 
 export default function RootLayout({
   children,
@@ -49,9 +51,16 @@ export default function RootLayout({
         `}</style>
       </head>
       <body className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-white antialiased overflow-hidden">
-        <ScanProvider>
-          {children}
-        </ScanProvider>
+        {/* Google Sign-In Script */}
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+        />
+        <AuthProvider>
+          <ScanProvider>
+            {children}
+          </ScanProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -129,6 +129,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     // --- OpenVAS Dedicated Handler (3-step async flow) ---
     const executeOpenVAS = async (scanId: string, target: string) => {
         const tool: ToolKey = "openvas";
+        console.log(`[OpenVAS] Starting scan for target: ${target}`);
+
         updateToolStatus(scanId, tool, {
             status: "running",
             progress: 0,
@@ -137,33 +139,58 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
         try {
             // Step 1: Start Scan
+            console.log(`[OpenVAS] Step 1: Starting scan...`);
             const startRes = await scannersApi.openvas.scan(target);
-            if (!startRes.ok || !startRes.data?.taskID) {
-                throw new Error((startRes as any).message || "Failed to start OpenVAS scan");
+            console.log(`[OpenVAS] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[OpenVAS] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start OpenVAS scan");
             }
-            const taskId = startRes.data.taskID;
+
+            // Handle nested data structure: startRes.data = {success, message, data: {taskID, ...}}
+            const responseData = (startRes.data as any)?.data || startRes.data;
+            const taskId = responseData?.taskID;
+
+            if (!taskId) {
+                console.error(`[OpenVAS] No taskID in response:`, startRes.data);
+                throw new Error("No taskID returned from OpenVAS");
+            }
+
+            console.log(`[OpenVAS] Scan started, taskID: ${taskId}`);
 
             // Step 2: Poll for status
             let reportId: string | undefined;
             let progress = 0;
-            const POLL_INTERVAL = 5000; // 5 seconds
-            const MAX_POLLS = 120; // Max 10 minutes
+            const POLL_INTERVAL = 15000; // 15 seconds
+            const MAX_POLLS = 200;
+
+            console.log(`[OpenVAS] Step 2: Polling for status (max ${MAX_POLLS} polls, interval ${POLL_INTERVAL}ms)...`);
 
             for (let i = 0; i < MAX_POLLS; i++) {
+                console.log(`[OpenVAS] Poll ${i + 1}/${MAX_POLLS}...`);
                 const statusRes = await scannersApi.openvas.taskStatus(taskId);
+                console.log(`[OpenVAS] Status response:`, statusRes);
+
                 if (!statusRes.ok) {
-                    throw new Error((statusRes as any).message || "Failed to get OpenVAS status");
+                    console.error(`[OpenVAS] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get OpenVAS status");
                 }
 
-                progress = statusRes.data?.progress ?? 0;
+                // Handle nested data structure
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+                console.log(`[OpenVAS] Progress: ${progress}%, Status: ${status}`);
+
                 updateToolStatus(scanId, tool, { progress });
 
-                const status = statusRes.data?.status?.toLowerCase();
                 if (status === "done" || status === "completed") {
-                    reportId = statusRes.data?.reportID;
+                    reportId = statusData?.reportID;
+                    console.log(`[OpenVAS] Scan completed! reportID: ${reportId}`);
                     break;
                 }
-                if (status === "stopped" || status === "failed") {
+                if (status === "stopped" || status === "failed" || status === "error") {
                     throw new Error(`OpenVAS task ${status}`);
                 }
 
@@ -171,23 +198,43 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (!reportId) {
-                throw new Error("OpenVAS scan timed out or no report ID");
+                throw new Error("OpenVAS scan timed out or no report ID returned");
             }
 
             // Step 3: Fetch Report
+            console.log(`[OpenVAS] Step 3: Fetching report ${reportId}...`);
             const reportRes = await scannersApi.openvas.report(reportId);
+            console.log(`[OpenVAS] Report response:`, reportRes);
+
             if (!reportRes.ok) {
-                throw new Error((reportRes as any).message || "Failed to fetch OpenVAS report");
+                console.error(`[OpenVAS] Report fetch failed:`, reportRes);
+                throw new Error((reportRes as any).message || (reportRes as any).error || "Failed to fetch OpenVAS report");
             }
 
+            console.log(`[OpenVAS] Scan completed successfully!`);
             updateToolStatus(scanId, tool, {
                 status: "completed",
                 progress: 100,
                 endTime: new Date().toISOString(),
                 result: reportRes.data,
             });
+
+            // Parse vulnerabilities from report
+            try {
+                const toolVulns = parseToolResults(tool, reportRes.data);
+                console.log(`[OpenVAS] Parsed ${toolVulns.length} vulnerabilities`);
+                if (toolVulns.length > 0) {
+                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                        ...v,
+                        id: `${scanId}-${tool}-${idx}`,
+                    }));
+                    addVulnerabilities(scanId, scanVulns);
+                }
+            } catch (parseError) {
+                console.error(`[OpenVAS] Failed to parse results:`, parseError);
+            }
         } catch (err: any) {
-            console.error("OpenVAS failed", err);
+            console.error("[OpenVAS] Failed:", err);
             updateToolStatus(scanId, tool, {
                 status: "failed",
                 progress: 100,
@@ -234,6 +281,45 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             }
 
             const res = result as any;
+
+            // Special handling for SSLyze - it may return HTTP 500 but still have valid results
+            // SSLyze exits with status 1 when compliance check fails, but scan data is in the error/data field
+            // Check both res.data (for HTTP 200 with success:false) and res.data (for HTTP 500 error body)
+            if (tool === "sslyze") {
+                const sslyzeData = res.data as { success?: boolean; error?: string; message?: string } | undefined;
+                const errorStr = sslyzeData?.error || res.message || "";
+
+                console.log(`[ScanContext] SSLyze response:`, { ok: res.ok, hasData: !!sslyzeData, errorLength: errorStr.length });
+
+                if (typeof errorStr === "string" && errorStr.includes("SCAN RESULTS FOR")) {
+                    console.log(`[ScanContext] SSLyze has scan results in response, parsing...`);
+
+                    // Store the data even though it's technically a "failure"
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: sslyzeData || { error: errorStr },
+                    });
+
+                    // Parse vulnerabilities from the response
+                    try {
+                        const toolVulns = parseToolResults(tool, sslyzeData || { error: errorStr });
+                        console.log(`[ScanContext] Parsed ${toolVulns.length} SSLyze vulnerabilities:`, toolVulns);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`Failed to parse SSLyze results:`, parseError);
+                    }
+                    return; // Exit early, don't throw error
+                }
+            }
+
             if (!res.ok) {
                 throw new Error(res.error || res.message || "Unknown error");
             }

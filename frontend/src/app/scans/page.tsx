@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
 import { ToolList } from "@/components/scans/ToolList";
+import { Sidebar } from "@/components/layout";
 
 export default function ScansPage() {
-  const router = useRouter();
   const { scans, startScan, deleteScan } = useScan();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Scan type: web or apk
+  const [scanType, setScanType] = useState<"web" | "apk">("web");
 
   // State for file upload
   const [dragActive, setDragActive] = useState(false);
@@ -56,8 +58,29 @@ export default function ScansPage() {
       nuclei: false,
       sslyze: false,
       ffuf: false,
+      mobsf: false,
     },
   });
+
+  // Reset tools when switching scan type
+  const handleScanTypeChange = (type: "web" | "apk") => {
+    setScanType(type);
+    setFormData({
+      ...formData,
+      selectedTools: {
+        nmap: false,
+        zap: false,
+        openvas: false,
+        nuclei: false,
+        sslyze: false,
+        ffuf: false,
+        mobsf: false,
+      },
+    });
+    // Clear target/file
+    setSelectedTarget(null);
+    setUploadedFile(null);
+  };
 
 
   const targets = [
@@ -128,87 +151,10 @@ export default function ScansPage() {
     setExpandedScanId(expandedScanId === scanId ? null : scanId);
   };
 
-  const navItems = [
-    { label: "Dashboard", icon: "dashboard", href: "/", active: false },
-    { label: "Scans", icon: "radar", href: "/scans", active: true },
-    { label: "Reports", icon: "description", href: "/reports", active: false },
-    { label: "Settings", icon: "settings", href: "/settings", active: false },
-  ];
-
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-slate-950">
       {/* Sidebar */}
-      <aside className="w-64 bg-white dark:bg-slate-900 border-r-2 border-slate-200 dark:border-slate-800 flex-col hidden md:flex shrink-0 transition-all duration-300">
-        <div className="h-full flex flex-col justify-between p-6">
-          <div className="flex flex-col gap-8">
-            {/* Logo */}
-            <div className="flex items-center gap-3 px-2">
-              <div className="bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center aspect-square rounded-lg size-11 text-white shadow-lg shadow-blue-500/20">
-                <span className="material-symbols-outlined text-xl font-bold">
-                  shield_lock
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <h1 className="text-slate-900 dark:text-white text-base font-bold leading-tight">
-                  NapScan
-                </h1>
-                <p className="text-slate-500 dark:text-slate-400 text-xs">
-                  Security
-                </p>
-              </div>
-            </div>
-
-            {/* Nav Items */}
-            <nav className="flex flex-col gap-2">
-              {navItems.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${item.active
-                    ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
-                    }`}>
-                  <span
-                    className={`material-symbols-outlined text-xl transition-transform ${item.active
-                      ? "fill-current scale-110"
-                      : "group-hover:scale-110"
-                      }`}>
-                    {item.icon}
-                  </span>
-                  <span
-                    className={`text-sm font-semibold tracking-wide ${item.active
-                      ? "text-white"
-                      : "text-slate-700 dark:text-slate-300"
-                      }`}>
-                    {item.label}
-                  </span>
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          {/* User Profile Bottom */}
-          <div className="flex items-center gap-3 px-4 py-4 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/50 cursor-pointer border-t border-slate-200 dark:border-slate-800 pt-5 transition-colors">
-            <div
-              className="bg-center bg-no-repeat bg-cover rounded-lg size-9 shrink-0 ring-2 ring-blue-500/20"
-              style={{
-                backgroundImage: `url("https://lh3.googleusercontent.com/aida-public/AB6AXuCh8uYRP-HT-F-XERcS5Eey8codaekqO8OB2xh0uUpbbudDU-w4poJggQ538EII8_qWXNp9iiyhXdDmfvAFNQ_Ltqpn0_ri0HezeEd7kMC8x_Fh_-u_SZv0CWyIVLh5PKGuQbhdq8cFikywQ0HXMRN1VgQ6oyQXarl8BpM2_kF72N_hlRRja1UW2llExWmJLu0bhPiU2qzRO5BxFCB7bx3baPcDNCVQeLdn2NI3ftYREJ9mOBGbZJ-FW_qnKINaOaiRIo2sAQazNTqt")`,
-              }}
-            />
-            <div className="flex flex-col min-w-0 flex-1">
-              <p className="text-slate-900 dark:text-white text-sm font-semibold truncate">
-                Alex Morgan
-              </p>
-              <p className="text-slate-500 dark:text-slate-500 text-xs truncate">
-                Security Analyst
-              </p>
-            </div>
-            <span className="material-symbols-outlined text-slate-600 dark:text-slate-400 text-lg">
-              expand_more
-            </span>
-          </div>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
@@ -323,99 +269,153 @@ export default function ScansPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Select Target */}
+                  {/* Scan Type Toggle */}
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
-                      Target to Scan <span className="text-red-500">*</span>
+                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-3">
+                      Scan Type <span className="text-red-500">*</span>
                     </label>
-                    <input
-                      type="text"
-                      list="targets-list"
-                      value={selectedTarget || ""}
-                      onChange={(e) => {
-                        setSelectedTarget(e.target.value);
-                      }}
-                      placeholder="Type or select a target..."
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                    />
-
-                    <datalist id="targets-list">
-                      {targets.map((t) => (
-                        <option key={t.id} value={t.name} />
-                      ))}
-                    </datalist>
-
-                    {/* File Upload Section */}
-                    <div className="mt-4">
-                      <div
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragActive(true);
-                        }}
-                        onDragLeave={() => setDragActive(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragActive(false);
-                          const files = e.dataTransfer.files;
-                          if (files.length > 0) {
-                            setUploadedFile(files[0]);
-                            setSelectedTarget(files[0].name);
-                          }
-                        }}
-                        className={`flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 border-dashed transition-all cursor-pointer ${dragActive
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleScanTypeChange("web")}
+                        className={`flex-1 flex items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all ${scanType === "web"
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-                          : "border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 bg-slate-50 dark:bg-slate-800/30 hover:bg-blue-50 dark:hover:bg-blue-500/5"
+                          : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
                           }`}
-                        onClick={() => document.getElementById('file-upload')?.click()}
                       >
-                        <span
-                          className={`material-symbols-outlined text-2xl transition-colors ${dragActive
-                            ? "text-blue-600 dark:text-blue-400"
-                            : "text-slate-400"
-                            }`}>
-                          upload_file
+                        <span className={`material-symbols-outlined text-2xl ${scanType === "web" ? "text-blue-600 dark:text-blue-400" : "text-slate-400"}`}>
+                          language
                         </span>
                         <div className="text-left">
-                          <p
-                            className={`text-sm font-semibold ${dragActive
-                              ? "text-blue-600 dark:text-blue-400"
-                              : "text-slate-700 dark:text-slate-300"
-                              }`}>
-                            {uploadedFile ? uploadedFile.name : "Drop APK file here or click to browse"}
+                          <p className={`font-bold ${scanType === "web" ? "text-blue-600 dark:text-blue-400" : "text-slate-700 dark:text-slate-300"}`}>
+                            Web Target
                           </p>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Supports: APK files
+                            Scan websites, APIs, or servers
                           </p>
                         </div>
-                        {uploadedFile && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setUploadedFile(null);
-                              if (selectedTarget === uploadedFile.name) {
-                                setSelectedTarget(null);
-                              }
-                            }}
-                            className="ml-auto text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                          >
-                            <span className="material-symbols-outlined">close</span>
-                          </button>
-                        )}
-                      </div>
-                      <input
-                        id="file-upload"
-                        type="file"
-                        accept=".apk"
-                        className="hidden"
-                        onChange={(e) => {
-                          const files = e.target.files;
-                          if (files && files.length > 0) {
-                            setUploadedFile(files[0]);
-                            setSelectedTarget(files[0].name);
-                          }
-                        }}
-                      />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleScanTypeChange("apk")}
+                        className={`flex-1 flex items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all ${scanType === "apk"
+                          ? "border-purple-500 bg-purple-50 dark:bg-purple-500/10"
+                          : "border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600"
+                          }`}
+                      >
+                        <span className={`material-symbols-outlined text-2xl ${scanType === "apk" ? "text-purple-600 dark:text-purple-400" : "text-slate-400"}`}>
+                          android
+                        </span>
+                        <div className="text-left">
+                          <p className={`font-bold ${scanType === "apk" ? "text-purple-600 dark:text-purple-400" : "text-slate-700 dark:text-slate-300"}`}>
+                            APK Mobile
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Analyze Android applications
+                          </p>
+                        </div>
+                      </button>
                     </div>
+                  </div>
+
+                  {/* Conditional Input: Web URL or APK Upload */}
+                  <div className="md:col-span-2">
+                    {scanType === "web" ? (
+                      <>
+                        <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
+                          Target URL / Host <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          list="targets-list"
+                          value={selectedTarget || ""}
+                          onChange={(e) => {
+                            setSelectedTarget(e.target.value);
+                          }}
+                          placeholder="Enter URL or IP address (e.g., https://example.com or 192.168.1.1)"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                        />
+                        <datalist id="targets-list">
+                          {targets.map((t) => (
+                            <option key={t.id} value={t.name} />
+                          ))}
+                        </datalist>
+                      </>
+                    ) : (
+                      <>
+                        <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
+                          APK File <span className="text-red-500">*</span>
+                        </label>
+                        <div
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragActive(true);
+                          }}
+                          onDragLeave={() => setDragActive(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDragActive(false);
+                            const files = e.dataTransfer.files;
+                            if (files.length > 0) {
+                              setUploadedFile(files[0]);
+                              setSelectedTarget(files[0].name);
+                            }
+                          }}
+                          className={`flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 border-dashed transition-all cursor-pointer ${dragActive
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
+                            : "border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 bg-slate-50 dark:bg-slate-800/30 hover:bg-blue-50 dark:hover:bg-blue-500/5"
+                            }`}
+                          onClick={() => document.getElementById('file-upload')?.click()}
+                        >
+                          <span
+                            className={`material-symbols-outlined text-2xl transition-colors ${dragActive
+                              ? "text-blue-600 dark:text-blue-400"
+                              : "text-slate-400"
+                              }`}>
+                            upload_file
+                          </span>
+                          <div className="text-left">
+                            <p
+                              className={`text-sm font-semibold ${dragActive
+                                ? "text-blue-600 dark:text-blue-400"
+                                : "text-slate-700 dark:text-slate-300"
+                                }`}>
+                              {uploadedFile ? uploadedFile.name : "Drop APK file here or click to browse"}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Supports: APK files
+                            </p>
+                          </div>
+                          {uploadedFile && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUploadedFile(null);
+                                if (selectedTarget === uploadedFile.name) {
+                                  setSelectedTarget(null);
+                                }
+                              }}
+                              className="ml-auto text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                            >
+                              <span className="material-symbols-outlined">close</span>
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          id="file-upload"
+                          type="file"
+                          accept=".apk"
+                          className="hidden"
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              setUploadedFile(files[0]);
+                              setSelectedTarget(files[0].name);
+                            }
+                          }}
+                        />
+                      </>
+                    )}
                   </div>
 
                   {/* Scanner Tools Selection */}
@@ -423,52 +423,91 @@ export default function ScansPage() {
                     <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-3">
                       Scanner Tools <span className="text-red-500">*</span>
                     </label>
-                    <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                      {[
-                        { id: "nmap", name: "Nmap", icon: "router" },
-                        { id: "zap", name: "OWASP ZAP", icon: "bug_report" },
-                        { id: "openvas", name: "OpenVAS", icon: "shield" },
-                        { id: "nuclei", name: "Nuclei", icon: "bolt" },
-                        { id: "sslyze", name: "SSLyze", icon: "lock" },
-                        { id: "ffuf", name: "Ffuf", icon: "search" },
-                      ].map((tool) => (
+
+                    {scanType === "web" ? (
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                        {[
+                          { id: "nmap", name: "Nmap", icon: "router", desc: "Port scanning" },
+                          { id: "zap", name: "OWASP ZAP", icon: "bug_report", desc: "Web app testing" },
+                          { id: "openvas", name: "OpenVAS", icon: "shield", desc: "Vulnerability scan" },
+                          { id: "nuclei", name: "Nuclei", icon: "bolt", desc: "Template scanning" },
+                          { id: "sslyze", name: "SSLyze", icon: "lock", desc: "SSL/TLS analysis" },
+                          { id: "ffuf", name: "Ffuf", icon: "search", desc: "Fuzzing" },
+                        ].map((tool) => (
+                          <label
+                            key={tool.id}
+                            className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${formData.selectedTools[
+                              tool.id as keyof typeof formData.selectedTools
+                            ]
+                              ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
+                              : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
+                              }`}>
+                            <input
+                              type="checkbox"
+                              checked={
+                                formData.selectedTools[
+                                tool.id as keyof typeof formData.selectedTools
+                                ]
+                              }
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  selectedTools: {
+                                    ...formData.selectedTools,
+                                    [tool.id]: e.target.checked,
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                            />
+                            <div className="flex-1 text-center">
+                              <span className="material-symbols-outlined text-lg block mb-1">
+                                {tool.icon}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                                {tool.name}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
                         <label
-                          key={tool.id}
-                          className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${formData.selectedTools[
-                            tool.id as keyof typeof formData.selectedTools
-                          ]
-                            ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-                            : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
+                          className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${formData.selectedTools.mobsf
+                            ? "border-purple-500 bg-purple-50 dark:bg-purple-500/10"
+                            : "border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600"
                             }`}>
                           <input
                             type="checkbox"
-                            checked={
-                              formData.selectedTools[
-                              tool.id as keyof typeof formData.selectedTools
-                              ]
-                            }
+                            checked={formData.selectedTools.mobsf}
                             onChange={(e) =>
                               setFormData({
                                 ...formData,
                                 selectedTools: {
                                   ...formData.selectedTools,
-                                  [tool.id]: e.target.checked,
+                                  mobsf: e.target.checked,
                                 },
                               })
                             }
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                            className="w-5 h-5 rounded border-slate-300 text-purple-600 cursor-pointer"
                           />
-                          <div className="flex-1 text-center">
-                            <span className="material-symbols-outlined text-lg block mb-1">
-                              {tool.icon}
-                            </span>
-                            <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                              {tool.name}
-                            </span>
+                          <div className="flex items-center gap-3">
+                            <div className="bg-purple-100 dark:bg-purple-500/20 p-3 rounded-xl">
+                              <span className="material-symbols-outlined text-2xl text-purple-600 dark:text-purple-400">
+                                security
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-900 dark:text-white">MobSF</p>
+                              <p className="text-sm text-slate-500 dark:text-slate-400">
+                                Mobile Security Framework - Static &amp; Dynamic analysis for Android APKs
+                              </p>
+                            </div>
                           </div>
                         </label>
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Scan Timing */}
@@ -588,6 +627,7 @@ export default function ScansPage() {
                             nuclei: "Nuclei",
                             sslyze: "SSLyze",
                             ffuf: "Ffuf",
+                            mobsf: "MobSF",
                           };
                           return (
                             <span

@@ -65,12 +65,13 @@ export const api: AxiosInstance = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    // If you later add auth, keep this SSR-safe.
-    // Example:
-    // if (typeof window !== 'undefined') {
-    //   const token = window.localStorage.getItem('authToken');
-    //   if (token) config.headers.Authorization = `Bearer ${token}`;
-    // }
+    // Attach JWT token if available (SSR-safe)
+    if (typeof window !== "undefined") {
+      const token = window.localStorage.getItem("napscan_auth_token");
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
     return config;
   },
   (error) => Promise.reject(error)
