@@ -77,6 +77,9 @@ func main() {
 	ffufHandler := handler.NewFfufHandler(ffufService)
 	openvasHandler := handler.NewOpenVASHandler(openvasService)
 	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService)
+	
+	// Auth & Batch Handlers
+	authHandler := handler.NewAuthHandler()
 
 	// Health Check Route
 	app.Get("/health", healthHandler.Check)
@@ -90,6 +93,9 @@ func main() {
 	routes.FfufRoutes(api, ffufHandler)
 	routes.OpenVASRoutes(api, openvasHandler)
 	routes.SslyzeRoutes(api, sslyzeHandler)
+
+	// Auth & Batch Routes
+	routes.AuthRoutes(app, authHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
