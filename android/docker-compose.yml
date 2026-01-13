@@ -1,0 +1,11 @@
+services:
+  redroid11:
+    image: redroid/redroid:11.0.0-latest
+    container_name: redroid
+    privileged: true
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./data11:/data
