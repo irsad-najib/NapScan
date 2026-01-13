@@ -19,7 +19,7 @@ type Ports struct {
 
 type Port struct {
 	PortID  string  `xml:"portid,attr" json:"port"`
-	Proto   string  `xml:"protocol,attr" json:"protocol"`
+	Protocol string `xml:"protocol,attr" json:"protocol"`
 	State   State   `xml:"state"`
 	Service Service `xml:"service"`
 }
@@ -29,5 +29,7 @@ type State struct {
 }
 
 type Service struct {
-	Name string `xml:"name,attr" json:"name"`
+	Name    string `xml:"name,attr" json:"name"`
+	Product string `xml:"product,attr" json:"product,omitempty"`
+	Version string `xml:"version,attr" json:"version,omitempty"`
 }

@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash    
 ENV PATH="/root/.local/bin:$PATH"
 
 # Install SSLyze and Frida via pipx
-RUN pipx install sslyze frida-tools
+RUN pipx install sslyze frida-tools frida-tools
 
 # Create a non-root user used specifically for gvm-cli (gvm-tools forbids root)
 RUN useradd -m -s /bin/bash napscan

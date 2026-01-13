@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
@@ -19,9 +20,10 @@ import (
 
 type AuthService struct{
 	oauthConfig *oauth2.Config
+	userRepo    repository.UserRepository
 }
 
-func NewAuthService() *AuthService {
+func NewAuthService(userRepo repository.UserRepository) *AuthService {
 	// Get config from environment with fallback
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
@@ -46,13 +48,14 @@ func NewAuthService() *AuthService {
 
 	return &AuthService{
 		oauthConfig: config,
+		userRepo:    userRepo,
 	}
 }
 
-// GetGoogleLoginURL returns the URL to redirect the user to for Google Login
-func (s *AuthService) GetGoogleLoginURL() string {
-	// State should be randomized in production to prevent CSRF
-	return s.oauthConfig.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+// GetGoogleLoginURL returns the URL to redirect the user to for Google Login.
+// Caller must provide a cryptographically-random state and validate it on callback.
+func (s *AuthService) GetGoogleLoginURL(state string) string {
+	return s.oauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
 }
 
 // HandleGoogleCallback exchanges code for token and retrieves user info
@@ -90,12 +93,19 @@ func (s *AuthService) HandleGoogleCallback(ctx context.Context, code string) (*m
 		return nil, err
 	}
 
-	return &models.User{
+	user := &models.User{
 		ID:      googleUser.ID,
 		Email:   googleUser.Email,
 		Name:    googleUser.Name,
 		Picture: googleUser.Picture,
-	}, nil
+	}
+	
+	// Save user to database
+	if err := s.userRepo.Upsert(ctx, user); err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
 
 
@@ -113,12 +123,28 @@ func (s *AuthService) VerifyGoogleToken(ctx context.Context, tokenString string)
 	name, _ := payload.Claims["name"].(string)
 	picture, _ := payload.Claims["picture"].(string)
 	
-	return &models.User{
+	user := &models.User{
 		ID:      userID,
 		Email:   email,
 		Name:    name,
 		Picture: picture,
-	}, nil
+	}
+
+	if err := s.userRepo.Upsert(ctx, user); err != nil {
+		return nil, err
+	}
+	
+	return user, nil
+}
+
+// GetUserByID retrieves user by ID
+func (s *AuthService) GetUserByID(ctx context.Context, id string) (*models.User, error) {
+	return s.userRepo.FindByID(ctx, id)
+}
+
+// GetUserByEmail retrieves user by email
+func (s *AuthService) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	return s.userRepo.FindByEmail(ctx, email)
 }
 
 // GenerateJWT creates a new access token for the backend

@@ -22,118 +22,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/a": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part A",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part A",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    },
-                    {
-                        "description": "Scan Data",
-                        "name": "request",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/models.BatchRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/analysis/{batch_id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns the aggregated results and status of the batch",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Get Batch Analysis Result",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "batch_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.BatchResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/auth/google": {
             "post": {
                 "description": "Validates Google ID token sent from Frontend and issues JWT",
@@ -214,153 +102,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/b": {
+        "/auth/logout": {
             "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part B",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
+                "description": "Clears the auth cookie and ends the session",
                 "tags": [
-                    "Batch"
+                    "Auth"
                 ],
-                "summary": "Receive Scan Part B",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/c": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part C",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part C",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/d": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part D",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part D",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/e": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part E",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part E",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
+                "summary": "Logout",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -928,37 +676,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.BatchRequest": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.BatchResponse": {
-            "type": "object",
-            "properties": {
-                "batch_id": {
-                    "type": "string"
-                },
-                "result": {},
-                "status": {
-                    "$ref": "#/definitions/models.BatchStatus"
-                }
-            }
-        },
-        "models.BatchStatus": {
-            "type": "string",
-            "enum": [
-                "processing",
-                "complete"
-            ],
-            "x-enum-varnames": [
-                "BatchStatusProcessing",
-                "BatchStatusComplete"
-            ]
-        },
         "models.GoogleAuthRequest": {
             "type": "object",
             "properties": {
@@ -1042,6 +759,12 @@ const docTemplate = `{
             "properties": {
                 "name": {
                     "type": "string"
+                },
+                "product": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1056,6 +779,9 @@ const docTemplate = `{
         "models.User": {
             "type": "object",
             "properties": {
+                "created_at": {
+                    "type": "string"
+                },
                 "email": {
                     "type": "string"
                 },
@@ -1066,6 +792,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "picture": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }

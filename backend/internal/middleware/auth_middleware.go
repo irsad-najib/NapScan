@@ -13,21 +13,33 @@ import (
 // AuthMiddleware validates the JWT token and injects user info into context
 func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Missing authorization header",
-			})
+		// Prefer HttpOnly cookie for browser clients.
+		cookieName := strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME"))
+		if cookieName == "" {
+			cookieName = "napscan_access_token"
 		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid authorization header format",
-			})
+		tokenString := strings.TrimSpace(c.Cookies(cookieName))
+		if tokenString == "" {
+			// Compatibility: accept a generic cookie name too.
+			tokenString = strings.TrimSpace(c.Cookies("access_token"))
 		}
+		if tokenString == "" {
+			// Fallback to Authorization: Bearer <token> for API clients.
+			authHeader := c.Get("Authorization")
+			if authHeader == "" {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "Missing authentication (cookie or Authorization header)",
+				})
+			}
 
-		tokenString := parts[1]
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "Invalid authorization header format",
+				})
+			}
+			tokenString = parts[1]
+		}
 		secret := os.Getenv("JWT_SECRET")
 		if secret == "" {
 			secret = "dev-secret-key-change-in-prod"

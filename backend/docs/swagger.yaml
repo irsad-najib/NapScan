@@ -12,27 +12,6 @@ definitions:
       user:
         $ref: '#/definitions/models.User'
     type: object
-  models.BatchRequest:
-    properties:
-      data:
-        type: string
-    type: object
-  models.BatchResponse:
-    properties:
-      batch_id:
-        type: string
-      result: {}
-      status:
-        $ref: '#/definitions/models.BatchStatus'
-    type: object
-  models.BatchStatus:
-    enum:
-    - processing
-    - complete
-    type: string
-    x-enum-varnames:
-    - BatchStatusProcessing
-    - BatchStatusComplete
   models.GoogleAuthRequest:
     properties:
       id_token:
@@ -88,6 +67,10 @@ definitions:
     properties:
       name:
         type: string
+      product:
+        type: string
+      version:
+        type: string
     type: object
   models.State:
     properties:
@@ -96,6 +79,8 @@ definitions:
     type: object
   models.User:
     properties:
+      created_at:
+        type: string
       email:
         type: string
       id:
@@ -103,6 +88,8 @@ definitions:
       name:
         type: string
       picture:
+        type: string
+      updated_at:
         type: string
     type: object
   response.Response:
@@ -132,77 +119,6 @@ info:
   title: Napscan API
   version: "1.0"
 paths:
-  /a:
-    post:
-      consumes:
-      - application/json
-      description: Receives partial scan result for Part A
-      parameters:
-      - description: Batch ID
-        in: header
-        name: X-Batch-ID
-        required: true
-        type: string
-      - description: Scan Data
-        in: body
-        name: request
-        schema:
-          $ref: '#/definitions/models.BatchRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Receive Scan Part A
-      tags:
-      - Batch
-  /analysis/{batch_id}:
-    get:
-      consumes:
-      - application/json
-      description: Returns the aggregated results and status of the batch
-      parameters:
-      - description: Batch ID
-        in: path
-        name: batch_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/models.BatchResponse'
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Get Batch Analysis Result
-      tags:
-      - Batch
   /auth/google:
     post:
       consumes:
@@ -255,19 +171,9 @@ paths:
       summary: Google Login Redirect
       tags:
       - Auth
-  /b:
+  /auth/logout:
     post:
-      consumes:
-      - application/json
-      description: Receives partial scan result for Part B
-      parameters:
-      - description: Batch ID
-        in: header
-        name: X-Batch-ID
-        required: true
-        type: string
-      produces:
-      - application/json
+      description: Clears the auth cookie and ends the session
       responses:
         "200":
           description: OK
@@ -275,86 +181,9 @@ paths:
             additionalProperties:
               type: string
             type: object
-      security:
-      - BearerAuth: []
-      summary: Receive Scan Part B
+      summary: Logout
       tags:
-      - Batch
-  /c:
-    post:
-      consumes:
-      - application/json
-      description: Receives partial scan result for Part C
-      parameters:
-      - description: Batch ID
-        in: header
-        name: X-Batch-ID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Receive Scan Part C
-      tags:
-      - Batch
-  /d:
-    post:
-      consumes:
-      - application/json
-      description: Receives partial scan result for Part D
-      parameters:
-      - description: Batch ID
-        in: header
-        name: X-Batch-ID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Receive Scan Part D
-      tags:
-      - Batch
-  /e:
-    post:
-      consumes:
-      - application/json
-      description: Receives partial scan result for Part E
-      parameters:
-      - description: Batch ID
-        in: header
-        name: X-Batch-ID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Receive Scan Part E
-      tags:
-      - Batch
+      - Auth
   /ffuf/scan:
     post:
       consumes:
