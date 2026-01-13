@@ -17,8 +17,9 @@ services:
       - NET_ADMIN
     depends_on:
       - gvmd
+      - redroid
     restart: unless-stopped
-
+  
   
   # MobSF
   mobsf-client:
@@ -240,6 +241,17 @@ services:
     depends_on:
       - gvmd
       - ospd-openvas
+
+  redroid:
+    image: redroid/redroid:11.0.0-latest
+    container_name: redroid
+    privileged: true
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5555:5555"
+    volumes:
+      - ./data11:/data
 
 volumes:
   gpg_data_vol:
