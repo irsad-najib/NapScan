@@ -22,278 +22,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/a": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part A",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part A",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    },
-                    {
-                        "description": "Scan Data",
-                        "name": "request",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_models.BatchRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/analysis/{batch_id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns the aggregated results and status of the batch",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Get Batch Analysis Result",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "batch_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_models.BatchResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/b": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part B",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part B",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/c": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part C",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part C",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/d": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part D",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part D",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/e": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Receives partial scan result for Part E",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Batch"
-                ],
-                "summary": "Receive Scan Part E",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch ID",
-                        "name": "X-Batch-ID",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/auth/google": {
             "post": {
                 "description": "Validates Google ID token sent from Frontend and issues JWT",
@@ -314,7 +42,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_models.GoogleAuthRequest"
+                            "$ref": "#/definitions/models.GoogleAuthRequest"
                         }
                     }
                 ],
@@ -322,7 +50,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_models.AuthResponse"
+                            "$ref": "#/definitions/models.AuthResponse"
                         }
                     }
                 }
@@ -354,7 +82,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_models.AuthResponse"
+                            "$ref": "#/definitions/models.AuthResponse"
                         }
                     }
                 }
@@ -370,6 +98,26 @@ const docTemplate = `{
                 "responses": {
                     "302": {
                         "description": "Found"
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "description": "Clears the auth cookie and ends the session",
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
@@ -407,19 +155,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -444,6 +192,58 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mobsf/scan": {
+            "post": {
+                "description": "Initiates a scan in MobSF for the uploaded file",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MobSF"
+                ],
+                "summary": "Start MobSF Scan",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Return a small summary instead of full scan+report JSON",
+                        "name": "compact",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Scan request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MobSFScanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -475,19 +275,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -526,19 +326,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_internal_service.CombinedScanResponse"
+                            "$ref": "#/definitions/service.CombinedScanResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -577,19 +377,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -628,7 +428,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -667,19 +467,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -718,7 +518,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -747,7 +547,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -786,19 +586,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -837,19 +637,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/napscan-be_pkg_response.Response"
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -857,7 +657,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "napscan-be_internal_models.Address": {
+        "models.Address": {
             "type": "object",
             "properties": {
                 "addr": {
@@ -865,49 +665,18 @@ const docTemplate = `{
                 }
             }
         },
-        "napscan-be_internal_models.AuthResponse": {
+        "models.AuthResponse": {
             "type": "object",
             "properties": {
                 "access_token": {
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/napscan-be_internal_models.User"
+                    "$ref": "#/definitions/models.User"
                 }
             }
         },
-        "napscan-be_internal_models.BatchRequest": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "string"
-                }
-            }
-        },
-        "napscan-be_internal_models.BatchResponse": {
-            "type": "object",
-            "properties": {
-                "batch_id": {
-                    "type": "string"
-                },
-                "result": {},
-                "status": {
-                    "$ref": "#/definitions/napscan-be_internal_models.BatchStatus"
-                }
-            }
-        },
-        "napscan-be_internal_models.BatchStatus": {
-            "type": "string",
-            "enum": [
-                "processing",
-                "complete"
-            ],
-            "x-enum-varnames": [
-                "BatchStatusProcessing",
-                "BatchStatusComplete"
-            ]
-        },
-        "napscan-be_internal_models.GoogleAuthRequest": {
+        "models.GoogleAuthRequest": {
             "type": "object",
             "properties": {
                 "id_token": {
@@ -915,32 +684,49 @@ const docTemplate = `{
                 }
             }
         },
-        "napscan-be_internal_models.Host": {
+        "models.Host": {
             "type": "object",
             "properties": {
                 "addresses": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/napscan-be_internal_models.Address"
+                        "$ref": "#/definitions/models.Address"
                     }
                 },
                 "ports": {
-                    "$ref": "#/definitions/napscan-be_internal_models.Ports"
+                    "$ref": "#/definitions/models.Ports"
                 }
             }
         },
-        "napscan-be_internal_models.NmapRun": {
+        "models.MobSFScanRequest": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "example": "app.apk"
+                },
+                "hash": {
+                    "type": "string",
+                    "example": "0123456789abcdef0123456789abcdef"
+                },
+                "scan_type": {
+                    "type": "string",
+                    "example": "apk"
+                }
+            }
+        },
+        "models.NmapRun": {
             "type": "object",
             "properties": {
                 "hosts": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/napscan-be_internal_models.Host"
+                        "$ref": "#/definitions/models.Host"
                     }
                 }
             }
         },
-        "napscan-be_internal_models.Port": {
+        "models.Port": {
             "type": "object",
             "properties": {
                 "port": {
@@ -950,33 +736,39 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "service": {
-                    "$ref": "#/definitions/napscan-be_internal_models.Service"
+                    "$ref": "#/definitions/models.Service"
                 },
                 "state": {
-                    "$ref": "#/definitions/napscan-be_internal_models.State"
+                    "$ref": "#/definitions/models.State"
                 }
             }
         },
-        "napscan-be_internal_models.Ports": {
+        "models.Ports": {
             "type": "object",
             "properties": {
                 "ports": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/napscan-be_internal_models.Port"
+                        "$ref": "#/definitions/models.Port"
                     }
                 }
             }
         },
-        "napscan-be_internal_models.Service": {
+        "models.Service": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string"
+                },
+                "product": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
-        "napscan-be_internal_models.State": {
+        "models.State": {
             "type": "object",
             "properties": {
                 "state": {
@@ -984,9 +776,12 @@ const docTemplate = `{
                 }
             }
         },
-        "napscan-be_internal_models.User": {
+        "models.User": {
             "type": "object",
             "properties": {
+                "created_at": {
+                    "type": "string"
+                },
                 "email": {
                     "type": "string"
                 },
@@ -998,21 +793,13 @@ const docTemplate = `{
                 },
                 "picture": {
                     "type": "string"
-                }
-            }
-        },
-        "napscan-be_internal_service.CombinedScanResponse": {
-            "type": "object",
-            "properties": {
-                "tcp": {
-                    "$ref": "#/definitions/napscan-be_internal_models.NmapRun"
                 },
-                "udp": {
-                    "$ref": "#/definitions/napscan-be_internal_models.NmapRun"
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
-        "napscan-be_pkg_response.Response": {
+        "response.Response": {
             "type": "object",
             "properties": {
                 "data": {},
@@ -1022,6 +809,17 @@ const docTemplate = `{
                 },
                 "success": {
                     "type": "boolean"
+                }
+            }
+        },
+        "service.CombinedScanResponse": {
+            "type": "object",
+            "properties": {
+                "tcp": {
+                    "$ref": "#/definitions/models.NmapRun"
+                },
+                "udp": {
+                    "$ref": "#/definitions/models.NmapRun"
                 }
             }
         }

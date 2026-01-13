@@ -15,4 +15,7 @@ func AuthRoutes(router fiber.Router, h *handler.AuthHandler) {
 	// Server-Side Flow (GET Redirect & Callback)
 	g.Get("/google/login", h.GoogleLoginRedirect)
 	g.Get("/google/callback", h.GoogleCallback)
+
+	// Cookie-based logout
+	g.Post("/logout", h.Logout)
 }

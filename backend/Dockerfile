@@ -1,12 +1,12 @@
 FROM golang:latest
 
 # Install tools (nmap, ffuf, zap, sslyze, nuclei, gvm-tools)
-RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb   && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install SSLyze via pipx
-RUN pipx install sslyze
+# Install SSLyze and Frida via pipx
+RUN pipx install sslyze frida-tools frida-tools
 
 # Create a non-root user used specifically for gvm-cli (gvm-tools forbids root)
 RUN useradd -m -s /bin/bash napscan
@@ -26,7 +26,10 @@ RUN go install github.com/swaggo/swag/cmd/swag@v1.16.3
 WORKDIR /app
 
 # Install ZAP
-RUN wget -O ZAP_2.17.0_Linux.tar.gz "https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Linux.tar.gz"     && tar -zxvf ZAP_2.17.0_Linux.tar.gz     && chmod +x ZAP_2.17.0/zap.sh     && rm ZAP_2.17.0_Linux.tar.gz
+RUN wget -O ZAP_2.17.0_Linux.tar.gz "https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Linux.tar.gz" && tar -zxvf ZAP_2.17.0_Linux.tar.gz && chmod +x ZAP_2.17.0/zap.sh     && rm ZAP_2.17.0_Linux.tar.gz
+
+# Download Frida Server
+RUN wget -O frida-server.xz "https://github.com/frida/frida/releases/download/17.5.2/frida-server-17.5.2-android-x86_64.xz" && unxz frida-server.xz
 
 # Copy go files first (for cache)
 COPY go.mod go.sum ./
@@ -43,6 +46,5 @@ RUN go build -o napscan ./cmd/server/main.go
 
 EXPOSE 5000
 
-# Run ZAP daemon + Napscan app
-# IMPORTANT: run as root (needed for nmap)
-CMD ["sh", "-c", "  /app/ZAP_2.17.0/zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.disablekey=true &   echo 'Waiting for ZAP...' &&   until curl -s http://localhost:8080/JSON/core/view/version/ >/dev/null; do sleep 2; done &&   echo 'ZAP ready' &&   /app/napscan     "]
+# Entrypoint
+ENTRYPOINT ["./entrypoint.sh"]

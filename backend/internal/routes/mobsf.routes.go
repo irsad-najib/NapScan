@@ -9,4 +9,5 @@ import (
 func MobSFRoutes(router fiber.Router) {
 	mobsf := router.Group("/mobsf")
 	mobsf.Post("/upload", handler.UploadMobSFFile)
+	mobsf.Post("/scan", handler.StartMobSFScan)
 }
