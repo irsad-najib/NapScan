@@ -22,11 +22,21 @@ type AuthService struct{
 }
 
 func NewAuthService() *AuthService {
+	// Get config from environment with fallback
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	redirectURL := os.Getenv("GOOGLE_REDIRECT_URL")
+	
+	// Fallback to default redirect URL if not set
+	if redirectURL == "" {
+		redirectURL = "http://localhost:5000/api/auth/google/callback"
+	}
+	
 	// Initialize OAuth2 config for server-side flow
 	config := &oauth2.Config{
-		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  redirectURL,
 		Scopes: []string{
 			"https://www.googleapis.com/auth/userinfo.email",
 			"https://www.googleapis.com/auth/userinfo.profile",

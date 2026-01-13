@@ -22,4 +22,10 @@ func BatchRoutes(router fiber.Router, h *handler.BatchHandler) {
 
 	// Result Retrieval
 	protected.Get("/analysis/:batch_id", h.GetBatchResult)
+	
+	// Security Report
+	protected.Get("/report/:batch_id", h.GetBatchReport)
+	
+	// Submit scan results to batch
+	protected.Post("/batch/nmap", h.SubmitNmapResult)
 }

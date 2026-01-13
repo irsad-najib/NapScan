@@ -18,7 +18,8 @@ type SafeBatch struct {
 
 type BatchService struct {
 	// batches stores pointers to SafeBatch, key is batchID
-	batches sync.Map
+	batches  sync.Map
+	analyzer *ReportAnalyzer
 }
 
 var (
@@ -28,7 +29,9 @@ var (
 
 func NewBatchService() *BatchService {
 	batchServiceOnce.Do(func() {
-		batchServiceInstance = &BatchService{}
+		batchServiceInstance = &BatchService{
+			analyzer: NewReportAnalyzer(),
+		}
 	})
 	return batchServiceInstance
 }
@@ -104,17 +107,19 @@ func (s *BatchService) runAnalysis(sb *SafeBatch) {
 	sb.mu.Unlock()
 
 	// --- ANALYSIS LOGIC ---
-	// "Implement Analyze(results map[string]any) any"
-	// Example: just summarizing keys
+	// Use ReportAnalyzer to generate comprehensive security report
 	
 	// Simulate processing time
 	time.Sleep(500 * time.Millisecond) 
 	
+	// Generate detailed security report
+	report := s.analyzer.AnalyzeResults(resultsCopy)
+	
 	analysisResult := map[string]interface{}{
-		"summary": fmt.Sprintf("Processed %d sources", len(resultsCopy)),
-		"sources": resultsCopy,
-		"timestamp": time.Now(),
-		"risk_score": 0, // Mock logic
+		"report":     report,
+		"summary":    fmt.Sprintf("Analyzed %d sources", len(resultsCopy)),
+		"sources":    resultsCopy,
+		"timestamp":  time.Now(),
 	}
 
 	// --- SAVE RESULT ---

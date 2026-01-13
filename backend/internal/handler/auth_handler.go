@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
 
@@ -62,6 +63,7 @@ func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
 // @Router /auth/google/login [get]
 func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 	url := h.authService.GetGoogleLoginURL()
+	log.Printf("Redirecting to Google OAuth: %s", url)
 	return c.Redirect(url)
 }
 
@@ -76,23 +78,30 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	code := c.Query("code")
 	if code == "" {
+		log.Printf("Google callback error: code not found")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Code not found"})
 	}
 
+	log.Printf("Handling Google callback with code: %s...", code[:10])
+
 	user, err := h.authService.HandleGoogleCallback(c.Context(), code)
 	if err != nil {
+		log.Printf("Failed to handle Google callback: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to handle callback: " + err.Error()})
 	}
 
+	log.Printf("User authenticated: %s (%s)", user.Name, user.Email)
+
 	token, err := h.authService.GenerateJWT(user)
 	if err != nil {
+		log.Printf("Failed to generate JWT: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate session"})
 	}
 
-	// In a real app, you might redirect to a frontend with the token in URL or set a cookie.
-	// For testing/JSON API purposes, we return JSON.
+	// Option 1: Redirect to frontend with token
 	// return c.Redirect("http://localhost:3000/auth/success?token=" + token)
 	
+	// Option 2: Return JSON (for API testing)
 	return c.JSON(models.AuthResponse{
 		AccessToken: token,
 		User:        *user,

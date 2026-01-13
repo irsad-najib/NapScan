@@ -162,3 +162,106 @@ func (h *BatchHandler) GetBatchResult(c *fiber.Ctx) error {
 		BatchID:        batch.BatchID,
 	})
 }
+
+// GetBatchReport retrieves just the security report from batch analysis
+// @Summary Get Security Report
+// @Description Returns the detailed security report generated from batch analysis
+// @Tags Batch
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param batch_id path string true "Batch ID"
+// @Success 200 {object} models.ScanReport
+// @Failure 404 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Router /report/{batch_id} [get]
+func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "User ID not found in session"})
+	}
+
+	batchID := c.Params("batch_id")
+	if batchID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Batch ID required"})
+	}
+
+	batch, err := h.batchService.GetBatch(userID, batchID)
+	if err != nil {
+		if err.Error() == "batch not found" {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Batch not found"})
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Check if analysis is complete
+	if batch.Status != models.BatchStatusComplete {
+		return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
+			"status":  "processing",
+			"message": "Report is being generated. Please try again shortly.",
+		})
+	}
+
+	// Extract report from analysis result
+	if batch.AnalysisResult == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No analysis result available"})
+	}
+
+	analysisMap, ok := batch.AnalysisResult.(map[string]interface{})
+	if !ok {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Invalid analysis result format"})
+	}
+
+	report, ok := analysisMap["report"]
+	if !ok {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Report not found in analysis result"})
+	}
+
+	return c.JSON(report)
+}
+
+// SubmitNmapResult submits nmap scan results to batch for analysis
+// @Summary Submit Nmap Results for Batch Analysis
+// @Description Submit nmap scan results to be included in batch analysis and report generation
+// @Tags Batch
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param X-Batch-ID header string true "Batch ID"
+// @Param results body service.CombinedScanResponse true "Nmap Scan Results"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /batch/nmap [post]
+func (h *BatchHandler) SubmitNmapResult(c *fiber.Ctx) error {
+	// 1. Get UserID from context
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "User ID not found in session"})
+	}
+
+	// 2. Get X-Batch-ID header
+	batchID := c.Get("X-Batch-ID")
+	if batchID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "X-Batch-ID header is required"})
+	}
+
+	// 3. Parse Nmap results
+	var nmapResults interface{}
+	if err := c.BodyParser(&nmapResults); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid nmap results payload"})
+	}
+
+	// 4. Send to Batch Manager with "nmap" source
+	err := h.batchService.AddResult(userID, batchID, "nmap", nmapResults)
+	if err != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"status":   "received",
+		"source":   "nmap",
+		"batch_id": batchID,
+		"message":  "Nmap results submitted for analysis",
+	})
+}
