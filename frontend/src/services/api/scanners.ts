@@ -1,6 +1,6 @@
 import { ApiResult, request } from "./http";
 
-export type ToolKey = "nmap" | "zap" | "openvas" | "nuclei" | "sslyze" | "ffuf";
+export type ToolKey = "nmap" | "zap" | "openvas" | "nuclei" | "sslyze" | "ffuf" | "mobsf";
 
 export type NmapScanResponse = {
   tcp: unknown;
@@ -40,6 +40,56 @@ export type OpenVASStartScanResponse = {
 };
 
 export type OpenVASReportResponse = unknown;
+
+// MobSF Types
+export type MobSFUploadData = {
+  file_name: string;
+  hash: string;
+  scan_type: string;
+  upload: {
+    analyzer: string;
+    file_name: string;
+    hash: string;
+    scan_type: string;
+    status: string;
+  };
+};
+
+export type MobSFUploadResponse = {
+  success: boolean;
+  message: string;
+  data: MobSFUploadData;
+};
+
+export type MobSFScanRequest = {
+  hash: string;
+  file_name: string;
+  scan_type: string;
+};
+
+export type MobSFScanResponse = {
+  hash: string;
+  scan_type: string;
+  file_name: string;
+  app_name?: string;
+  package_name?: string;
+  version_name?: string;
+  version_code?: string;
+  size?: string;
+  md5?: string;
+  sha1?: string;
+  sha256?: string;
+  permissions?: Record<string, unknown>;
+  security_score?: number;
+  average_cvss?: number;
+  findings?: Array<{
+    severity: string;
+    title: string;
+    description: string;
+  }>;
+  // Full scan result from MobSF
+  [key: string]: unknown;
+};
 
 function ensureNonEmptyTarget(target: string): string {
   const t = target.trim();
@@ -131,6 +181,31 @@ export const scannersApi = {
       request<OpenVASReportResponse>({
         method: "GET",
         url: `/api/openvas/report/${encodeURIComponent(reportId)}`,
+      }),
+  },
+
+  mobsf: {
+    // Step 1: Upload APK file
+    upload: async (file: File): Promise<ApiResult<MobSFUploadResponse>> => {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      return request<MobSFUploadResponse>({
+        method: "POST",
+        url: "/api/mobsf/upload",
+        data: formData,
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+    },
+
+    // Step 2: Scan using hash, file_name, scan_type from upload
+    scan: async (params: MobSFScanRequest): Promise<ApiResult<MobSFScanResponse>> =>
+      request<MobSFScanResponse>({
+        method: "POST",
+        url: "/api/mobsf/scan",
+        data: params,
       }),
   },
 } as const;

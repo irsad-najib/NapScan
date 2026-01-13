@@ -49,22 +49,22 @@ export default function Sidebar() {
                                 key={item.label}
                                 href={item.href}
                                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive(item.href)
-                                        ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
-                                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
+                                    ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
+                                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
                                     }`}
                             >
                                 <span
                                     className={`material-symbols-outlined text-xl transition-transform ${isActive(item.href)
-                                            ? "fill-current scale-110"
-                                            : "group-hover:scale-110"
+                                        ? "fill-current scale-110"
+                                        : "group-hover:scale-110"
                                         }`}
                                 >
                                     {item.icon}
                                 </span>
                                 <span
                                     className={`text-sm font-semibold tracking-wide ${isActive(item.href)
-                                            ? "text-white"
-                                            : "text-slate-700 dark:text-slate-300"
+                                        ? "text-white"
+                                        : "text-slate-700 dark:text-slate-300"
                                         }`}
                                 >
                                     {item.label}
@@ -74,17 +74,9 @@ export default function Sidebar() {
                     </nav>
                 </div>
 
-                {/* User Profile / Login */}
-                {authLoading ? (
-                    <div className="flex items-center justify-center px-4 py-4 border-t border-slate-200 dark:border-slate-800">
-                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-                    </div>
-                ) : isAuthenticated ? (
+                {/* User Profile (only when authenticated) */}
+                {isAuthenticated && !authLoading && (
                     <UserMenu />
-                ) : (
-                    <div className="px-4 py-4 border-t border-slate-200 dark:border-slate-800">
-                        <LoginButton />
-                    </div>
                 )}
             </div>
         </aside>

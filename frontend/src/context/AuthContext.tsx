@@ -15,6 +15,7 @@ import {
     setAuthData,
     clearAuthData,
     loginWithGoogleToken,
+    redirectToGoogleLogin,
 } from "@/services/authService";
 
 interface AuthContextType {
@@ -22,7 +23,9 @@ interface AuthContextType {
     loading: boolean;
     isAuthenticated: boolean;
     login: () => void;
+    loginWithRedirect: () => void;
     logout: () => void;
+    refreshUser: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -129,6 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
+    const loginWithRedirect = useCallback(() => {
+        redirectToGoogleLogin();
+    }, []);
+
     const logout = useCallback(() => {
         clearAuthData();
         setUser(null);
@@ -137,12 +144,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
+    const refreshUser = useCallback(() => {
+        const storedUser = getStoredUser();
+        if (storedUser) {
+            setUser(storedUser);
+        }
+    }, []);
+
     const value: AuthContextType = {
         user,
         loading,
         isAuthenticated: !!user,
         login,
+        loginWithRedirect,
         logout,
+        refreshUser,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

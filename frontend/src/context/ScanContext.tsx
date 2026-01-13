@@ -41,7 +41,7 @@ interface ScanContextType {
     scans: ScanJob[];
     currentScan: ScanJob | null;
     getScan: (id: string) => ScanJob | undefined;
-    startScan: (target: string, selectedTools: ToolKey[], name?: string) => Promise<string>;
+    startScan: (target: string, selectedTools: ToolKey[], name?: string, apkFile?: File) => Promise<string>;
     deleteScan: (id: string) => void;
     isLoading: boolean;
 }
@@ -49,7 +49,6 @@ interface ScanContextType {
 // --- Helper Functions ---
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
-const STORAGE_KEY = "napscan_jobs";
 
 // --- Context ---
 
@@ -57,28 +56,8 @@ const ScanContext = createContext<ScanContextType | undefined>(undefined);
 
 export function ScanProvider({ children }: { children: React.ReactNode }) {
     const [scans, setScans] = useState<ScanJob[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    // Load from LocalStorage on mount
-    useEffect(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                setScans(JSON.parse(stored));
-            }
-        } catch (error) {
-            console.error("Failed to load scans", error);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    // Save to LocalStorage whenever scans change
-    useEffect(() => {
-        if (!isLoading) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(scans));
-        }
-    }, [scans, isLoading]);
+    // No more loading state since we don't load from localStorage
+    const [isLoading] = useState(false);
 
     const getScan = useCallback((id: string) => {
         return scans.find((s) => s.id === id);
@@ -159,16 +138,17 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             console.log(`[OpenVAS] Scan started, taskID: ${taskId}`);
 
-            // Step 2: Poll for status
+            // Step 2: Poll for status (no timeout - wait until done)
             let reportId: string | undefined;
             let progress = 0;
             const POLL_INTERVAL = 15000; // 15 seconds
-            const MAX_POLLS = 200;
+            let pollCount = 0;
 
-            console.log(`[OpenVAS] Step 2: Polling for status (max ${MAX_POLLS} polls, interval ${POLL_INTERVAL}ms)...`);
+            console.log(`[OpenVAS] Step 2: Polling for status (no timeout, interval ${POLL_INTERVAL}ms)...`);
 
-            for (let i = 0; i < MAX_POLLS; i++) {
-                console.log(`[OpenVAS] Poll ${i + 1}/${MAX_POLLS}...`);
+            while (true) {
+                pollCount++;
+                console.log(`[OpenVAS] Poll #${pollCount}...`);
                 const statusRes = await scannersApi.openvas.taskStatus(taskId);
                 console.log(`[OpenVAS] Status response:`, statusRes);
 
@@ -198,7 +178,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (!reportId) {
-                throw new Error("OpenVAS scan timed out or no report ID returned");
+                throw new Error("No report ID returned from OpenVAS");
             }
 
             // Step 3: Fetch Report
@@ -244,11 +224,109 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    // --- MobSF Dedicated Handler (2-step async flow: upload + scan) ---
+    const executeMobSF = async (scanId: string, apkFile: File) => {
+        const tool: ToolKey = "mobsf";
+        console.log(`[MobSF] Starting scan for APK: ${apkFile.name}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Upload APK
+            console.log(`[MobSF] Step 1: Uploading APK file...`);
+            updateToolStatus(scanId, tool, { progress: 10 });
+
+            const uploadRes = await scannersApi.mobsf.upload(apkFile);
+            console.log(`[MobSF] Upload response:`, uploadRes);
+
+            if (!uploadRes.ok) {
+                console.error(`[MobSF] Upload failed:`, uploadRes);
+                throw new Error((uploadRes as any).message || "Failed to upload APK");
+            }
+
+            // Handle nested data structure - response is { success, message, data: { file_name, hash, scan_type, upload } }
+            const uploadData = (uploadRes.data as any)?.data || uploadRes.data;
+            const hash = uploadData?.hash;
+            const fileName = uploadData?.file_name;
+            const scanType = uploadData?.scan_type;
+
+            if (!hash || !fileName || !scanType) {
+                console.error(`[MobSF] Missing required data in upload response:`, uploadRes.data);
+                throw new Error("Missing hash, file_name, or scan_type from MobSF upload");
+            }
+
+            console.log(`[MobSF] APK uploaded - hash: ${hash}, file: ${fileName}, type: ${scanType}`);
+            updateToolStatus(scanId, tool, { progress: 40 });
+
+            // Step 2: Scan using hash, file_name, scan_type
+            console.log(`[MobSF] Step 2: Starting scan...`);
+            const scanRes = await scannersApi.mobsf.scan({ hash, file_name: fileName, scan_type: scanType });
+            console.log(`[MobSF] Scan response:`, scanRes);
+
+            if (!scanRes.ok) {
+                console.error(`[MobSF] Scan failed:`, scanRes);
+                throw new Error((scanRes as any).message || "Failed to scan APK");
+            }
+
+            // Handle nested data structure
+            const scanData = (scanRes.data as any)?.data || scanRes.data;
+
+            console.log(`[MobSF] Scan completed successfully!`);
+            updateToolStatus(scanId, tool, {
+                status: "completed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                result: scanData,
+            });
+
+            // Parse vulnerabilities from scan result
+            try {
+                const toolVulns = parseToolResults(tool, scanData);
+                console.log(`[MobSF] Parsed ${toolVulns.length} vulnerabilities`);
+                if (toolVulns.length > 0) {
+                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                        ...v,
+                        id: `${scanId}-${tool}-${idx}`,
+                    }));
+                    addVulnerabilities(scanId, scanVulns);
+                }
+            } catch (parseError) {
+                console.error(`[MobSF] Failed to parse results:`, parseError);
+            }
+        } catch (err: any) {
+            console.error("[MobSF] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
     // --- Generic Tool Executor ---
-    const executeTool = async (scanId: string, tool: ToolKey, target: string) => {
+    const executeTool = async (scanId: string, tool: ToolKey, target: string, apkFile?: File) => {
         // OpenVAS has its own dedicated async handler
         if (tool === "openvas") {
             return executeOpenVAS(scanId, target);
+        }
+
+        // MobSF has its own dedicated async handler
+        if (tool === "mobsf") {
+            if (!apkFile) {
+                console.error("[MobSF] No APK file provided");
+                updateToolStatus(scanId, tool, {
+                    status: "failed",
+                    error: "No APK file provided",
+                    endTime: new Date().toISOString(),
+                });
+                return;
+            }
+            return executeMobSF(scanId, apkFile);
         }
 
         // Mark tool as running
@@ -360,7 +438,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const startScan = async (target: string, selectedTools: ToolKey[], name?: string) => {
+    const startScan = async (target: string, selectedTools: ToolKey[], name?: string, apkFile?: File) => {
         const newScanId = generateId();
         const timestamp = new Date().toISOString();
 
@@ -389,7 +467,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         // Start tools in "background" (no await here)
         // We execute them individually so they update independently
         selectedTools.forEach((tool) => {
-            executeTool(newScanId, tool, target).then(() => {
+            executeTool(newScanId, tool, target, apkFile).then(() => {
                 // Check if all tools finished
                 setScans((currentScans) => {
                     const s = currentScans.find(scan => scan.id === newScanId);

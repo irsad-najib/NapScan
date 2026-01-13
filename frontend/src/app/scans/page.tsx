@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
 import { ToolList } from "@/components/scans/ToolList";
-import { Sidebar } from "@/components/layout";
+import { Sidebar, Header } from "@/components/layout";
 
 export default function ScansPage() {
   const { scans, startScan, deleteScan } = useScan();
@@ -117,6 +117,38 @@ export default function ScansPage() {
   ];
 
   const handleStartScan = async () => {
+    // For APK scans, validate file is uploaded
+    if (scanType === "apk") {
+      if (!uploadedFile) {
+        alert("Please upload an APK file");
+        return;
+      }
+
+      const selectedTools = Object.entries(formData.selectedTools)
+        .filter(([, selected]) => selected)
+        .map(([tool]) => tool) as ToolKey[];
+
+      if (selectedTools.length === 0) {
+        alert("Please select at least one scanner tool");
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const scanId = await startScan(uploadedFile.name, selectedTools, formData.scanName || uploadedFile.name, uploadedFile);
+        setShowNewScanForm(false);
+        setExpandedScanId(scanId);
+        setUploadedFile(null); // Reset file after scan starts
+      } catch (error) {
+        console.error("Error creating scan:", error);
+        alert("Failed to create scan. Please try again.");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // For Web scans
     const target = String(selectedTarget ?? "").trim();
     if (!target) {
       alert("Please select a target");
@@ -159,43 +191,7 @@ export default function ScansPage() {
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
         {/* Top Navigation */}
-        <header className="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 backdrop-blur-sm shrink-0 z-10">
-          <button className="md:hidden text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-colors">
-            <span className="material-symbols-outlined">menu</span>
-          </button>
-
-          {/* Search */}
-          <div className="hidden md:flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 w-72 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-transparent transition-all hover:border-slate-300 dark:hover:border-slate-600">
-            <span className="material-symbols-outlined text-slate-400 text-[20px]">
-              search
-            </span>
-            <input
-              className="bg-transparent border-none text-sm text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:ring-0 w-full ml-3 h-6 font-medium"
-              placeholder="Search scans..."
-              type="text"
-            />
-          </div>
-
-          {/* Right Actions */}
-          <div className="flex items-center gap-5 ml-auto">
-            <button className="relative p-2.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all duration-200">
-              <span className="material-symbols-outlined text-xl">
-                notifications
-              </span>
-              <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-950 shadow-md"></span>
-            </button>
-            <button className="p-2.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all duration-200">
-              <span className="material-symbols-outlined text-xl">help</span>
-            </button>
-            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
-            <button className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-              <span>Docs</span>
-              <span className="material-symbols-outlined text-lg">
-                open_in_new
-              </span>
-            </button>
-          </div>
-        </header>
+        <Header searchPlaceholder="Search scans..." />
 
         {/* Main Content Scroll Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
@@ -813,6 +809,6 @@ export default function ScansPage() {
           </div>
         </main>
       </div>
-    </div>
+    </div >
   );
 }

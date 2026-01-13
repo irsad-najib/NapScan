@@ -320,6 +320,152 @@ export function parseFfufResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
+ * Parse MobSF scan results - handles both summary.findings and report.android_api formats
+ */
+export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
+    const vulnerabilities: ScanVulnerability[] = [];
+    let vulnIdx = 0;
+
+    try {
+        console.log("[MobSF Parser] Parsing results...");
+        console.log("[MobSF Parser] Raw result keys:", Object.keys(rawResult || {}));
+
+        // Handle nested data structure
+        const data = rawResult?.data || rawResult;
+
+        // Map MobSF severity to our severity type
+        const mapSeverity = (mobsfSeverity: string): "Critical" | "High" | "Medium" | "Low" | "Info" => {
+            const sev = (mobsfSeverity || "info").toLowerCase();
+            if (sev === "critical" || sev === "danger") return "Critical";
+            if (sev === "high") return "High";
+            if (sev === "warning" || sev === "medium") return "Medium";
+            if (sev === "low") return "Low";
+            return "Info";
+        };
+
+        // --- Format 1: report.android_api structure ---
+        const report = data?.report;
+        if (report) {
+            console.log("[MobSF Parser] Found report object, parsing android_api...");
+
+            // Parse android_api findings
+            const androidApi = report?.android_api;
+            if (androidApi && typeof androidApi === "object") {
+                Object.entries(androidApi).forEach(([apiName, apiData]: [string, any]) => {
+                    const metadata = apiData?.metadata;
+                    if (metadata) {
+                        vulnerabilities.push({
+                            id: `mobsf-${vulnIdx++}`,
+                            name: apiName.replace(/_/g, ' ').replace(/api /i, ''),
+                            severity: mapSeverity(metadata.severity),
+                            description: metadata.description || apiName,
+                            tool: "mobsf",
+                        });
+                    }
+                });
+            }
+
+            // Parse code_analysis findings
+            const codeAnalysis = report?.code_analysis;
+            if (codeAnalysis && typeof codeAnalysis === "object") {
+                Object.entries(codeAnalysis).forEach(([ruleName, ruleData]: [string, any]) => {
+                    const metadata = ruleData?.metadata;
+                    if (metadata) {
+                        vulnerabilities.push({
+                            id: `mobsf-${vulnIdx++}`,
+                            name: metadata.description || ruleName,
+                            severity: mapSeverity(metadata.severity),
+                            description: `${metadata.description}${ruleData.files ? ` (${Object.keys(ruleData.files).length} files affected)` : ''}`,
+                            tool: "mobsf",
+                        });
+                    }
+                });
+            }
+
+            // Parse manifest_analysis findings
+            const manifestAnalysis = report?.manifest_analysis;
+            if (Array.isArray(manifestAnalysis)) {
+                manifestAnalysis.forEach((finding: any) => {
+                    vulnerabilities.push({
+                        id: `mobsf-${vulnIdx++}`,
+                        name: finding.title?.replace(/<[^>]*>/g, '') || "Manifest Issue",
+                        severity: mapSeverity(finding.severity),
+                        description: finding.description || "No description",
+                        tool: "mobsf",
+                    });
+                });
+            }
+
+            // Parse certificate_analysis
+            const certAnalysis = report?.certificate_analysis;
+            if (certAnalysis?.certificate_findings && Array.isArray(certAnalysis.certificate_findings)) {
+                certAnalysis.certificate_findings.forEach((finding: any) => {
+                    vulnerabilities.push({
+                        id: `mobsf-${vulnIdx++}`,
+                        name: finding.title || "Certificate Issue",
+                        severity: mapSeverity(finding.severity),
+                        description: finding.description || "No description",
+                        tool: "mobsf",
+                    });
+                });
+            }
+
+            // Parse permissions
+            const permissions = report?.permissions;
+            if (permissions && typeof permissions === "object") {
+                Object.entries(permissions).forEach(([permName, permData]: [string, any]) => {
+                    if (permData?.status === "dangerous") {
+                        vulnerabilities.push({
+                            id: `mobsf-${vulnIdx++}`,
+                            name: `Dangerous Permission: ${permName.split('.').pop()}`,
+                            severity: "Medium",
+                            description: `${permData.description || permName} - ${permData.info || ''}`,
+                            tool: "mobsf",
+                        });
+                    }
+                });
+            }
+        }
+
+        // --- Format 2: summary.findings structure (legacy) ---
+        const summary = data?.summary;
+        const findings = summary?.findings;
+        if (findings) {
+            console.log("[MobSF Parser] Found summary.findings object, parsing...");
+
+            const categories = ['high', 'warning', 'hotspot', 'info', 'secure'];
+            const severityMap: Record<string, "Critical" | "High" | "Medium" | "Low" | "Info"> = {
+                high: "High",
+                warning: "Medium",
+                hotspot: "Medium",
+                info: "Info",
+                secure: "Info"
+            };
+
+            categories.forEach(category => {
+                if (Array.isArray(findings[category])) {
+                    findings[category].forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-${vulnIdx++}`,
+                            name: category === 'secure' ? `✓ ${finding.title || "Secure"}` : finding.title || "Finding",
+                            severity: severityMap[category],
+                            description: finding.description || "No description available",
+                            tool: "mobsf",
+                        });
+                    });
+                }
+            });
+        }
+
+        console.log(`[MobSF Parser] Parsed ${vulnerabilities.length} findings`);
+        return vulnerabilities;
+    } catch (error) {
+        console.error("Error parsing MobSF results:", error);
+        return [];
+    }
+}
+
+/**
  * Main parser dispatcher - routes to appropriate parser based on tool
  */
 export function parseToolResults(tool: ToolKey, rawResult: any): ScanVulnerability[] {
@@ -339,6 +485,8 @@ export function parseToolResults(tool: ToolKey, rawResult: any): ScanVulnerabili
                 return parseSslyzeResults(rawResult);
             case "ffuf":
                 return parseFfufResults(rawResult);
+            case "mobsf":
+                return parseMobsfResults(rawResult);
             default:
                 console.warn(`No parser available for tool: ${tool}`);
                 return [];

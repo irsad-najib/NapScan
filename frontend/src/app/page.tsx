@@ -3,13 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { request } from "@/services/api";
-import { useAuth } from "@/context/AuthContext";
-import { LoginButton, UserMenu } from "@/components/auth";
+import { Sidebar, Header } from "@/components/layout";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
-  const { isAuthenticated, loading: authLoading } = useAuth();
 
   const handleHealthCheck = async () => {
     const res = await request<{ status?: string }>({
@@ -156,117 +154,12 @@ export default function Home() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-slate-950">
       {/* Sidebar */}
-      <aside className="w-64 bg-white dark:bg-slate-900 border-r-2 border-slate-200 dark:border-slate-800 flex-col hidden md:flex shrink-0 transition-all duration-300">
-        <div className="h-full flex flex-col justify-between p-6">
-          <div className="flex flex-col gap-8">
-            {/* Logo */}
-            <div className="flex items-center gap-3 px-2">
-              <div className="bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center aspect-square rounded-lg size-11 text-white shadow-lg shadow-blue-500/20">
-                <span className="material-symbols-outlined text-xl font-bold">
-                  shield_lock
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <h1 className="text-slate-900 dark:text-white text-base font-bold leading-tight">
-                  NapScan
-                </h1>
-                <p className="text-slate-500 dark:text-slate-400 text-xs">
-                  Security
-                </p>
-              </div>
-            </div>
-
-            {/* Nav Items */}
-            <nav className="flex flex-col gap-2">
-              {navItems.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${item.active
-                    ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
-                    }`}>
-                  <span
-                    className={`material-symbols-outlined text-xl transition-transform ${item.active
-                      ? "fill-current scale-110"
-                      : "group-hover:scale-110"
-                      }`}>
-                    {item.icon}
-                  </span>
-                  <span
-                    className={`text-sm font-semibold tracking-wide ${item.active
-                      ? "text-white"
-                      : "text-slate-700 dark:text-slate-300"
-                      }`}>
-                    {item.label}
-                  </span>
-                </Link>
-              ))}
-              <button
-                onClick={handleHealthCheck}
-                className="mt-4 w-full bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-500/30 font-semibold text-sm px-4 py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                test health
-              </button>
-            </nav>
-          </div>
-
-          {/* User Profile / Login */}
-          {authLoading ? (
-            <div className="flex items-center justify-center px-4 py-4 border-t border-slate-200 dark:border-slate-800">
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-            </div>
-          ) : isAuthenticated ? (
-            <UserMenu />
-          ) : (
-            <div className="px-4 py-4 border-t border-slate-200 dark:border-slate-800">
-              <LoginButton />
-            </div>
-          )}
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
         {/* Top Navigation */}
-        <header className="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 backdrop-blur-sm shrink-0 z-10">
-          <button className="md:hidden text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-colors">
-            <span className="material-symbols-outlined">menu</span>
-          </button>
-
-          {/* Search */}
-          <div className="hidden md:flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 w-72 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-transparent transition-all hover:border-slate-300 dark:hover:border-slate-600">
-            <span className="material-symbols-outlined text-slate-400 text-[20px]">
-              search
-            </span>
-            <input
-              className="bg-transparent border-none text-sm text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:ring-0 w-full ml-3 h-6 font-medium"
-              placeholder="Search targets..."
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          {/* Right Actions */}
-          <div className="flex items-center gap-5 ml-auto">
-            <button className="relative p-2.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all duration-200">
-              <span className="material-symbols-outlined text-xl">
-                notifications
-              </span>
-              <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-950 shadow-md"></span>
-            </button>
-            <button className="p-2.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all duration-200">
-              <span className="material-symbols-outlined text-xl">help</span>
-            </button>
-            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
-            <button className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-              <span>Docs</span>
-              <span className="material-symbols-outlined text-lg">
-                open_in_new
-              </span>
-            </button>
-          </div>
-        </header>
+        <Header searchPlaceholder="Search targets..." />
 
         {/* Main Content Scroll Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
