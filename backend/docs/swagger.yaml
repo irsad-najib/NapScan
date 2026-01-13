@@ -1,31 +1,31 @@
 basePath: /api
 definitions:
-  napscan-be_internal_models.Address:
+  models.Address:
     properties:
       addr:
         type: string
     type: object
-  napscan-be_internal_models.AuthResponse:
+  models.AuthResponse:
     properties:
       access_token:
         type: string
       user:
-        $ref: '#/definitions/napscan-be_internal_models.User'
+        $ref: '#/definitions/models.User'
     type: object
-  napscan-be_internal_models.BatchRequest:
+  models.BatchRequest:
     properties:
       data:
         type: string
     type: object
-  napscan-be_internal_models.BatchResponse:
+  models.BatchResponse:
     properties:
       batch_id:
         type: string
       result: {}
       status:
-        $ref: '#/definitions/napscan-be_internal_models.BatchStatus'
+        $ref: '#/definitions/models.BatchStatus'
     type: object
-  napscan-be_internal_models.BatchStatus:
+  models.BatchStatus:
     enum:
     - processing
     - complete
@@ -33,56 +33,68 @@ definitions:
     x-enum-varnames:
     - BatchStatusProcessing
     - BatchStatusComplete
-  napscan-be_internal_models.GoogleAuthRequest:
+  models.GoogleAuthRequest:
     properties:
       id_token:
         type: string
     type: object
-  napscan-be_internal_models.Host:
+  models.Host:
     properties:
       addresses:
         items:
-          $ref: '#/definitions/napscan-be_internal_models.Address'
+          $ref: '#/definitions/models.Address'
         type: array
       ports:
-        $ref: '#/definitions/napscan-be_internal_models.Ports'
+        $ref: '#/definitions/models.Ports'
     type: object
-  napscan-be_internal_models.NmapRun:
+  models.MobSFScanRequest:
+    properties:
+      file_name:
+        example: app.apk
+        type: string
+      hash:
+        example: 0123456789abcdef0123456789abcdef
+        type: string
+      scan_type:
+        example: apk
+        type: string
+    type: object
+  models.NmapRun:
     properties:
       hosts:
         items:
-          $ref: '#/definitions/napscan-be_internal_models.Host'
+          $ref: '#/definitions/models.Host'
         type: array
     type: object
-  napscan-be_internal_models.Port:
+  models.Port:
     properties:
       port:
         type: string
       protocol:
         type: string
       service:
-        $ref: '#/definitions/napscan-be_internal_models.Service'
+        $ref: '#/definitions/models.Service'
       state:
-        $ref: '#/definitions/napscan-be_internal_models.State'
+        $ref: '#/definitions/models.State'
     type: object
-  napscan-be_internal_models.Ports:
+  models.Ports:
     properties:
       ports:
         items:
-          $ref: '#/definitions/napscan-be_internal_models.Port'
+          $ref: '#/definitions/models.Port'
         type: array
     type: object
-  napscan-be_internal_models.Service:
+  models.Service:
     properties:
       name:
         type: string
     type: object
-  napscan-be_internal_models.State:
+  models.State:
     properties:
       state:
         type: string
     type: object
-  napscan-be_internal_models.User:
+  models.User:
     properties:
       email:
         type: string
@@ -93,14 +105,7 @@ definitions:
       picture:
         type: string
     type: object
-  napscan-be_internal_service.CombinedScanResponse:
-    properties:
-      tcp:
-        $ref: '#/definitions/napscan-be_internal_models.NmapRun'
-      udp:
-        $ref: '#/definitions/napscan-be_internal_models.NmapRun'
-    type: object
-  napscan-be_pkg_response.Response:
+  response.Response:
     properties:
       data: {}
       error: {}
@@ -108,6 +113,13 @@ definitions:
         type: string
       success:
         type: boolean
+    type: object
+  service.CombinedScanResponse:
+    properties:
+      tcp:
+        $ref: '#/definitions/models.NmapRun'
+      udp:
+        $ref: '#/definitions/models.NmapRun'
     type: object
 info:
   contact:
@@ -120,7 +132,7 @@ info:
   title: Napscan API
   version: "1.0"
 paths:
-  /api/a:
+  /a:
     post:
       consumes:
       - application/json
@@ -135,7 +147,7 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/napscan-be_internal_models.BatchRequest'
+          $ref: '#/definitions/models.BatchRequest'
       produces:
       - application/json
       responses:
@@ -162,7 +174,7 @@ paths:
       summary: Receive Scan Part A
       tags:
       - Batch
-  /api/analysis/{batch_id}:
+  /analysis/{batch_id}:
     get:
       consumes:
       - application/json
@@ -179,7 +191,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_internal_models.BatchResponse'
+            $ref: '#/definitions/models.BatchResponse'
         "404":
           description: Not Found
           schema:
@@ -191,7 +203,59 @@ paths:
       summary: Get Batch Analysis Result
       tags:
       - Batch
-  /api/b:
+  /auth/google:
+    post:
+      consumes:
+      - application/json
+      description: Validates Google ID token sent from Frontend and issues JWT
+      parameters:
+      - description: Google Auth Request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.GoogleAuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.AuthResponse'
+      summary: Google OAuth Login (ID Token)
+      tags:
+      - Auth
+  /auth/google/callback:
+    get:
+      description: Exchanges Auth Code for Token, creates User session, returns JWT
+      parameters:
+      - description: Auth Code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State
+        in: query
+        name: state
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.AuthResponse'
+      summary: Google OAuth Callback
+      tags:
+      - Auth
+  /auth/google/login:
+    get:
+      description: Redirects user to Google Login Page (Server-Side Flow)
+      responses:
+        "302":
+          description: Found
+      summary: Google Login Redirect
+      tags:
+      - Auth
+  /b:
     post:
       consumes:
       - application/json
@@ -216,7 +280,7 @@ paths:
       summary: Receive Scan Part B
       tags:
       - Batch
-  /api/c:
+  /c:
     post:
       consumes:
       - application/json
@@ -241,7 +305,7 @@ paths:
       summary: Receive Scan Part C
       tags:
       - Batch
-  /api/d:
+  /d:
     post:
       consumes:
       - application/json
@@ -266,7 +330,7 @@ paths:
       summary: Receive Scan Part D
       tags:
       - Batch
-  /api/e:
+  /e:
     post:
       consumes:
       - application/json
@@ -291,58 +355,6 @@ paths:
       summary: Receive Scan Part E
       tags:
       - Batch
-  /auth/google:
-    post:
-      consumes:
-      - application/json
-      description: Validates Google ID token sent from Frontend and issues JWT
-      parameters:
-      - description: Google Auth Request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/napscan-be_internal_models.GoogleAuthRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/napscan-be_internal_models.AuthResponse'
-      summary: Google OAuth Login (ID Token)
-      tags:
-      - Auth
-  /auth/google/callback:
-    get:
-      description: Exchanges Auth Code for Token, creates User session, returns JWT
-      parameters:
-      - description: Auth Code
-        in: query
-        name: code
-        required: true
-        type: string
-      - description: State
-        in: query
-        name: state
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/napscan-be_internal_models.AuthResponse'
-      summary: Google OAuth Callback
-      tags:
-      - Auth
-  /auth/google/login:
-    get:
-      description: Redirects user to Google Login Page (Server-Side Flow)
-      responses:
-        "302":
-          description: Found
-      summary: Google Login Redirect
-      tags:
-      - Auth
   /ffuf/scan:
     post:
       consumes:
@@ -364,15 +376,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start FFUF Scan
       tags:
       - FFUF
@@ -392,6 +404,40 @@ paths:
       summary: Health Check
       tags:
       - Health
+  /mobsf/scan:
+    post:
+      consumes:
+      - application/json
+      description: Initiates a scan in MobSF for the uploaded file
+      parameters:
+      - description: Return a small summary instead of full scan+report JSON
+        in: query
+        name: compact
+        type: boolean
+      - description: Scan request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.MobSFScanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Start MobSF Scan
+      tags:
+      - MobSF
   /mobsf/upload:
     post:
       consumes:
@@ -409,15 +455,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Upload file for MobSF
       tags:
       - MobSF
@@ -442,15 +488,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_internal_service.CombinedScanResponse'
+            $ref: '#/definitions/service.CombinedScanResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start Nmap Full Scan
       tags:
       - Nmap
@@ -475,15 +521,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start Nuclei Scan
       tags:
       - Nuclei
@@ -509,7 +555,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Get Scan Report
       tags:
       - OpenVAS
@@ -534,15 +580,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start OpenVAS Scan
       tags:
       - OpenVAS
@@ -568,7 +614,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Get Task Status
       tags:
       - OpenVAS
@@ -587,7 +633,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Get OpenVAS Version
       tags:
       - OpenVAS
@@ -612,15 +658,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start SSLyze Scan
       tags:
       - SSLyze
@@ -645,15 +691,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/napscan-be_pkg_response.Response'
+            $ref: '#/definitions/response.Response'
       summary: Start ZAP Scan
       tags:
       - ZAP

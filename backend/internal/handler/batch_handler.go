@@ -31,7 +31,7 @@ func NewBatchHandler() *BatchHandler {
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
-// @Router /api/a [post]
+// @Router /a [post]
 func (h *BatchHandler) HandleScanPartA(c *fiber.Ctx) error {
 	return h.handlePart(c, "api_a")
 }
@@ -45,7 +45,7 @@ func (h *BatchHandler) HandleScanPartA(c *fiber.Ctx) error {
 // @Security BearerAuth
 // @Param X-Batch-ID header string true "Batch ID"
 // @Success 200 {object} map[string]string
-// @Router /api/b [post]
+// @Router /b [post]
 func (h *BatchHandler) HandleScanPartB(c *fiber.Ctx) error {
 	return h.handlePart(c, "api_b")
 }
@@ -59,7 +59,7 @@ func (h *BatchHandler) HandleScanPartB(c *fiber.Ctx) error {
 // @Security BearerAuth
 // @Param X-Batch-ID header string true "Batch ID"
 // @Success 200 {object} map[string]string
-// @Router /api/c [post]
+// @Router /c [post]
 func (h *BatchHandler) HandleScanPartC(c *fiber.Ctx) error {
 	return h.handlePart(c, "api_c")
 }
@@ -73,7 +73,7 @@ func (h *BatchHandler) HandleScanPartC(c *fiber.Ctx) error {
 // @Security BearerAuth
 // @Param X-Batch-ID header string true "Batch ID"
 // @Success 200 {object} map[string]string
-// @Router /api/d [post]
+// @Router /d [post]
 func (h *BatchHandler) HandleScanPartD(c *fiber.Ctx) error {
 	return h.handlePart(c, "api_d")
 }
@@ -87,7 +87,7 @@ func (h *BatchHandler) HandleScanPartD(c *fiber.Ctx) error {
 // @Security BearerAuth
 // @Param X-Batch-ID header string true "Batch ID"
 // @Success 200 {object} map[string]string
-// @Router /api/e [post]
+// @Router /e [post]
 func (h *BatchHandler) HandleScanPartE(c *fiber.Ctx) error {
 	return h.handlePart(c, "api_e")
 }
@@ -136,7 +136,7 @@ func (h *BatchHandler) handlePart(c *fiber.Ctx, sourceName string) error {
 // @Param batch_id path string true "Batch ID"
 // @Success 200 {object} models.BatchResponse
 // @Failure 404 {object} map[string]string
-// @Router /api/analysis/{batch_id} [get]
+// @Router /analysis/{batch_id} [get]
 func (h *BatchHandler) GetBatchResult(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(string)
 	if !ok {
