@@ -4,8 +4,8 @@ set -euo pipefail
 echo "[*] Starting ADB server..."
 adb start-server
 
-echo "[*] Connecting to Redroid at localhost:5555..."
-if ! adb connect localhost:5555; then
+echo "[*] Connecting to Redroid at redroid:5555..."
+if ! adb connect redroid:5555; then
     echo "[!] ERROR: Failed to connect to Redroid via ADB"
     exit 1
 fi
@@ -23,7 +23,7 @@ echo "[*] Running ADB as root..."
 adb root
 
 echo "[*] Pushing frida-server..."
-adb push /tmp/frida-server /data/local/tmp/frida-server
+adb push /app/frida-server /data/local/tmp/frida-server
 
 echo "[*] Setting permissions..."
 adb shell chmod 755 /data/local/tmp/frida-server

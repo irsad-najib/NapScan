@@ -17,7 +17,7 @@ services:
       - OPENVAS_RUN_USER=napscan
       - OPENVAS_GVMD_SOCKET=/run/gvmd/gvmd.sock
     volumes:
-      - gvmd_socket_vol:/run/gvmd
+      - ./data/gvmd_socket_vol:/run/gvmd
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -26,8 +26,23 @@ services:
       - mobsf-client
       - mongodb
       - redroid
+    networks:
+      - napscan-net
     restart: unless-stopped
 
+  # Android
+  redroid:
+    image: redroid/redroid:11.0.0-latest
+    container_name: redroid
+    privileged: true
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5555:5555"
+    volumes:
+      - ./data11:/data
+    networks:
+      - napscan-net
   # MongoDB
   mongodb:
     image: mongo:latest
@@ -52,27 +67,27 @@ services:
     environment:
       FEED_RELEASE: "24.10"
     volumes:
-      - vt_data_vol:/mnt
+      - ./data/vt_data_vol:/mnt
 
   notus-data:
     image: registry.community.greenbone.net/community/notus-data
     volumes:
-      - notus_data_vol:/mnt
+      - ./data/vt_data_vol:/mnt
 
   scap-data:
     image: registry.community.greenbone.net/community/scap-data
     volumes:
-      - scap_data_vol:/mnt
+      - ./data/scap_data_vol:/mnt
 
   cert-bund-data:
     image: registry.community.greenbone.net/community/cert-bund-data
     volumes:
-      - cert_data_vol:/mnt
+      - ./data/cert_data_vol:/mnt
 
   dfn-cert-data:
     image: registry.community.greenbone.net/community/dfn-cert-data
     volumes:
-      - cert_data_vol:/mnt
+      - ./data/cert_data_vol:/mnt
     depends_on:
       - cert-bund-data
 
@@ -81,48 +96,48 @@ services:
     environment:
       FEED_RELEASE: "24.10"
     volumes:
-      - data_objects_vol:/mnt
+      - ./data/data_objects_vol:/mnt
 
   report-formats:
     image: registry.community.greenbone.net/community/report-formats
     environment:
       FEED_RELEASE: "24.10"
     volumes:
-      - data_objects_vol:/mnt
+      - ./data/data_objects_vol:/mnt
     depends_on:
       - data-objects
 
   gpg-data:
     image: registry.community.greenbone.net/community/gpg-data
     volumes:
-      - gpg_data_vol:/mnt
+      - ./data/gpg_data_vol:/mnt
 
   redis-server:
     image: registry.community.greenbone.net/community/redis-server
     restart: on-failure
     volumes:
-      - redis_socket_vol:/run/redis/
+    - ./data/redis_socket_vol:/run/redis/
 
   pg-gvm:
     image: registry.community.greenbone.net/community/pg-gvm:stable
     restart: on-failure
     volumes:
-      - psql_data_vol:/var/lib/postgresql
-      - psql_socket_vol:/var/run/postgresql
+    - ./data/psql_data_vol:/var/lib/postgresql
+    - ./data/psql_socket_vol:/var/run/postgresql
 
   gvmd:
     image: registry.community.greenbone.net/community/gvmd:stable
     restart: on-failure
     volumes:
-      - gvmd_data_vol:/var/lib/gvm
-      - scap_data_vol:/var/lib/gvm/scap-data/
-      - cert_data_vol:/var/lib/gvm/cert-data
-      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
-      - vt_data_vol:/var/lib/openvas/plugins
-      - psql_data_vol:/var/lib/postgresql
-      - gvmd_socket_vol:/run/gvmd
-      - ospd_openvas_socket_vol:/run/ospd
-      - psql_socket_vol:/var/run/postgresql
+    - ./data/gvmd_data_vol:/var/lib/gvm
+    - ./data/scap_data_vol:/var/lib/gvm/scap-data/
+    - ./data/cert_data_vol:/var/lib/gvm/cert-data
+    - ./data/data_objects_vol:/var/lib/gvm/data-objects/gvmd
+    - ./data/vt_data_vol:/var/lib/openvas/plugins
+    - ./data/psql_data_vol:/var/lib/postgresql
+    - ./data/gvmd_socket_vol:/run/gvmd
+    - ./data/ospd_openvas_socket_vol:/run/ospd
+    - ./data/psql_socket_vol:/var/run/postgresql
     depends_on:
       pg-gvm:
         condition: service_started
@@ -143,7 +158,7 @@ services:
     ports:
       - 127.0.0.1:9392:80
     volumes:
-      - gvmd_socket_vol:/run/gvmd
+    - ./data/gvmd_socket_vol:/run/gvmd
     depends_on:
       - gvmd
   # Sets log level of openvas to the set LOG_LEVEL within the env
@@ -152,8 +167,8 @@ services:
   configure-openvas:
     image: registry.community.greenbone.net/community/openvas-scanner:stable
     volumes:
-      - openvas_data_vol:/mnt
-      - openvas_log_data_vol:/var/log/openvas
+      - ./data/openvas_data_vol:/mnt
+      - ./data/openvas_log_data_vol:/var/log/openvas
     command:
       - /bin/sh
       - -c
@@ -170,8 +185,8 @@ services:
     image: registry.community.greenbone.net/community/openvas-scanner:stable
     restart: on-failure
     volumes:
-      - openvas_data_vol:/etc/openvas
-      - openvas_log_data_vol:/var/log/openvas
+      - ./data/openvas_data_vol:/etc/openvas
+      - ./data/openvas_log_data_vol:/var/log/openvas
     command:
       - /bin/sh
       - -c
@@ -192,10 +207,10 @@ services:
       GNUPGHOME: /etc/openvas/gnupg
       LISTENING: 0.0.0.0:80
     volumes:
-      - openvas_data_vol:/etc/openvas
-      - openvas_log_data_vol:/var/log/openvas
-      - gpg_data_vol:/etc/openvas/gnupg
-      - notus_data_vol:/var/lib/notus
+      - ./data/openvas_data_vol:/etc/openvas
+      - ./data/openvas_log_data_vol:/var/log/openvas
+      - ./data/gpg_data_vol:/etc/openvas/gnupg
+      - ./data/notus_data_vol:/var/lib/notus
     # enable port forwarding when you want to use the http api from your host machine
     # ports:
     #   - 127.0.0.1:3000:80
@@ -233,13 +248,13 @@ services:
         "666",
       ]
     volumes:
-      - gpg_data_vol:/etc/openvas/gnupg
-      - vt_data_vol:/var/lib/openvas/plugins
-      - notus_data_vol:/var/lib/notus
-      - ospd_openvas_socket_vol:/run/ospd
-      - redis_socket_vol:/run/redis/
-      - openvas_data_vol:/etc/openvas/
-      - openvas_log_data_vol:/var/log/openvas
+    - ./data/gpg_data_vol:/etc/openvas/gnupg
+    - ./data/vt_data_vol:/var/lib/openvas/plugins
+    - ./data/notus_data_vol:/var/lib/notus
+    - ./data/ospd_openvas_socket_vol:/run/ospd
+    - ./data/redis_socket_vol:/run/redis/
+    - ./data/openvas_data_vol:/etc/openvas/
+    - ./data/openvas_log_data_vol:/var/log/openvas
     depends_on:
       redis-server:
         condition: service_started
@@ -253,8 +268,8 @@ services:
   gvm-tools:
     image: registry.community.greenbone.net/community/gvm-tools
     volumes:
-      - gvmd_socket_vol:/run/gvmd
-      - ospd_openvas_socket_vol:/run/ospd
+    - ./data/gvmd_socket_vol:/run/gvmd
+    - ./data/ospd_openvas_socket_vol:/run/ospd
     depends_on:
       - gvmd
       - ospd-openvas
@@ -285,4 +300,3 @@ volumes:
   redis_socket_vol:
   openvas_data_vol:
   openvas_log_data_vol:
-  mongodb_data:
