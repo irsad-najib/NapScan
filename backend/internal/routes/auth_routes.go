@@ -7,15 +7,14 @@ import (
 )
 
 func AuthRoutes(router fiber.Router, h *handler.AuthHandler) {
-	g := router.Group("/auth")
-	
-	// Client-Side Flow (POST ID Token)
-	g.Post("/google", h.GoogleLogin)
-	
-	// Server-Side Flow (GET Redirect & Callback)
-	g.Get("/google/login", h.GoogleLoginRedirect)
-	g.Get("/google/callback", h.GoogleCallback)
+	auth := router.Group("/auth")
 
-	// Cookie-based logout
-	g.Post("/logout", h.Logout)
+	// OAuth Routes
+	auth.Post("/google", h.GoogleLogin)
+	auth.Get("/google/login", h.GoogleLoginRedirect)
+	auth.Get("/google/callback", h.GoogleCallback)
+	auth.Post("/logout", h.Logout)
+
+	// Development-only route to get a test token
+	auth.Get("/dev/get-token", h.GetDevToken)
 }

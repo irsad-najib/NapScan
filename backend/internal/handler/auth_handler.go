@@ -3,9 +3,11 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
+	"napscan-be/pkg/response"
 	"os"
 	"strings"
 	"time"
@@ -127,8 +129,9 @@ func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
 
 	h.setAuthCookie(c, token)
 
+	// Token is now in an HttpOnly cookie, not in the response body.
 	return c.JSON(models.AuthResponse{
-		AccessToken: "",
+		AccessToken: "", // Ensure token is not sent in the body
 		User:        *user,
 	})
 }
@@ -217,13 +220,50 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 		return c.Redirect(redirect)
 	}
 
-	// Option 1: Redirect to frontend with token
-	// return c.Redirect("http://localhost:3000/auth/success?token=" + token)
-	
-	// Option 2: Return JSON (for API testing)
+	// Return user info, but not the token in the body.
 	return c.JSON(models.AuthResponse{
-		AccessToken: "",
+		AccessToken: "", // Ensure token is not sent in the body
 		User:        *user,
+	})
+}
+
+// GetDevToken generates a JWT for a fake user for development/testing.
+// This endpoint should ONLY be available in a development environment.
+// @Summary Get Development Token
+// @Description Generates a JWT for a test user (e.g., user_id '1'). Only for development.
+// @Tags Auth
+// @Produce json
+// @Param user_id query string false "User ID to generate token for" default(1)
+// @Success 200 {object} object{access_token=string, user_id=string, name=string, email=string}
+// @Failure 403 {object} response.Response
+// @Router /auth/dev/get-token [get]
+func (h *AuthHandler) GetDevToken(c *fiber.Ctx) error {
+	// CRITICAL: Only allow this in development environments.
+	if os.Getenv("APP_ENV") != "development" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "This endpoint is for development use only.",
+		})
+	}
+
+	userID := c.Query("user_id", "1") // Default to user_id "1"
+	fakeUser := &models.User{
+		ID:      userID, // <-- Perbaikan: UserID -> ID
+		Email:   fmt.Sprintf("testuser-%s@example.com", userID),
+		Name:    fmt.Sprintf("Test User %s", userID),
+		Picture: "https://example.com/avatar.png", // <-- Perbaikan: AvatarURL -> Picture
+	}
+
+	token, err := h.authService.GenerateJWT(fakeUser)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to generate dev token", err)
+	}
+
+	// For easy testing, return the token in the body.
+	return c.JSON(fiber.Map{
+		"access_token": token,
+		"user_id":      fakeUser.ID, // <-- Perbaikan: fakeUser.UserID -> fakeUser.ID
+		"name":         fakeUser.Name,
+		"email":        fakeUser.Email,
 	})
 }
 

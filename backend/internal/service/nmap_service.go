@@ -24,8 +24,9 @@ type ScanResult struct {
 }
 
 type CombinedScanResponse struct {
-	TCP *models.NmapRun `json:"tcp"`
-	UDP *models.NmapRun `json:"udp"`
+	TCP     *models.NmapRun `json:"tcp"`
+	UDP     *models.NmapRun `json:"udp"`
+	BatchID string          `json:"batch_id,omitempty"`
 }
 
 func (s *NmapService) ExecuteScan(target string, scanType string, args ...string) (models.NmapRun, error) {

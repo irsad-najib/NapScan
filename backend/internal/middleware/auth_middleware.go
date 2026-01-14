@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -13,33 +15,39 @@ import (
 // AuthMiddleware validates the JWT token and injects user info into context
 func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		// Prefer HttpOnly cookie for browser clients.
+		// --- DEVELOPMENT-ONLY DEBUGGING OVERRIDE ---
+		if os.Getenv("APP_ENV") == "development" {
+			debugUserID := c.Get("X-Debug-User-ID")
+			if debugUserID != "" {
+				log.Printf("!!! DEBUG: Overriding auth. Using User ID: %s !!!", debugUserID)
+				c.Locals("user_id", debugUserID)
+				c.Locals("email", fmt.Sprintf("debug-%s@example.com", debugUserID))
+				c.Locals("name", fmt.Sprintf("Debug User %s", debugUserID))
+				return c.Next()
+			}
+		}
+		// --- END DEBUGGING OVERRIDE ---
+
 		cookieName := strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME"))
 		if cookieName == "" {
 			cookieName = "napscan_access_token"
 		}
 		tokenString := strings.TrimSpace(c.Cookies(cookieName))
-		if tokenString == "" {
-			// Compatibility: accept a generic cookie name too.
-			tokenString = strings.TrimSpace(c.Cookies("access_token"))
-		}
-		if tokenString == "" {
-			// Fallback to Authorization: Bearer <token> for API clients.
-			authHeader := c.Get("Authorization")
-			if authHeader == "" {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Missing authentication (cookie or Authorization header)",
-				})
-			}
 
-			parts := strings.Split(authHeader, " ")
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Invalid authorization header format",
-				})
+		// Fallback to Authorization header for API clients (like Swagger)
+		if tokenString == "" {
+			authHeader := c.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
 			}
-			tokenString = parts[1]
 		}
+
+		if tokenString == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Missing authentication token",
+			})
+		}
+
 		secret := os.Getenv("JWT_SECRET")
 		if secret == "" {
 			secret = "dev-secret-key-change-in-prod"

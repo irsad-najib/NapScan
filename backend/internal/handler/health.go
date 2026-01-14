@@ -15,6 +15,7 @@ func NewHealthHandler() *HealthHandler {
 // @Description Checks if the server is running
 // @Tags Health
 // @Accept json
+// @Security BearerAuth
 // @Produce json
 // @Success 200 {object}  map[string]interface{}
 // @Router /health [get]

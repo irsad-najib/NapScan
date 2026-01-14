@@ -1,9 +1,9 @@
 FROM golang:latest
 
 # Install tools (nmap, ffuf, zap, sslyze, nuclei, gvm-tools)
-RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb   && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb  xz-utils && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/root/.local/bin:$PATH"
+ENV PATH="/opt/docker/.local/bin:$PATH"
 
 # Install SSLyze and Frida via pipx
 RUN pipx install sslyze frida-tools frida-tools

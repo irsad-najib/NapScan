@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"napscan-be/internal/models"
+	"napscan-be/internal/repository"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
 
@@ -11,17 +13,20 @@ import (
 )
 
 type OpenVASHandler struct {
-	service *service.OpenVASService
+	service      *service.OpenVASService
+	scanRepo     repository.ScanResultRepository
+	batchService *service.BatchService
 }
 
-func NewOpenVASHandler(s *service.OpenVASService) *OpenVASHandler {
-	return &OpenVASHandler{service: s}
+func NewOpenVASHandler(s *service.OpenVASService, scanRepo repository.ScanResultRepository, batchService *service.BatchService) *OpenVASHandler {
+	return &OpenVASHandler{service: s, scanRepo: scanRepo, batchService: batchService}
 }
 
 // GetVersion returns OpenVAS version
 // @Summary Get OpenVAS Version
 // @Description Check OpenVAS connectivity and version
 // @Tags OpenVAS
+// @Security BearerAuth
 // @Accept json
 // @Produce xml
 // @Success 200 {string} string "XML response"
@@ -43,20 +48,31 @@ func (h *OpenVASHandler) GetVersion(c *fiber.Ctx) error {
 // @Summary Start OpenVAS Scan
 // @Description Create target, task, and start scan
 // @Tags OpenVAS
+// @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param body body object{target=string} true "Scan parameters"
+// @Param body body object{target=string,batch_id=string} true "Scan parameters"
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /openvas/scan [post]
 func (h *OpenVASHandler) StartScan(c *fiber.Ctx) error {
 	var req struct {
-		Target string `json:"target"`
+		Target  string `json:"target"`
+		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
+	}
+
+	if req.BatchID == "" {
+		return response.BadRequest(c, "batch_id is required", nil)
+	}
+
+	// Enforce batch ownership
+	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
+		return err
 	}
 
 	if req.Target == "" {
@@ -68,7 +84,7 @@ func (h *OpenVASHandler) StartScan(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 60*time.Second)
 	defer cancel()
 
-	result, err := h.service.StartScan(ctx, req.Target)
+	result, err := h.service.StartScan(ctx, req.Target, req.BatchID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to start OpenVAS scan", err)
 	}
@@ -80,6 +96,7 @@ func (h *OpenVASHandler) StartScan(c *fiber.Ctx) error {
 // @Summary Get Task Status
 // @Description Get details of a task especially progress and report ID
 // @Tags OpenVAS
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param taskId path string true "Task ID"
@@ -108,6 +125,9 @@ func (h *OpenVASHandler) GetTaskStatus(c *fiber.Ctx) error {
 	if status.LastReport.Report.ID != "" {
 		res["reportId"] = status.LastReport.Report.ID
 	}
+	if status.BatchID != "" {
+		res["batch_id"] = status.BatchID
+	}
 
 	return c.JSON(res)
 }
@@ -116,6 +136,7 @@ func (h *OpenVASHandler) GetTaskStatus(c *fiber.Ctx) error {
 // @Summary Get Scan Report
 // @Description Get report details parsed as JSON
 // @Tags OpenVAS
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param reportId path string true "Report ID"
@@ -134,6 +155,27 @@ func (h *OpenVASHandler) GetScanReport(c *fiber.Ctx) error {
 	report, err := h.service.GetScanReport(ctx, reportID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get report", err)
+	}
+
+	if h.scanRepo != nil {
+		batchID := ""
+		if report != nil {
+			batchID = report.BatchID
+		}
+		if batchID != "" {
+			dbCtx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+			defer cancel()
+			_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
+				BatchID:   batchID,
+				Tool:      "openvas",
+				Target:    "", // target not available from report endpoint
+				Result:    report,
+				CreatedAt: time.Now().UTC(),
+			})
+			if dbErr != nil {
+				return response.InternalServerError(c, "Failed to save scan result", dbErr)
+			}
+		}
 	}
 	
 	return c.JSON(report)

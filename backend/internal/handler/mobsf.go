@@ -10,28 +10,50 @@ import (
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/internal/repository"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
 )
 
+type MobSFHandler struct {
+	scanRepo     repository.ScanResultRepository
+	batchService *service.BatchService
+}
+
+func NewMobSFHandler(scanRepo repository.ScanResultRepository, batchService *service.BatchService) *MobSFHandler {
+	return &MobSFHandler{scanRepo: scanRepo, batchService: batchService}
+}
+
 // UploadMobSFFile uploads a file for MobSF analysis
 // @Summary Upload file for MobSF
 // @Description Upload APK/IPA/ZIP file for analysis
 // @Tags MobSF
 // @Accept multipart/form-data
+// @Security BearerAuth
 // @Produce json
 // @Param file formData file true "File to upload"
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /mobsf/upload [post]
-func UploadMobSFFile(c *fiber.Ctx) error {
+func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 	// Get the file from the request
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return response.BadRequest(c, "Failed to get file from request", err)
+	}
+
+	// Get batch_id from form data
+	batchID := c.FormValue("batch_id")
+	if batchID == "" {
+		return response.BadRequest(c, "batch_id is required", nil)
+	}
+
+	// Enforce batch ownership
+	if err := h.batchService.ValidateBatchOwnership(c, batchID); err != nil {
+		return err
 	}
 
 	// Open the uploaded file
@@ -54,12 +76,15 @@ func UploadMobSFFile(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadGateway, "MobSF upload failed", err.Error())
 	}
 
-	return response.Success(c, "MobSF upload completed", fiber.Map{
+	payload := fiber.Map{
 		"hash":      info.Hash,
 		"scan_type": info.ScanType,
 		"file_name": info.FileName,
 		"upload":    uploadRaw,
-	})
+		"batch_id":  batchID,
+	}
+
+	return response.Success(c, "MobSF upload completed", payload)
 }
 
 // StartMobSFScan starts a scan in MobSF for the uploaded file
@@ -67,6 +92,7 @@ func UploadMobSFFile(c *fiber.Ctx) error {
 // @Description Initiates a scan in MobSF for the uploaded file
 // @Tags MobSF
 // @Accept json
+// @Security BearerAuth
 // @Produce json
 // @Param compact query boolean false "Return a small summary instead of full scan+report JSON"
 // @Param request body models.MobSFScanRequest true "Scan request"
@@ -74,10 +100,19 @@ func UploadMobSFFile(c *fiber.Ctx) error {
 // @Failure 400 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /mobsf/scan [post]
-func StartMobSFScan(c *fiber.Ctx) error {
+func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 	var req models.MobSFScanRequest
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
+	}
+
+	if req.BatchID == "" {
+		return response.BadRequest(c, "batch_id is required", nil)
+	}
+
+	// Enforce batch ownership
+	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
+		return err
 	}
 
 	hash := strings.TrimSpace(req.Hash)
@@ -136,21 +171,57 @@ func StartMobSFScan(c *fiber.Ctx) error {
 	compact := isTruthy(c.Query("compact"))
 	if compact {
 		summary := buildMobSFSummary(info, scanRaw, reportRaw)
-		return response.Success(c, "MobSF scan completed", fiber.Map{
+		payload := fiber.Map{
 			"hash":      info.Hash,
 			"scan_type": info.ScanType,
 			"file_name": info.FileName,
 			"summary":   summary,
-		})
+			"batch_id":  req.BatchID,
+		}
+
+		if h.scanRepo != nil {
+			dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
+				BatchID:   req.BatchID,
+				Tool:      "mobsf",
+				Target:    info.Hash,
+				Result:    payload,
+				CreatedAt: time.Now().UTC(),
+			})
+			if dbErr != nil {
+				return response.InternalServerError(c, "Failed to save scan result", dbErr)
+			}
+		}
+
+		return response.Success(c, "MobSF scan completed", payload)
 	}
 
-	return response.Success(c, "MobSF scan completed", fiber.Map{
+	payload := fiber.Map{
 		"hash":      info.Hash,
 		"scan_type": info.ScanType,
 		"file_name": info.FileName,
 		"scan":      scanRaw,
 		"report":    reportRaw,
-	})
+		"batch_id":  req.BatchID,
+	}
+
+	if h.scanRepo != nil {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
+			BatchID:   req.BatchID,
+			Tool:      "mobsf",
+			Target:    info.Hash,
+			Result:    payload,
+			CreatedAt: time.Now().UTC(),
+		})
+		if dbErr != nil {
+			return response.InternalServerError(c, "Failed to save scan result", dbErr)
+		}
+	}
+
+	return response.Success(c, "MobSF scan completed", payload)
 }	
 
 func isMobSFDebug() bool {
