@@ -248,6 +248,17 @@ paths:
       summary: Logout
       tags:
       - Auth
+  /auth/me:
+    get:
+      description: Returns the currently logged in user based on the auth cookie
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+      summary: Get Current User
+      tags:
+      - Auth
   /batch/create:
     post:
       description: Generate a unique batch ID for the authenticated user
@@ -396,6 +407,11 @@ paths:
       - multipart/form-data
       description: Upload APK/IPA/ZIP file for analysis
       parameters:
+      - description: Batch ID
+        in: formData
+        name: batch_id
+        required: true
+        type: string
       - description: File to upload
         in: formData
         name: file

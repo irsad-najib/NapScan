@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // BatchStatus indicates the progress of the batch
 type BatchStatus string
@@ -12,14 +17,42 @@ const (
 
 // Batch represents the aggregated state of multiple API requests
 type Batch struct {
-	UserID         string                 `json:"user_id" bson:"user_id"`
-	BatchID        string                 `json:"batch_id" bson:"batch_id"`
-	ExpectedCount  int                    `json:"expected_count" bson:"expected_count"`
-	ReceivedCount  int                    `json:"received_count" bson:"received_count"`
-	Results        map[string]interface{} `json:"results" bson:"results"`
-	Status         BatchStatus            `json:"status" bson:"status"`
-	AnalysisResult interface{}            `json:"analysis_result,omitempty" bson:"analysis_result,omitempty"`
-	CreatedAt      time.Time              `json:"created_at" bson:"created_at"`
+	UserID            string                 `json:"user_id" gorm:"type:varchar(191);index"`
+	BatchID           string                 `json:"batch_id" gorm:"primaryKey;type:varchar(191)"`
+	ExpectedCount     int                    `json:"expected_count"`
+	ReceivedCount     int                    `json:"received_count"`
+	ResultsRaw        []byte                 `json:"-" gorm:"column:results"`
+	Results           map[string]interface{} `json:"results" gorm:"-"`
+	Status            BatchStatus            `json:"status" gorm:"type:varchar(32)"`
+	AnalysisResultRaw []byte                 `json:"-" gorm:"column:analysis_result"`
+	AnalysisResult    interface{}            `json:"analysis_result,omitempty" gorm:"-"`
+	CreatedAt         time.Time              `json:"created_at"`
+}
+
+func (b *Batch) BeforeSave(tx *gorm.DB) (err error) {
+	if b.Results != nil {
+		b.ResultsRaw, err = json.Marshal(b.Results)
+		if err != nil {
+			return err
+		}
+	}
+	if b.AnalysisResult != nil {
+		b.AnalysisResultRaw, err = json.Marshal(b.AnalysisResult)
+	}
+	return
+}
+
+func (b *Batch) AfterFind(tx *gorm.DB) (err error) {
+	if b.ResultsRaw != nil {
+		err = json.Unmarshal(b.ResultsRaw, &b.Results)
+		if err != nil {
+			return err
+		}
+	}
+	if b.AnalysisResultRaw != nil {
+		err = json.Unmarshal(b.AnalysisResultRaw, &b.AnalysisResult)
+	}
+	return
 }
 
 // BatchRequest represents the input for fan-in endpoints

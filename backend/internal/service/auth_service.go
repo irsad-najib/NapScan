@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"napscan-be/internal/models"
@@ -52,10 +53,42 @@ func NewAuthService(userRepo repository.UserRepository) *AuthService {
 	}
 }
 
+func (s *AuthService) upsertGoogleUser(ctx context.Context, incoming *models.User) (*models.User, error) {
+	if incoming == nil {
+		return nil, errors.New("user cannot be nil")
+	}
+	if strings.TrimSpace(incoming.Email) == "" {
+		return nil, errors.New("email is required")
+	}
+
+	// Prefer email as the stable lookup key to avoid duplicates across flows.
+	existing, err := s.userRepo.FindByEmail(ctx, incoming.Email)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		// Reuse existing primary key so Save() updates instead of inserting a new row.
+		incoming.ID = existing.ID
+	}
+
+	// Align timestamps.
+	incoming.UpdatedAt = time.Now()
+	if existing == nil {
+		incoming.CreatedAt = time.Now()
+	} else {
+		incoming.CreatedAt = existing.CreatedAt
+	}
+
+	if err := s.userRepo.Upsert(ctx, incoming); err != nil {
+		return nil, err
+	}
+	return incoming, nil
+}
+
 // GetGoogleLoginURL returns the URL to redirect the user to for Google Login.
 // Caller must provide a cryptographically-random state and validate it on callback.
 func (s *AuthService) GetGoogleLoginURL(state string) string {
-	return s.oauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
+	return s.oauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "select_account"),)
 }
 
 // HandleGoogleCallback exchanges code for token and retrieves user info
@@ -99,13 +132,8 @@ func (s *AuthService) HandleGoogleCallback(ctx context.Context, code string) (*m
 		Name:    googleUser.Name,
 		Picture: googleUser.Picture,
 	}
-	
-	// Save user to database
-	if err := s.userRepo.Upsert(ctx, user); err != nil {
-		return nil, err
-	}
 
-	return user, nil
+	return s.upsertGoogleUser(ctx, user)
 }
 
 
@@ -130,11 +158,7 @@ func (s *AuthService) VerifyGoogleToken(ctx context.Context, tokenString string)
 		Picture: picture,
 	}
 
-	if err := s.userRepo.Upsert(ctx, user); err != nil {
-		return nil, err
-	}
-	
-	return user, nil
+	return s.upsertGoogleUser(ctx, user)
 }
 
 // GetUserByID retrieves user by ID
@@ -167,4 +191,18 @@ func (s *AuthService) GenerateJWT(user *models.User) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
+}
+
+func (s *AuthService) GetJWTExpiry(tokenString string) time.Time {
+	token, _, err := new(jwt.Parser).ParseUnverified(tokenString, &models.JWTCustomClaims{})
+	if err != nil {
+		return time.Now().Add(24 * time.Hour)
+	}
+
+	claims := token.Claims.(*models.JWTCustomClaims)
+	if claims.ExpiresAt != nil {
+		return claims.ExpiresAt.Time
+	}
+
+	return time.Now().Add(24 * time.Hour)
 }

@@ -32,6 +32,24 @@ func AuthMiddleware() fiber.Handler {
 		if cookieName == "" {
 			cookieName = "napscan_access_token"
 		}
+
+		cookieDebug := false
+		if os.Getenv("APP_ENV") == "development" {
+			v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG")))
+			cookieDebug = v == "1" || v == "true" || v == "yes"
+		}
+		if cookieDebug {
+			origin := strings.TrimSpace(c.Get("Origin"))
+			referer := strings.TrimSpace(c.Get("Referer"))
+			log.Printf("[AUTH_COOKIE_DEBUG] incoming %s %s origin=%q referer=%q cookie_name=%q cookie_present=%v",
+				c.Method(),
+				c.OriginalURL(),
+				origin,
+				referer,
+				cookieName,
+				strings.TrimSpace(c.Cookies(cookieName)) != "",
+			)
+		}
 		tokenString := strings.TrimSpace(c.Cookies(cookieName))
 
 		// Fallback to Authorization header for API clients (like Swagger)
@@ -39,6 +57,9 @@ func AuthMiddleware() fiber.Handler {
 			authHeader := c.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+				if cookieDebug {
+					log.Printf("[AUTH_COOKIE_DEBUG] using Authorization header fallback (bearer_present=%v)", tokenString != "")
+				}
 			}
 		}
 

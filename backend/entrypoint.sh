@@ -33,6 +33,10 @@ adb shell "/data/local/tmp/frida-server >/dev/null 2>&1 &"
 
 echo "[✓] Frida server running"
 
+# ---- Start Napscan ----
+echo "[*] Starting Napscan..."
+exec /app/napscan
+
 # ---- Start ZAP ----
 echo "[*] Starting ZAP daemon..."
 /app/ZAP_2.17.0/zap.sh \
@@ -48,6 +52,3 @@ done
 
 echo "[✓] ZAP ready"
 
-# ---- Start Napscan ----
-echo "[*] Starting Napscan..."
-exec /app/napscan

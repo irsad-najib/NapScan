@@ -9,7 +9,7 @@ import (
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
 	"os"
-	"strings"
+	"strings" // Pastikan import ini ada
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,6 +57,14 @@ func sameSiteMode() string {
 	return "Lax"
 }
 
+func isCookieDebugEnabled() bool {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV"))) != "development" {
+		return false
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
 	cookie := &fiber.Cookie{
 		Name:     authCookieName(),
@@ -72,10 +80,28 @@ func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
 	if strings.EqualFold(cookie.SameSite, "None") {
 		cookie.Secure = true
 	}
+	if isCookieDebugEnabled() {
+		prefix := jwtToken
+		if len(prefix) > 12 {
+			prefix = prefix[:12]
+		}
+		log.Printf("[AUTH_COOKIE_DEBUG] set cookie name=%q secure=%v samesite=%q path=%q expires=%s token_prefix=%q token_len=%d",
+			cookie.Name,
+			cookie.Secure,
+			cookie.SameSite,
+			cookie.Path,
+			cookie.Expires.Format(time.RFC3339),
+			prefix,
+			len(jwtToken),
+		)
+	}
 	c.Cookie(cookie)
 }
 
 func (h *AuthHandler) clearAuthCookie(c *fiber.Ctx) {
+	if isCookieDebugEnabled() {
+		log.Printf("[AUTH_COOKIE_DEBUG] clear cookie name=%q", authCookieName())
+	}
 	c.Cookie(&fiber.Cookie{
 		Name:     authCookieName(),
 		Value:    "",
@@ -129,9 +155,9 @@ func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
 
 	h.setAuthCookie(c, token)
 
-	// Token is now in an HttpOnly cookie, not in the response body.
+	// UBAH DISINI: Kembalikan token agar frontend bisa menyimpannya di localStorage
 	return c.JSON(models.AuthResponse{
-		AccessToken: "", // Ensure token is not sent in the body
+		AccessToken: token, // DULU: "", SEKARANG: token
 		User:        *user,
 	})
 }
@@ -215,14 +241,15 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 
 	h.setAuthCookie(c, token)
 
-	// Optional: redirect to frontend after setting cookie (no token in URL).
+	// UBAH DISINI: Redirect bersih tanpa query params
 	if redirect := strings.TrimSpace(os.Getenv("AUTH_SUCCESS_REDIRECT_URL")); redirect != "" {
+		// Browser sudah punya Cookie, jadi langsung redirect aja
 		return c.Redirect(redirect)
 	}
 
-	// Return user info, but not the token in the body.
+	// Jika tidak ada redirect URL, return response biasa (opsional)
 	return c.JSON(models.AuthResponse{
-		AccessToken: "", // Ensure token is not sent in the body
+		AccessToken: "", // Kosongkan karena sudah ada di cookie
 		User:        *user,
 	})
 }
@@ -276,4 +303,26 @@ func (h *AuthHandler) GetDevToken(c *fiber.Ctx) error {
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	h.clearAuthCookie(c)
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// Tambahkan Method Baru ini untuk cek session
+// GetMe validates the session cookie and returns the current user
+// @Summary Get Current User
+// @Description Returns the currently logged in user based on the auth cookie
+// @Tags Auth
+// @Success 200 {object} models.User
+// @Router /auth/me [get]
+func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
+    // User ID harusnya sudah di-set oleh AuthMiddleware di c.Locals
+    userID, ok := c.Locals("user_id").(string)
+    if !ok || userID == "" {
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+    }
+
+    user, err := h.authService.GetUserByID(c.Context(), userID)
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+    }
+
+    return c.JSON(user)
 }

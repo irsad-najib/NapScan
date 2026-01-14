@@ -16,12 +16,12 @@ type AuthResponse struct {
 }
 
 type User struct {
-	ID        string    `json:"id" bson:"id"`
-	Email     string    `json:"email" bson:"email"`
-	Name      string    `json:"name" bson:"name"`
-	Picture   string    `json:"picture,omitempty" bson:"picture,omitempty"`
-	CreatedAt time.Time `json:"created_at" bson:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
+	ID        string    `json:"id" gorm:"primaryKey;type:varchar(191)"`
+	Email     string    `json:"email" gorm:"type:varchar(191);uniqueIndex"`
+	Name      string    `json:"name" gorm:"type:varchar(255)"`
+	Picture   string    `json:"picture,omitempty" gorm:"type:text"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type JWTCustomClaims struct {

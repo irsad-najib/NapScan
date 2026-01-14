@@ -9,8 +9,7 @@ services:
       - PORT=5000
       - NODE_ENV=development
       # Database
-      - MONGODB_URI=mongodb://mongodb:27017
-      - MONGODB_DATABASE=napscan
+      - MYSQL_DSN=root:root@tcp(mysql:3306)/napscan?charset=utf8mb4&parseTime=True&loc=Local
       # MobSF (when running via docker compose, use service DNS name, not localhost)
       - MOBSF_BASE_URL=http://mobsf-client:8000
       - MOBSF_API_KEY=${MOBSF_API_KEY}
@@ -24,7 +23,7 @@ services:
     depends_on:
       - gvmd
       - mobsf-client
-      - mongodb
+      - mysql
       - redroid
     networks:
       - napscan-net
@@ -43,14 +42,17 @@ services:
       - ./data11:/data
     networks:
       - napscan-net
-  # MongoDB
-  mongodb:
-    image: mongo:latest
-    container_name: napscan-mongodb
+  # MySQL
+  mysql:
+    image: mysql:8
+    container_name: napscan-mysql
+    environment:
+      - MYSQL_DATABASE=napscan
+      - MYSQL_ROOT_PASSWORD=root
     ports:
-      - "27017:27017"
+      - "3306:3306"
     volumes:
-      - mongodb_data:/data/db
+      - mysql_data:/var/lib/mysql
     restart: unless-stopped
 
   # MobSF
@@ -116,28 +118,28 @@ services:
     image: registry.community.greenbone.net/community/redis-server
     restart: on-failure
     volumes:
-    - ./data/redis_socket_vol:/run/redis/
+      - ./data/redis_socket_vol:/run/redis/
 
   pg-gvm:
     image: registry.community.greenbone.net/community/pg-gvm:stable
     restart: on-failure
     volumes:
-    - ./data/psql_data_vol:/var/lib/postgresql
-    - ./data/psql_socket_vol:/var/run/postgresql
+      - ./data/psql_data_vol:/var/lib/postgresql
+      - ./data/psql_socket_vol:/var/run/postgresql
 
   gvmd:
     image: registry.community.greenbone.net/community/gvmd:stable
     restart: on-failure
     volumes:
-    - ./data/gvmd_data_vol:/var/lib/gvm
-    - ./data/scap_data_vol:/var/lib/gvm/scap-data/
-    - ./data/cert_data_vol:/var/lib/gvm/cert-data
-    - ./data/data_objects_vol:/var/lib/gvm/data-objects/gvmd
-    - ./data/vt_data_vol:/var/lib/openvas/plugins
-    - ./data/psql_data_vol:/var/lib/postgresql
-    - ./data/gvmd_socket_vol:/run/gvmd
-    - ./data/ospd_openvas_socket_vol:/run/ospd
-    - ./data/psql_socket_vol:/var/run/postgresql
+      - ./data/gvmd_data_vol:/var/lib/gvm
+      - ./data/scap_data_vol:/var/lib/gvm/scap-data/
+      - ./data/cert_data_vol:/var/lib/gvm/cert-data
+      - ./data/data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - ./data/vt_data_vol:/var/lib/openvas/plugins
+      - ./data/psql_data_vol:/var/lib/postgresql
+      - ./data/gvmd_socket_vol:/run/gvmd
+      - ./data/ospd_openvas_socket_vol:/run/ospd
+      - ./data/psql_socket_vol:/var/run/postgresql
     depends_on:
       pg-gvm:
         condition: service_started
@@ -158,7 +160,7 @@ services:
     ports:
       - 127.0.0.1:9392:80
     volumes:
-    - ./data/gvmd_socket_vol:/run/gvmd
+      - ./data/gvmd_socket_vol:/run/gvmd
     depends_on:
       - gvmd
   # Sets log level of openvas to the set LOG_LEVEL within the env
@@ -248,13 +250,13 @@ services:
         "666",
       ]
     volumes:
-    - ./data/gpg_data_vol:/etc/openvas/gnupg
-    - ./data/vt_data_vol:/var/lib/openvas/plugins
-    - ./data/notus_data_vol:/var/lib/notus
-    - ./data/ospd_openvas_socket_vol:/run/ospd
-    - ./data/redis_socket_vol:/run/redis/
-    - ./data/openvas_data_vol:/etc/openvas/
-    - ./data/openvas_log_data_vol:/var/log/openvas
+      - ./data/gpg_data_vol:/etc/openvas/gnupg
+      - ./data/vt_data_vol:/var/lib/openvas/plugins
+      - ./data/notus_data_vol:/var/lib/notus
+      - ./data/ospd_openvas_socket_vol:/run/ospd
+      - ./data/redis_socket_vol:/run/redis/
+      - ./data/openvas_data_vol:/etc/openvas/
+      - ./data/openvas_log_data_vol:/var/log/openvas
     depends_on:
       redis-server:
         condition: service_started
@@ -268,24 +270,20 @@ services:
   gvm-tools:
     image: registry.community.greenbone.net/community/gvm-tools
     volumes:
-    - ./data/gvmd_socket_vol:/run/gvmd
-    - ./data/ospd_openvas_socket_vol:/run/ospd
+      - ./data/gvmd_socket_vol:/run/gvmd
+      - ./data/ospd_openvas_socket_vol:/run/ospd
     depends_on:
       - gvmd
       - ospd-openvas
+    networks:
+      - napscan-net
 
-  redroid:
-    image: redroid/redroid:11.0.0-latest
-    container_name: redroid
-    privileged: true
-    pull_policy: always
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5555:5555"
-    volumes:
-      - ./data11:/data
+networks:
+  napscan-net:
+    driver: bridge
 
 volumes:
+  mysql_data:
   gpg_data_vol:
   scap_data_vol:
   cert_data_vol:

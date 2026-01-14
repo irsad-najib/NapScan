@@ -33,6 +33,7 @@ func NewMobSFHandler(scanRepo repository.ScanResultRepository, batchService *ser
 // @Accept multipart/form-data
 // @Security BearerAuth
 // @Produce json
+// @Param batch_id formData string true "Batch ID"
 // @Param file formData file true "File to upload"
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response

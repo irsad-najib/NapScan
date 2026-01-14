@@ -10,6 +10,7 @@ import (
 
 	"napscan-be/internal/handler"
 	"napscan-be/internal/middleware"
+	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
 	"napscan-be/internal/routes"
 	"napscan-be/internal/service"
@@ -40,11 +41,11 @@ import (
 // @securityRequirement BearerAuth
 // main boots the HTTP API server.
 //
-// It loads environment variables from a .env file (if present), establishes a MongoDB connection,
+// It loads environment variables from a .env file (if present), establishes a MySQL connection,
 // wires repositories/services/handlers, registers middleware (logger, recover, CORS), exposes
 // Swagger docs, and mounts API routes under /api (plus a root /health endpoint that also checks
-// MongoDB connectivity). It then starts the Fiber server on PORT (default 5000) and performs a
-// graceful shutdown on SIGINT/SIGTERM, closing MongoDB and stopping the HTTP server.
+// database connectivity). It then starts the Fiber server on PORT (default 5000) and performs a
+// graceful shutdown on SIGINT/SIGTERM, closing the database and stopping the HTTP server.
 //
 // Build behavior: saat di-build (go build), endpoint API tidak “hilang”. Semua route yang didaftarkan
 // di main akan tetap ada di binary hasil build, selama code ini terpanggil dan tidak ada conditional
@@ -55,20 +56,28 @@ func main() {
 		log.Println("No .env file found")
 	}
 
-	// Initialize MongoDB
-	ctx := context.Background()
-	mongoDB, err := database.NewMongoDB(ctx)
+	// Initialize MySQL
+	db, err := database.NewMySQL()
 	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
+		log.Fatalf("Failed to connect to MySQL: %v", err)
 	}
-	defer mongoDB.Close(ctx)
+	log.Println("✅ Connected to MySQL successfully")
 
-	log.Println("✅ Connected to MongoDB successfully")
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("Failed to get sql.DB from GORM: %v", err)
+	}
+
+	// Auto-migrate models
+	err = db.AutoMigrate(&models.User{}, &models.ScanResult{}, &models.Batch{})
+	if err != nil {
+		log.Fatalf("Failed to auto-migrate models: %v", err)
+	}
 
 	// Initialize repositories
-	userRepo := repository.NewMongoDBUserRepository(mongoDB.Database)
-	scanResultRepo := repository.NewMongoDBScanResultRepository(mongoDB.Database)
-	batchRepo := repository.NewMongoDBBatchRepository(mongoDB.Database) // <-- ADD THIS
+	userRepo := repository.NewGormUserRepository(db)
+	scanResultRepo := repository.NewGormScanResultRepository(db)
+	batchRepo := repository.NewGormBatchRepository(db)
 
 	app := fiber.New(fiber.Config{
 		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
@@ -131,8 +140,9 @@ func main() {
 
 	// Health Check Route (public, so defined on `app`, not `api`)
 	app.Get("/health", func(c *fiber.Ctx) error {
-		// Check MongoDB connection
-		if err := mongoDB.Ping(c.Context()); err != nil {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(pingCtx); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"status":   "unhealthy",
 				"database": "disconnected",
@@ -164,14 +174,13 @@ func main() {
 	go func() {
 		<-quit
 		log.Println("Shutting down server...")
-		
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		
-		if err := mongoDB.Close(shutdownCtx); err != nil {
-			log.Printf("Error closing MongoDB: %v", err)
+
+		if err := sqlDB.Close(); err != nil {
+			log.Printf("Error closing MySQL connection: %v", err)
 		}
-		
+
 		if err := app.Shutdown(); err != nil {
 			log.Printf("Error shutting down server: %v", err)
 		}

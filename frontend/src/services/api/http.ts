@@ -54,7 +54,11 @@ const WITH_CREDENTIALS = (
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: Number.isFinite(API_TIMEOUT_MS) ? API_TIMEOUT_MS : 600_000,
-  withCredentials: true, // Always send cookies for auth
+  withCredentials:
+    WITH_CREDENTIALS === "" ||
+    WITH_CREDENTIALS === "1" ||
+    WITH_CREDENTIALS === "true" ||
+    WITH_CREDENTIALS === "yes",
   headers: {
     "Content-Type": "application/json",
   },
@@ -66,7 +70,7 @@ function getCookie(name: string): string | null {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) {
-    return parts.pop()?.split(';').shift() || null;
+    return parts.pop()?.split(";").shift() || null;
   }
   return null;
 }
@@ -74,8 +78,9 @@ function getCookie(name: string): string | null {
 api.interceptors.request.use(
   (config) => {
     // Skip auth header for login endpoints
-    const isLoginEndpoint = config.url?.includes('/auth/google/login') ||
-      config.url?.includes('/auth/google/callback');
+    const isLoginEndpoint =
+      config.url?.includes("/auth/google/login") ||
+      config.url?.includes("/auth/google/callback");
 
     if (isLoginEndpoint) {
       return config;

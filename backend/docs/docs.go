@@ -171,6 +171,23 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/me": {
+            "get": {
+                "description": "Returns the currently logged in user based on the auth cookie",
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Get Current User",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    }
+                }
+            }
+        },
         "/batch/create": {
             "post": {
                 "security": [
@@ -417,6 +434,13 @@ const docTemplate = `{
                 ],
                 "summary": "Upload file for MobSF",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Batch ID",
+                        "name": "batch_id",
+                        "in": "formData",
+                        "required": true
+                    },
                     {
                         "type": "file",
                         "description": "File to upload",
