@@ -54,20 +54,37 @@ const WITH_CREDENTIALS = (
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: Number.isFinite(API_TIMEOUT_MS) ? API_TIMEOUT_MS : 600_000,
-  withCredentials:
-    WITH_CREDENTIALS === "1" ||
-    WITH_CREDENTIALS === "true" ||
-    WITH_CREDENTIALS === "yes",
+  withCredentials: true, // Always send cookies for auth
   headers: {
     "Content-Type": "application/json",
   },
 });
 
+// Helper to get cookie value by name
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) {
+    return parts.pop()?.split(';').shift() || null;
+  }
+  return null;
+}
+
 api.interceptors.request.use(
   (config) => {
-    // Attach JWT token if available (SSR-safe)
+    // Skip auth header for login endpoints
+    const isLoginEndpoint = config.url?.includes('/auth/google/login') ||
+      config.url?.includes('/auth/google/callback');
+
+    if (isLoginEndpoint) {
+      return config;
+    }
+
+    // Attach JWT token from 'napscan' cookie (SSR-safe)
     if (typeof window !== "undefined") {
-      const token = window.localStorage.getItem("napscan_auth_token");
+      const token = getCookie("napscan");
+
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }

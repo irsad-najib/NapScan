@@ -86,14 +86,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         []
     );
 
-    // Initialize Google Sign-In and restore session
-    useEffect(() => {
-        // Restore user from storage
-        const storedUser = getStoredUser();
-        const storedToken = getStoredToken();
+    // Helper to get cookie value
+    const getCookie = (name: string): string | null => {
+        if (typeof document === "undefined") return null;
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) {
+            return parts.pop()?.split(';').shift() || null;
+        }
+        return null;
+    };
 
-        if (storedUser && storedToken) {
-            setUser(storedUser);
+    // Initialize and restore session
+    useEffect(() => {
+        // Check if authenticated via napscan cookie
+        const napScanToken = getCookie("napscan");
+
+        if (napScanToken) {
+            // User is authenticated via cookie - try to get user info from stored data
+            const storedUser = getStoredUser();
+            if (storedUser) {
+                setUser(storedUser);
+            } else {
+                // If we have token but no user, we're still authenticated
+                // The backend will validate the token on API calls
+                setUser({ id: "", email: "", name: "User", picture: "" });
+            }
+        } else {
+            // Fallback to localStorage for backwards compatibility
+            const storedUser = getStoredUser();
+            const storedToken = getStoredToken();
+            if (storedUser && storedToken) {
+                setUser(storedUser);
+            }
         }
         setLoading(false);
 
