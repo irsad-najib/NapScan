@@ -36,6 +36,19 @@ import (
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
+// @description Type "Bearer" followed by a space and a JWT.
+// @securityRequirement BearerAuth
+// main boots the HTTP API server.
+//
+// It loads environment variables from a .env file (if present), establishes a MongoDB connection,
+// wires repositories/services/handlers, registers middleware (logger, recover, CORS), exposes
+// Swagger docs, and mounts API routes under /api (plus a root /health endpoint that also checks
+// MongoDB connectivity). It then starts the Fiber server on PORT (default 5000) and performs a
+// graceful shutdown on SIGINT/SIGTERM, closing MongoDB and stopping the HTTP server.
+//
+// Build behavior: saat di-build (go build), endpoint API tidak “hilang”. Semua route yang didaftarkan
+// di main akan tetap ada di binary hasil build, selama code ini terpanggil dan tidak ada conditional
+// compilation/build tags atau config runtime yang sengaja men-disable route tertentu.
 func main() {
 	// load .env if present
 	if err := godotenv.Load(); err != nil {
@@ -54,6 +67,8 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewMongoDBUserRepository(mongoDB.Database)
+	scanResultRepo := repository.NewMongoDBScanResultRepository(mongoDB.Database)
+	batchRepo := repository.NewMongoDBBatchRepository(mongoDB.Database) // <-- ADD THIS
 
 	app := fiber.New(fiber.Config{
 		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
@@ -76,9 +91,21 @@ func main() {
 	app.Use(middleware.CORSMiddleware())
 
 	// Swagger
-	app.Get("api/swagger/*", fiberSwagger.New())
+	app.Get("/api/swagger/*", fiberSwagger.New())
 
+	// Auth routes are public and should NOT be under the protected /api group
+	authService := service.NewAuthService(userRepo)
+	authHandler := handler.NewAuthHandler(authService)
+	// We group them under /api for path consistency, but on the main `app` instance
+	// so they don't inherit the auth middleware.
+	authRoutes := app.Group("/api")
+	routes.AuthRoutes(authRoutes, authHandler)
+
+	// API group with authentication middleware for all other routes
 	api := app.Group("/api")
+
+	// Terapkan middleware otentikasi
+	api.Use(middleware.AuthMiddleware())
 
 	// Services
 	nmapService := service.NewNmapService()
@@ -87,21 +114,22 @@ func main() {
 	ffufService := service.NewFfufService()
 	openvasService := service.NewOpenVASService()
 	sslyzeService := service.NewSslyzeService()
+	batchService := service.NewBatchService(batchRepo) // <-- UPDATE THIS
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler()
-	nmapHandler := handler.NewNmapHandler(nmapService)
-	nucleiHandler := handler.NewNucleiHandler(nucleiService)
-	zapHandler := handler.NewZapHandler(zapService)
-	ffufHandler := handler.NewFfufHandler(ffufService)
-	openvasHandler := handler.NewOpenVASHandler(openvasService)
-	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService)
-	
-	// Auth & Batch Handlers
-	authService := service.NewAuthService(userRepo)
-	authHandler := handler.NewAuthHandler(authService)
+	nmapHandler := handler.NewNmapHandler(nmapService, scanResultRepo, batchService) // <-- UPDATE THIS
+	nucleiHandler := handler.NewNucleiHandler(nucleiService, scanResultRepo, batchService)
+	zapHandler := handler.NewZapHandler(zapService, scanResultRepo, batchService)
+	ffufHandler := handler.NewFfufHandler(ffufService, scanResultRepo, batchService)
+	openvasHandler := handler.NewOpenVASHandler(openvasService, scanResultRepo, batchService)
+	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService, scanResultRepo, batchService)
+	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService)
 
-	// Health Check Route with MongoDB status
+	// Auth & Batch Handlers
+	batchHandler := handler.NewBatchHandler(batchService) // <-- UPDATE THIS
+
+	// Health Check Route (public, so defined on `app`, not `api`)
 	app.Get("/health", func(c *fiber.Ctx) error {
 		// Check MongoDB connection
 		if err := mongoDB.Ping(c.Context()); err != nil {
@@ -119,17 +147,15 @@ func main() {
 	})
 	api.Get("/health", healthHandler.Check)
 
-	// Routes
-	routes.MobSFRoutes(api)
+	// Routes (now protected by middleware)
+	routes.MobSFRoutes(api, mobsfHandler)
 	routes.NmapRoutes(api, nmapHandler)
 	routes.NucleiRoutes(api, nucleiHandler)
 	routes.ZapRoutes(api, zapHandler)
 	routes.FfufRoutes(api, ffufHandler)
 	routes.OpenVASRoutes(api, openvasHandler)
 	routes.SslyzeRoutes(api, sslyzeHandler)
-
-	// Auth & Batch Routes
-	routes.AuthRoutes(app, authHandler)
+	routes.BatchRoutes(api, batchHandler) // <-- Batch routes are now protected
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)

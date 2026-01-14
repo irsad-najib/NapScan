@@ -6,8 +6,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func MobSFRoutes(router fiber.Router) {
+func MobSFRoutes(router fiber.Router, h *handler.MobSFHandler) {
 	mobsf := router.Group("/mobsf")
-	mobsf.Post("/upload", handler.UploadMobSFFile)
-	mobsf.Post("/scan", handler.StartMobSFScan)
+	mobsf.Post("/upload", h.UploadMobSFFile)
+	mobsf.Post("/scan", h.StartMobSFScan)
 }

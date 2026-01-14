@@ -12,6 +12,33 @@ definitions:
       user:
         $ref: '#/definitions/models.User'
     type: object
+  models.Batch:
+    properties:
+      analysis_result: {}
+      batch_id:
+        type: string
+      created_at:
+        type: string
+      expected_count:
+        type: integer
+      received_count:
+        type: integer
+      results:
+        additionalProperties: true
+        type: object
+      status:
+        $ref: '#/definitions/models.BatchStatus'
+      user_id:
+        type: string
+    type: object
+  models.BatchStatus:
+    enum:
+    - processing
+    - complete
+    type: string
+    x-enum-varnames:
+    - BatchStatusProcessing
+    - BatchStatusComplete
   models.GoogleAuthRequest:
     properties:
       id_token:
@@ -28,6 +55,9 @@ definitions:
     type: object
   models.MobSFScanRequest:
     properties:
+      batch_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
       file_name:
         example: app.apk
         type: string
@@ -103,6 +133,8 @@ definitions:
     type: object
   service.CombinedScanResponse:
     properties:
+      batch_id:
+        type: string
       tcp:
         $ref: '#/definitions/models.NmapRun'
       udp:
@@ -119,6 +151,38 @@ info:
   title: Napscan API
   version: "1.0"
 paths:
+  /auth/dev/get-token:
+    get:
+      description: Generates a JWT for a test user (e.g., user_id '1'). Only for development.
+      parameters:
+      - default: "1"
+        description: User ID to generate token for
+        in: query
+        name: user_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ' email':
+                type: string
+              ' name':
+                type: string
+              ' user_id':
+                type: string
+              access_token:
+                type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Get Development Token
+      tags:
+      - Auth
   /auth/google:
     post:
       consumes:
@@ -184,6 +248,57 @@ paths:
       summary: Logout
       tags:
       - Auth
+  /batch/create:
+    post:
+      description: Generate a unique batch ID for the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              batch_id:
+                type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Create Batch ID
+      tags:
+      - Batch
+  /batch/list:
+    get:
+      description: Get a list of all batches created by the current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Batch'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get User Batches
+      tags:
+      - Batch
   /ffuf/scan:
     post:
       consumes:
@@ -196,6 +311,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -214,6 +331,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start FFUF Scan
       tags:
       - FFUF
@@ -230,6 +349,8 @@ paths:
           schema:
             additionalProperties: true
             type: object
+      security:
+      - BearerAuth: []
       summary: Health Check
       tags:
       - Health
@@ -264,6 +385,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start MobSF Scan
       tags:
       - MobSF
@@ -293,6 +416,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Upload file for MobSF
       tags:
       - MobSF
@@ -308,6 +433,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -326,6 +453,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start Nmap Full Scan
       tags:
       - Nmap
@@ -341,6 +470,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -359,6 +490,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start Nuclei Scan
       tags:
       - Nuclei
@@ -385,6 +518,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Get Scan Report
       tags:
       - OpenVAS
@@ -400,6 +535,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -418,6 +555,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start OpenVAS Scan
       tags:
       - OpenVAS
@@ -444,6 +583,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Get Task Status
       tags:
       - OpenVAS
@@ -463,6 +604,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Get OpenVAS Version
       tags:
       - OpenVAS
@@ -478,6 +621,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -496,6 +641,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start SSLyze Scan
       tags:
       - SSLyze
@@ -511,6 +658,8 @@ paths:
         required: true
         schema:
           properties:
+            batch_id:
+              type: string
             target:
               type: string
           type: object
@@ -529,11 +678,14 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
       summary: Start ZAP Scan
       tags:
       - ZAP
 securityDefinitions:
   BearerAuth:
+    description: Type "Bearer" followed by a space and a JWT.
     in: header
     name: Authorization
     type: apiKey

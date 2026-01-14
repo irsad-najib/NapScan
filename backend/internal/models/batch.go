@@ -12,14 +12,14 @@ const (
 
 // Batch represents the aggregated state of multiple API requests
 type Batch struct {
-	UserID         string                 `json:"user_id"`
-	BatchID        string                 `json:"batch_id"`
-	ExpectedCount  int                    `json:"expected_count"`
-	ReceivedCount  int                    `json:"received_count"`
-	Results        map[string]interface{} `json:"results"`
-	Status         BatchStatus            `json:"status"`
-	AnalysisResult interface{}            `json:"analysis_result,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
+	UserID         string                 `json:"user_id" bson:"user_id"`
+	BatchID        string                 `json:"batch_id" bson:"batch_id"`
+	ExpectedCount  int                    `json:"expected_count" bson:"expected_count"`
+	ReceivedCount  int                    `json:"received_count" bson:"received_count"`
+	Results        map[string]interface{} `json:"results" bson:"results"`
+	Status         BatchStatus            `json:"status" bson:"status"`
+	AnalysisResult interface{}            `json:"analysis_result,omitempty" bson:"analysis_result,omitempty"`
+	CreatedAt      time.Time              `json:"created_at" bson:"created_at"`
 }
 
 // BatchRequest represents the input for fan-in endpoints

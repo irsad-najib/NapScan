@@ -68,7 +68,7 @@ func (s *MobSFService) setAuthHeaders(req *http.Request) {
 	req.Header.Set("X-Mobsf-Api-Key", apiKey)
 }
 
-func (s *MobSFService) doJSONRequest(ctx context.Context, req *http.Request) (map[string]interface{}, error) {
+func (s *MobSFService) doJSONRequest(_ context.Context, req *http.Request) (map[string]interface{}, error) {
 	start := time.Now()
 	s.setAuthHeaders(req)
 

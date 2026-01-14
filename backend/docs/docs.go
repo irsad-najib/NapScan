@@ -22,6 +22,55 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/auth/dev/get-token": {
+            "get": {
+                "description": "Generates a JWT for a test user (e.g., user_id '1'). Only for development.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Get Development Token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "1",
+                        "description": "User ID to generate token for",
+                        "name": "user_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                " email": {
+                                    "type": "string"
+                                },
+                                " name": {
+                                    "type": "string"
+                                },
+                                " user_id": {
+                                    "type": "string"
+                                },
+                                "access_token": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/google": {
             "post": {
                 "description": "Validates Google ID token sent from Frontend and issues JWT",
@@ -122,8 +171,95 @@ const docTemplate = `{
                 }
             }
         },
+        "/batch/create": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Generate a unique batch ID for the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Batch"
+                ],
+                "summary": "Create Batch ID",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/batch/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a list of all batches created by the current user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Batch"
+                ],
+                "summary": "Get User Batches",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Batch"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/ffuf/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run directory fuzzing using FFUF",
                 "consumes": [
                     "application/json"
@@ -144,6 +280,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -175,6 +314,11 @@ const docTemplate = `{
         },
         "/health": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Checks if the server is running",
                 "consumes": [
                     "application/json"
@@ -199,6 +343,11 @@ const docTemplate = `{
         },
         "/mobsf/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Initiates a scan in MobSF for the uploaded file",
                 "consumes": [
                     "application/json"
@@ -251,6 +400,11 @@ const docTemplate = `{
         },
         "/mobsf/upload": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Upload APK/IPA/ZIP file for analysis",
                 "consumes": [
                     "multipart/form-data"
@@ -295,6 +449,11 @@ const docTemplate = `{
         },
         "/nmap/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run parallel TCP and UDP Nmap scans on a target",
                 "consumes": [
                     "application/json"
@@ -315,6 +474,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -346,6 +508,11 @@ const docTemplate = `{
         },
         "/nuclei/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run Nuclei scan on a target",
                 "consumes": [
                     "application/json"
@@ -366,6 +533,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -397,6 +567,11 @@ const docTemplate = `{
         },
         "/openvas/report/{reportId}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get report details parsed as JSON",
                 "consumes": [
                     "application/json"
@@ -436,6 +611,11 @@ const docTemplate = `{
         },
         "/openvas/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Create target, task, and start scan",
                 "consumes": [
                     "application/json"
@@ -456,6 +636,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -487,6 +670,11 @@ const docTemplate = `{
         },
         "/openvas/task/{taskId}/status": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get details of a task especially progress and report ID",
                 "consumes": [
                     "application/json"
@@ -526,6 +714,11 @@ const docTemplate = `{
         },
         "/openvas/version": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Check OpenVAS connectivity and version",
                 "consumes": [
                     "application/json"
@@ -555,6 +748,11 @@ const docTemplate = `{
         },
         "/sslyze/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run SSL/TLS configuration analysis",
                 "consumes": [
                     "application/json"
@@ -575,6 +773,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -606,6 +807,11 @@ const docTemplate = `{
         },
         "/zap/scan": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run ZAP Spider and Active Scan",
                 "consumes": [
                     "application/json"
@@ -626,6 +832,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "batch_id": {
+                                    "type": "string"
+                                },
                                 "target": {
                                     "type": "string"
                                 }
@@ -676,6 +885,45 @@ const docTemplate = `{
                 }
             }
         },
+        "models.Batch": {
+            "type": "object",
+            "properties": {
+                "analysis_result": {},
+                "batch_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expected_count": {
+                    "type": "integer"
+                },
+                "received_count": {
+                    "type": "integer"
+                },
+                "results": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "status": {
+                    "$ref": "#/definitions/models.BatchStatus"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.BatchStatus": {
+            "type": "string",
+            "enum": [
+                "processing",
+                "complete"
+            ],
+            "x-enum-varnames": [
+                "BatchStatusProcessing",
+                "BatchStatusComplete"
+            ]
+        },
         "models.GoogleAuthRequest": {
             "type": "object",
             "properties": {
@@ -701,6 +949,10 @@ const docTemplate = `{
         "models.MobSFScanRequest": {
             "type": "object",
             "properties": {
+                "batch_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
                 "file_name": {
                     "type": "string",
                     "example": "app.apk"
@@ -815,6 +1067,9 @@ const docTemplate = `{
         "service.CombinedScanResponse": {
             "type": "object",
             "properties": {
+                "batch_id": {
+                    "type": "string"
+                },
                 "tcp": {
                     "$ref": "#/definitions/models.NmapRun"
                 },
@@ -826,6 +1081,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and a JWT.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
