@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { scannersApi, ToolKey } from "@/services/api";
+import { scannersApi, batchApi, ToolKey } from "@/services/api";
 import { parseToolResults } from "@/utils/toolParsers";
 
 // --- Types ---
@@ -106,9 +106,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // --- OpenVAS Dedicated Handler (3-step async flow) ---
-    const executeOpenVAS = async (scanId: string, target: string) => {
+    const executeOpenVAS = async (scanId: string, target: string, batchId?: string) => {
         const tool: ToolKey = "openvas";
-        console.log(`[OpenVAS] Starting scan for target: ${target}`);
+        console.log(`[OpenVAS] Starting scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
 
         updateToolStatus(scanId, tool, {
             status: "running",
@@ -119,7 +119,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         try {
             // Step 1: Start Scan
             console.log(`[OpenVAS] Step 1: Starting scan...`);
-            const startRes = await scannersApi.openvas.scan(target);
+            const startRes = await scannersApi.openvas.scan(target, undefined, batchId);
             console.log(`[OpenVAS] Start response:`, startRes);
 
             if (!startRes.ok) {
@@ -225,9 +225,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // --- MobSF Dedicated Handler (2-step async flow: upload + scan) ---
-    const executeMobSF = async (scanId: string, apkFile: File) => {
+    const executeMobSF = async (scanId: string, apkFile: File, batchId?: string) => {
         const tool: ToolKey = "mobsf";
-        console.log(`[MobSF] Starting scan for APK: ${apkFile.name}`);
+        console.log(`[MobSF] Starting scan for APK: ${apkFile.name}${batchId ? `, batchId: ${batchId}` : ''}`);
 
         updateToolStatus(scanId, tool, {
             status: "running",
@@ -240,7 +240,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             console.log(`[MobSF] Step 1: Uploading APK file...`);
             updateToolStatus(scanId, tool, { progress: 10 });
 
-            const uploadRes = await scannersApi.mobsf.upload(apkFile);
+            const uploadRes = await scannersApi.mobsf.upload(apkFile, batchId);
             console.log(`[MobSF] Upload response:`, uploadRes);
 
             if (!uploadRes.ok) {
@@ -262,9 +262,14 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             console.log(`[MobSF] APK uploaded - hash: ${hash}, file: ${fileName}, type: ${scanType}`);
             updateToolStatus(scanId, tool, { progress: 40 });
 
-            // Step 2: Scan using hash, file_name, scan_type
+            // Step 2: Scan using hash, file_name, scan_type, batch_id
             console.log(`[MobSF] Step 2: Starting scan...`);
-            const scanRes = await scannersApi.mobsf.scan({ hash, file_name: fileName, scan_type: scanType });
+            const scanRes = await scannersApi.mobsf.scan({
+                hash,
+                file_name: fileName,
+                scan_type: scanType,
+                ...(batchId && { batch_id: batchId })
+            });
             console.log(`[MobSF] Scan response:`, scanRes);
 
             if (!scanRes.ok) {
@@ -309,10 +314,10 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // --- Generic Tool Executor ---
-    const executeTool = async (scanId: string, tool: ToolKey, target: string, apkFile?: File) => {
+    const executeTool = async (scanId: string, tool: ToolKey, target: string, apkFile?: File, batchId?: string) => {
         // OpenVAS has its own dedicated async handler
         if (tool === "openvas") {
-            return executeOpenVAS(scanId, target);
+            return executeOpenVAS(scanId, target, batchId);
         }
 
         // MobSF has its own dedicated async handler
@@ -326,7 +331,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 });
                 return;
             }
-            return executeMobSF(scanId, apkFile);
+            return executeMobSF(scanId, apkFile, batchId);
         }
 
         // Mark tool as running
@@ -340,19 +345,19 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             let result;
             switch (tool) {
                 case "nmap":
-                    result = await scannersApi.nmap.scan(target);
+                    result = await scannersApi.nmap.scan(target, batchId);
                     break;
                 case "zap":
-                    result = await scannersApi.zap.scan(target);
+                    result = await scannersApi.zap.scan(target, batchId);
                     break;
                 case "nuclei":
-                    result = await scannersApi.nuclei.scan(target);
+                    result = await scannersApi.nuclei.scan(target, batchId);
                     break;
                 case "sslyze":
-                    result = await scannersApi.sslyze.scan(target);
+                    result = await scannersApi.sslyze.scan(target, batchId);
                     break;
                 case "ffuf":
-                    result = await scannersApi.ffuf.scan(target);
+                    result = await scannersApi.ffuf.scan(target, batchId);
                     break;
                 default:
                     throw new Error(`Unknown tool: ${tool}`);
@@ -464,10 +469,36 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
         setScans((prev) => [newScan, ...prev]);
 
-        // Start tools in "background" (no await here)
-        // We execute them individually so they update independently
+        // Step 1: Create a batch first
+        let batchId: string | undefined;
+        try {
+            console.log(`[ScanContext] Creating batch...`);
+            const batchRes = await batchApi.create();
+            console.log(`[ScanContext] Batch create response:`, batchRes);
+
+            if (batchRes.ok && batchRes.data) {
+                // Response is { batch_id: "xxx" }
+                batchId = batchRes.data.batch_id;
+
+                if (batchId) {
+                    console.log(`[ScanContext] ✅ Batch created with ID: ${batchId}`);
+                } else {
+                    console.error(`[ScanContext] ❌ batch_id not found in response:`, batchRes.data);
+                }
+            } else {
+                console.error(`[ScanContext] ❌ Batch create failed:`, batchRes);
+            }
+        } catch (err) {
+            console.error(`[ScanContext] ❌ Error creating batch:`, err);
+        }
+
+        if (!batchId) {
+            console.warn(`[ScanContext] ⚠️ Proceeding without batchId - scans may fail if backend requires it`);
+        }
+
+        // Step 2: Start tools in "background" with batchId
         selectedTools.forEach((tool) => {
-            executeTool(newScanId, tool, target, apkFile).then(() => {
+            executeTool(newScanId, tool, target, apkFile, batchId).then(() => {
                 // Check if all tools finished
                 setScans((currentScans) => {
                     const s = currentScans.find(scan => scan.id === newScanId);

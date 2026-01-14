@@ -65,6 +65,7 @@ export type MobSFScanRequest = {
   hash: string;
   file_name: string;
   scan_type: string;
+  batch_id?: string;
 };
 
 export type MobSFScanResponse = {
@@ -97,49 +98,64 @@ function ensureNonEmptyTarget(target: string): string {
   return t;
 }
 
+// Batch Types
+export type BatchCreateResponse = {
+  batch_id: string;
+};
+
+// Batch API
+export const batchApi = {
+  create: async (): Promise<ApiResult<BatchCreateResponse>> =>
+    request<BatchCreateResponse>({
+      method: "POST",
+      url: "/api/batch/create",
+      // No body required
+    }),
+};
+
 export const scannersApi = {
   nmap: {
-    scan: async (target: string): Promise<ApiResult<NmapScanResponse>> =>
+    scan: async (target: string, batchId?: string): Promise<ApiResult<NmapScanResponse>> =>
       request<NmapScanResponse>({
         method: "POST",
         url: "/api/nmap/scan",
-        data: { target: ensureNonEmptyTarget(target) },
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
   },
 
   ffuf: {
-    scan: async (target: string): Promise<ApiResult<unknown>> =>
+    scan: async (target: string, batchId?: string): Promise<ApiResult<unknown>> =>
       request<unknown>({
         method: "POST",
         url: "/api/ffuf/scan",
-        data: { target: ensureNonEmptyTarget(target) },
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
   },
 
   nuclei: {
-    scan: async (target: string): Promise<ApiResult<NucleiScanResponse>> =>
+    scan: async (target: string, batchId?: string): Promise<ApiResult<NucleiScanResponse>> =>
       request<NucleiScanResponse>({
         method: "POST",
         url: "/api/nuclei/scan",
-        data: { target: ensureNonEmptyTarget(target) },
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
   },
 
   sslyze: {
-    scan: async (target: string): Promise<ApiResult<unknown>> =>
+    scan: async (target: string, batchId?: string): Promise<ApiResult<unknown>> =>
       request<unknown>({
         method: "POST",
         url: "/api/sslyze/scan",
-        data: { target: ensureNonEmptyTarget(target) },
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
   },
 
   zap: {
-    scan: async (target: string): Promise<ApiResult<ZapScanResponse>> =>
+    scan: async (target: string, batchId?: string): Promise<ApiResult<ZapScanResponse>> =>
       request<ZapScanResponse>({
         method: "POST",
         url: "/api/zap/scan",
-        data: { target: ensureNonEmptyTarget(target) },
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
   },
 
@@ -156,7 +172,8 @@ export const scannersApi = {
 
     scan: async (
       target: string,
-      name?: string
+      name?: string,
+      batchId?: string
     ): Promise<ApiResult<OpenVASStartScanResponse>> =>
       request<OpenVASStartScanResponse>({
         method: "POST",
@@ -164,6 +181,7 @@ export const scannersApi = {
         data: {
           target: ensureNonEmptyTarget(target),
           ...(name && name.trim() ? { name: name.trim() } : {}),
+          ...(batchId && { batch_id: batchId }),
         },
       }),
 
@@ -186,9 +204,12 @@ export const scannersApi = {
 
   mobsf: {
     // Step 1: Upload APK file
-    upload: async (file: File): Promise<ApiResult<MobSFUploadResponse>> => {
+    upload: async (file: File, batchId?: string): Promise<ApiResult<MobSFUploadResponse>> => {
       const formData = new FormData();
       formData.append("file", file);
+      if (batchId) {
+        formData.append("batch_id", batchId);
+      }
 
       return request<MobSFUploadResponse>({
         method: "POST",
