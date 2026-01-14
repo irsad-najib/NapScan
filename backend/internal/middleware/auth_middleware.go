@@ -50,6 +50,25 @@ func AuthMiddleware() fiber.Handler {
 				strings.TrimSpace(c.Cookies(cookieName)) != "",
 			)
 		}
+
+		// Extra, targeted debug for /api/auth/me: show whether auth inputs exist.
+		// We NEVER log the raw token; only presence/length.
+		if cookieDebug && c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/api/auth/me") {
+			cookieVal := strings.TrimSpace(c.Cookies(cookieName))
+			authHeader := strings.TrimSpace(c.Get("Authorization"))
+			hasBearer := strings.HasPrefix(authHeader, "Bearer ") && len(strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))) > 0
+			bearerLen := 0
+			if hasBearer {
+				bearerLen = len(strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer ")))
+			}
+			log.Printf("[AUTH_ME_DEBUG] cookie_present=%v cookie_len=%d bearer_present=%v bearer_len=%d",
+				cookieVal != "",
+				len(cookieVal),
+				hasBearer,
+				bearerLen,
+			)
+		}
+
 		tokenString := strings.TrimSpace(c.Cookies(cookieName))
 
 		// Fallback to Authorization header for API clients (like Swagger)
@@ -64,6 +83,9 @@ func AuthMiddleware() fiber.Handler {
 		}
 
 		if tokenString == "" {
+			if cookieDebug && c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/api/auth/me") {
+				log.Printf("[AUTH_ME_DEBUG] unauthorized: no cookie and no bearer")
+			}
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Missing authentication token",
 			})
@@ -84,6 +106,9 @@ func AuthMiddleware() fiber.Handler {
 		})
 
 		if err != nil || !token.Valid {
+			if cookieDebug && c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/api/auth/me") {
+				log.Printf("[AUTH_ME_DEBUG] jwt_invalid valid=%v err=%v", token != nil && token.Valid, err)
+			}
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid or expired token",
 			})
@@ -100,6 +125,9 @@ func AuthMiddleware() fiber.Handler {
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
 		c.Locals("name", claims.Name)
+		if cookieDebug && c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/api/auth/me") {
+			log.Printf("[AUTH_ME_DEBUG] ok user_id=%q", claims.UserID)
+		}
 
 		return c.Next()
 	}

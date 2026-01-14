@@ -82,6 +82,16 @@ func main() {
 	app := fiber.New(fiber.Config{
 		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
 		BodyLimit: 100 * 1024 * 1024,
+		
+		// Disable startup message untuk development yang lebih bersih
+		DisableStartupMessage: false,
+		
+		// Reduce server header untuk keamanan
+		ServerHeader: "",
+		
+		// Enable prefork untuk performance (optional, bisa di-disable untuk debugging)
+		// Prefork: true,
+		
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {

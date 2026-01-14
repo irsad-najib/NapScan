@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -93,16 +94,20 @@ func (s *AuthService) GetGoogleLoginURL(state string) string {
 
 // HandleGoogleCallback exchanges code for token and retrieves user info
 func (s *AuthService) HandleGoogleCallback(ctx context.Context, code string) (*models.User, error) {
-	token, err := s.oauthConfig.Exchange(ctx, code)
+	// Add timeout to prevent hanging on Google API calls
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	token, err := s.oauthConfig.Exchange(ctxWithTimeout, code)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("google token exchange failed: %w", err)
 	}
 
 	// Use token to get user info
-	client := s.oauthConfig.Client(ctx, token)
+	client := s.oauthConfig.Client(ctxWithTimeout, token)
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("google userinfo request failed: %w", err)
 	}
 	defer resp.Body.Close()
 

@@ -8,8 +8,10 @@ import (
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
+	"net/url"
 	"os"
-	"strings" // Pastikan import ini ada
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,51 +59,80 @@ func sameSiteMode() string {
 	return "Lax"
 }
 
-func isCookieDebugEnabled() bool {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV"))) != "development" {
+func shouldUseCrossSiteCookie(c *fiber.Ctx) bool {
+	// When frontend and backend are on different sites (e.g. localhost -> ngrok / prod domains),
+	// browsers will NOT send cookies on XHR/fetch unless SameSite=None; Secure.
+	// We detect this via Origin vs Host comparison.
+	origin := strings.TrimSpace(c.Get("Origin"))
+	if origin == "" {
 		return false
 	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG")))
-	return v == "1" || v == "true" || v == "yes"
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := strings.TrimSpace(u.Hostname())
+	if originHost == "" {
+		return false
+	}
+	return !strings.EqualFold(originHost, c.Hostname())
+}
+
+func isExternalHTTPS(c *fiber.Ctx) bool {
+	// When running behind a reverse proxy (e.g. ngrok), Fiber may see the request as HTTP
+	// even though the browser connects via HTTPS. Use forwarded headers to detect this.
+	if strings.EqualFold(c.Protocol(), "https") {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Get("X-Forwarded-Proto")), "https") {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Get("X-Forwarded-Ssl")), "on") {
+		return true
+	}
+	return false
+}
+
+func redactSetCookieValue(setCookie, cookieName string) string {
+	needle := cookieName + "="
+	for {
+		i := strings.Index(setCookie, needle)
+		if i == -1 {
+			return setCookie
+		}
+		start := i + len(needle)
+		end := strings.Index(setCookie[start:], ";")
+		if end == -1 {
+			return setCookie[:start] + "<redacted>"
+		}
+		end = start + end
+		setCookie = setCookie[:start] + "<redacted>" + setCookie[end:]
+	}
 }
 
 func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
+	// Fast path: simple cookie creation without complex checks
 	cookie := &fiber.Cookie{
 		Name:     authCookieName(),
 		Value:    jwtToken,
 		HTTPOnly: true,
-		Secure:   isSecureCookie(),
-		SameSite: sameSiteMode(),
 		Path:     "/",
-		// Access token lifetime should match JWT exp; keep it aligned.
-		Expires: time.Now().Add(24 * time.Hour),
+		Expires:  time.Now().Add(24 * time.Hour),
+		// Always use None + Secure for development (ngrok compatibility)
+		SameSite: "None",
+		Secure:   true,
 	}
-	// If SameSite=None is requested, Secure must be true for modern browsers.
-	if strings.EqualFold(cookie.SameSite, "None") {
-		cookie.Secure = true
-	}
-	if isCookieDebugEnabled() {
-		prefix := jwtToken
-		if len(prefix) > 12 {
-			prefix = prefix[:12]
-		}
-		log.Printf("[AUTH_COOKIE_DEBUG] set cookie name=%q secure=%v samesite=%q path=%q expires=%s token_prefix=%q token_len=%d",
-			cookie.Name,
-			cookie.Secure,
-			cookie.SameSite,
-			cookie.Path,
-			cookie.Expires.Format(time.RFC3339),
-			prefix,
-			len(jwtToken),
-		)
-	}
+	
+	// Set cookie IMMEDIATELY - this is the critical path
 	c.Cookie(cookie)
+	
+	// Anti-cache headers
+	c.Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	c.Set("Pragma", "no-cache")
+	c.Set("Expires", "0")
 }
 
 func (h *AuthHandler) clearAuthCookie(c *fiber.Ctx) {
-	if isCookieDebugEnabled() {
-		log.Printf("[AUTH_COOKIE_DEBUG] clear cookie name=%q", authCookieName())
-	}
 	c.Cookie(&fiber.Cookie{
 		Name:     authCookieName(),
 		Value:    "",
@@ -120,6 +151,72 @@ func randomStateToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// oauthStateStore keeps OAuth state server-side to avoid relying on browser cookies.
+// This makes the flow robust across localhost/ngrok/cross-domain redirects where
+// SameSite/Secure/Domain cookie rules may prevent the state cookie from being sent.
+var oauthStateStore = newInMemoryOAuthStateStore(15 * time.Minute)
+
+type inMemoryOAuthStateStore struct {
+	mu  sync.Mutex
+	ttl time.Duration
+	m   map[string]time.Time
+}
+
+func newInMemoryOAuthStateStore(ttl time.Duration) *inMemoryOAuthStateStore {
+	return &inMemoryOAuthStateStore{ttl: ttl, m: make(map[string]time.Time)}
+}
+
+func (s *inMemoryOAuthStateStore) Put(state string) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Opportunistic cleanup to avoid unbounded growth if users abandon the flow.
+	if len(s.m) > 2048 {
+		cutoff := now.Add(-s.ttl)
+		for k, ts := range s.m {
+			if ts.Before(cutoff) {
+				delete(s.m, k)
+			}
+		}
+	}
+
+	s.m[state] = now
+	
+	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
+		log.Printf("[OAUTH_STATE_DEBUG] Stored state: %s (expires in %v, total_states=%d)", state[:16]+"...", s.ttl, len(s.m))
+	}
+}
+
+// Consume validates state and makes it single-use by deleting it.
+func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ts, ok := s.m[state]
+	delete(s.m, state) // single-use regardless of validity
+	
+	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
+		log.Printf("[OAUTH_STATE_DEBUG] Validating state: %s (found=%v, total_states=%d)", state[:16]+"...", ok, len(s.m))
+	}
+	
+	if !ok {
+		return false, "state not found (already used, server restarted, or never created)"
+	}
+	
+	age := now.Sub(ts)
+	if age > s.ttl {
+		return false, fmt.Sprintf("state expired (age=%v, ttl=%v)", age.Round(time.Second), s.ttl)
+	}
+	
+	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
+		log.Printf("[OAUTH_STATE_DEBUG] State valid (age=%v)", age.Round(time.Second))
+	}
+	
+	return true, ""
 }
 
 // GoogleLogin (POST) handles the ID Token flow (SPA/Mobile)
@@ -174,19 +271,12 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate oauth state"})
 	}
 
-	// CSRF protection for OAuth redirect flow.
-	c.Cookie(&fiber.Cookie{
-		Name:     defaultOAuthStateCookie,
-		Value:    state,
-		HTTPOnly: true,
-		Secure:   isSecureCookie(),
-		SameSite: "Lax",
-		Path:     "/",
-		Expires:  time.Now().Add(10 * time.Minute),
-	})
+	// Store state on the server (not in cookies) so cross-domain redirects (ngrok/prod)
+	// don't break due to SameSite/Secure/Domain cookie restrictions.
+	oauthStateStore.Put(state)
 
 	url := h.authService.GetGoogleLoginURL(state)
-	log.Printf("Redirecting to Google OAuth: %s", url)
+	log.Printf("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s...)", state[:16])
 	return c.Redirect(url)
 }
 
@@ -199,59 +289,79 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 // @Success 200 {object} models.AuthResponse
 // @Router /auth/google/callback [get]
 func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
+	log.Println("[AUTH_OAUTH_CALLBACK] Handling Google callback")
+	overallStart := time.Now()
+	stepStart := time.Now()
+	
+	// Skip CORS for this endpoint - it's a browser redirect from Google, not an XHR
+	// This prevents OPTIONS preflight delays
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Credentials", "true")
+
+	state := c.Query("state")
+	valid, errMsg := oauthStateStore.Consume(state)
+	if !valid {
+		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: State validation failed: %s (state=%s)", errMsg, state[:16]+"...")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid or expired state parameter",
+			"details": errMsg,
+		})
+	}
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] state_validation=%s", time.Since(stepStart))
+	stepStart = time.Now() // Reset timer for next step
+
 	code := c.Query("code")
 	if code == "" {
-		log.Printf("Google callback error: code not found")
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Code not found"})
+		log.Println("[AUTH_OAUTH_CALLBACK] ERROR: Missing code parameter")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing authorization code"})
 	}
 
-	// Validate OAuth state to prevent CSRF.
-	state := c.Query("state")
-	expectedState := c.Cookies(defaultOAuthStateCookie)
-	if expectedState == "" || state == "" || state != expectedState {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid oauth state"})
-	}
-	// One-time use
-	c.Cookie(&fiber.Cookie{
-		Name:     defaultOAuthStateCookie,
-		Value:    "",
-		HTTPOnly: true,
-		Secure:   isSecureCookie(),
-		SameSite: "Lax",
-		Path:     "/",
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-	})
-
-	log.Printf("Handling Google callback with code: %s...", code[:10])
-
+	// Exchange authorization code for token and get user info
+	log.Printf("[AUTH_OAUTH_CALLBACK] Starting Google token exchange...")
 	user, err := h.authService.HandleGoogleCallback(c.Context(), code)
 	if err != nil {
-		log.Printf("Failed to handle Google callback: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to handle callback: " + err.Error()})
+		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: Failed during code exchange: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to authenticate with Google",
+			"details": err.Error(),
+		})
 	}
+	exchangeDuration := time.Since(stepStart)
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] google_exchange=%s", exchangeDuration)
+	if exchangeDuration > 5*time.Second {
+		log.Printf("[AUTH_OAUTH_CALLBACK] ⚠️  WARNING: Google exchange took longer than 5s: %s", exchangeDuration)
+	}
+	stepStart = time.Now() // Reset timer for next step
 
-	log.Printf("User authenticated: %s (%s)", user.Name, user.Email)
-
-	token, err := h.authService.GenerateJWT(user)
+	// Generate JWT token
+	jwtToken, err := h.authService.GenerateJWT(user)
 	if err != nil {
-		log.Printf("Failed to generate JWT: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate session"})
+		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: Failed to generate JWT: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate token"})
 	}
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] jwt_generate=%s", time.Since(stepStart))
+	stepStart = time.Now() // Reset timer for next step
 
-	h.setAuthCookie(c, token)
+	// Set token in cookie with anti-cache headers
+	h.setAuthCookie(c, jwtToken)
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] set_cookie=%s", time.Since(stepStart))
+	stepStart = time.Now()
 
-	// UBAH DISINI: Redirect bersih tanpa query params
-	if redirect := strings.TrimSpace(os.Getenv("AUTH_SUCCESS_REDIRECT_URL")); redirect != "" {
-		// Browser sudah punya Cookie, jadi langsung redirect aja
-		return c.Redirect(redirect)
+	redirectURL := os.Getenv("FRONTEND_URL")
+	if redirectURL == "" {
+		redirectURL = os.Getenv("AUTH_SUCCESS_REDIRECT_URL")
 	}
-
-	// Jika tidak ada redirect URL, return response biasa (opsional)
-	return c.JSON(models.AuthResponse{
-		AccessToken: "", // Kosongkan karena sudah ada di cookie
-		User:        *user,
-	})
+	if redirectURL == "" {
+		redirectURL = "http://localhost:3000" // Fallback default
+	}
+	
+	log.Printf("[AUTH_OAUTH_CALLBACK] ✅ SUCCESS! Redirecting to %s", redirectURL)
+	totalDuration := time.Since(overallStart)
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] redirect_prep=%s", time.Since(stepStart))
+	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] TOTAL_duration=%s", totalDuration)
+	
+	// Fast 302 redirect - browser follows immediately
+	return c.Redirect(redirectURL, fiber.StatusFound)
 }
 
 // GetDevToken generates a JWT for a fake user for development/testing.

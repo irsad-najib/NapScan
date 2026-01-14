@@ -1,5 +1,6 @@
 import axios, {
   AxiosError,
+  AxiosHeaders,
   AxiosInstance,
   AxiosRequestConfig,
   AxiosResponse,
@@ -51,48 +52,83 @@ const WITH_CREDENTIALS = (
   process.env.NEXT_PUBLIC_WITH_CREDENTIALS || ""
 ).toLowerCase();
 
+const DEFAULT_WITH_CREDENTIALS =
+  WITH_CREDENTIALS !== "0" &&
+  WITH_CREDENTIALS !== "false" &&
+  WITH_CREDENTIALS != "no";
+
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: Number.isFinite(API_TIMEOUT_MS) ? API_TIMEOUT_MS : 600_000,
-  withCredentials:
-    WITH_CREDENTIALS === "1" ||
-    WITH_CREDENTIALS === "true" ||
-    WITH_CREDENTIALS === "yes",
+  // Cookie-based sessions require credentials for cross-origin dev (localhost:3000 -> localhost:5000).
+  // Default to on unless explicitly disabled.
+  withCredentials: DEFAULT_WITH_CREDENTIALS,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Helper to get cookie value by name
-function getCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || null;
+const TOKEN_STORAGE_KEY = "napscan_auth_token";
+
+function getAuthTokenFromStorage(): string | undefined {
+  // Note: HttpOnly cookies cannot be read from JS.
+  // Cookie sessions are sent automatically by the browser when allowed (CORS + withCredentials).
+  // This storage token is a fallback for token-based auth.
+  if (typeof window === "undefined") return undefined;
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
   }
-  return null;
+}
+
+function hasAuthorizationHeader(headers: unknown): boolean {
+  if (!headers) return false;
+  if (headers instanceof AxiosHeaders) {
+    const v = headers.get("Authorization");
+    return typeof v === "string" && v.length > 0;
+  }
+  const h = headers as Record<string, unknown>;
+  const v = h.Authorization ?? h.authorization;
+  return typeof v === "string" && v.length > 0;
+}
+
+function setAuthorizationHeader(headers: unknown, value: string): unknown {
+  if (!headers) {
+    return { Authorization: value };
+  }
+  if (headers instanceof AxiosHeaders) {
+    headers.set("Authorization", value);
+    return headers;
+  }
+  const h = headers as Record<string, unknown>;
+  return { ...h, Authorization: value };
 }
 
 api.interceptors.request.use(
   (config) => {
     // Skip auth header for login endpoints
     const isLoginEndpoint =
-      config.url?.includes("/auth/google/login") ||
-      config.url?.includes("/auth/google/callback");
+      config.url?.includes("/api/auth/google") ||
+      config.url?.includes("/api/auth/google/login") ||
+      config.url?.includes("/api/auth/google/callback");
 
     if (isLoginEndpoint) {
       return config;
     }
 
-    // Attach JWT token from 'napscan' cookie (SSR-safe)
-    if (typeof window !== "undefined") {
-      const token = getCookie("napscan");
-
+    // Prefer cookie-based sessions (HttpOnly) when available; browsers send them automatically.
+    // As a fallback (e.g. if cookies are blocked), attach the stored JWT as Bearer.
+    if (!hasAuthorizationHeader(config.headers)) {
+      const token = getAuthTokenFromStorage();
       if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+        config.headers = setAuthorizationHeader(
+          config.headers,
+          `Bearer ${token}`
+        ) as typeof config.headers;
       }
     }
+
     return config;
   },
   (error) => Promise.reject(error)
