@@ -55,7 +55,6 @@ export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: Number.isFinite(API_TIMEOUT_MS) ? API_TIMEOUT_MS : 600_000,
   withCredentials:
-    WITH_CREDENTIALS === "" ||
     WITH_CREDENTIALS === "1" ||
     WITH_CREDENTIALS === "true" ||
     WITH_CREDENTIALS === "yes",
