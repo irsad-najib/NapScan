@@ -9,21 +9,6 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
 
-  const handleHealthCheck = async () => {
-    const res = await request<{ status?: string }>({
-      method: "GET",
-      url: "/health",
-    });
-
-    if (!res.ok) {
-      const details = res.details ? `\n\n${res.details}` : "";
-      alert(`Health check failed: ${res.message}${details}`);
-      return;
-    }
-
-    alert("API Health: " + (res.data?.status ?? "ok"));
-  };
-
   const targets = [
     {
       id: 1,

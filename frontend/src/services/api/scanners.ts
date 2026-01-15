@@ -12,6 +12,44 @@ export type NucleiScanResponse = {
   results: Array<Record<string, unknown>>;
 };
 
+// Nuclei Async Result Response
+export type NucleiAsyncResultResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    batch_id: string;
+    compact: boolean;
+    results: Array<{
+      host: string;
+      ip?: string;
+      port?: string;
+      url?: string;
+      "matched-at"?: string;
+      "matcher-name"?: string;
+      "template-id"?: string;
+      type?: string;
+      info: {
+        name: string;
+        description?: string;
+        severity: string;
+        author?: string[];
+        tags?: string[];
+        reference?: string[];
+        remediation?: string;
+        classification?: {
+          "cve-id"?: string | null;
+          "cwe-id"?: string[] | null;
+        };
+      };
+      request?: string;
+      response?: string;
+      "curl-command"?: string;
+      "extracted-results"?: string[];
+      timestamp?: string;
+    }>;
+  };
+};
+
 export type ZapScanResponse = {
   target: string;
   zapBase: string;
@@ -133,11 +171,47 @@ export const scannersApi = {
   },
 
   nuclei: {
+    // Sync scan (legacy)
     scan: async (target: string, batchId?: string): Promise<ApiResult<NucleiScanResponse>> =>
       request<NucleiScanResponse>({
         method: "POST",
         url: "/api/nuclei/scan",
         data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
+      }),
+
+    // Async scan - Start scan and get task_id
+    scanAsync: async (target: string, batchId?: string): Promise<ApiResult<{
+      message: string;
+      status: string;
+      target: string;
+      task_id: string;
+    }>> =>
+      request({
+        method: "POST",
+        url: "/api/nuclei/scan/async",
+        data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
+      }),
+
+    // Get task status
+    taskStatus: async (taskId: string): Promise<ApiResult<{
+      batch_id: string;
+      progress: number;
+      started_at: string;
+      status: string;
+      target: string;
+      task_id: string;
+      updated_at: string;
+    }>> =>
+      request({
+        method: "GET",
+        url: `/api/nuclei/scan/async/${encodeURIComponent(taskId)}`,
+      }),
+
+    // Get final result
+    result: async (taskId: string): Promise<ApiResult<NucleiAsyncResultResponse>> =>
+      request<NucleiAsyncResultResponse>({
+        method: "GET",
+        url: `/api/nuclei/scan/async/${encodeURIComponent(taskId)}/result`,
       }),
   },
 

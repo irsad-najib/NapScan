@@ -14,6 +14,15 @@ export interface ScanVulnerability {
     severity: "Critical" | "High" | "Medium" | "Low" | "Info";
     description: string;
     tool: ToolKey;
+    // Optional fields for detailed vulnerability data (Nuclei, etc.)
+    affectedAsset?: string;
+    recommendation?: string;
+    cweId?: string;
+    cveId?: string | null;
+    references?: string[];
+    tags?: string[];
+    templateId?: string;
+    matcherName?: string;
 }
 
 export interface ToolExecution {
@@ -224,6 +233,118 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    // --- Nuclei Dedicated Handler (3-step async flow) ---
+    const executeNuclei = async (scanId: string, target: string, batchId?: string) => {
+        const tool: ToolKey = "nuclei";
+        console.log(`[Nuclei] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Start Async Scan
+            console.log(`[Nuclei] Step 1: Starting async scan...`);
+            const startRes = await scannersApi.nuclei.scanAsync(target, batchId);
+            console.log(`[Nuclei] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[Nuclei] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start Nuclei scan");
+            }
+
+            const taskId = startRes.data?.task_id;
+
+            if (!taskId) {
+                console.error(`[Nuclei] No task_id in response:`, startRes.data);
+                throw new Error("No task_id returned from Nuclei");
+            }
+
+            console.log(`[Nuclei] Scan started, task_id: ${taskId}`);
+
+            // Step 2: Poll for status (until completed)
+            let progress = 0;
+            const POLL_INTERVAL = 10000; // 10 seconds
+            let pollCount = 0;
+
+            console.log(`[Nuclei] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+                console.log(`[Nuclei] Poll #${pollCount}...`);
+                const statusRes = await scannersApi.nuclei.taskStatus(taskId);
+                console.log(`[Nuclei] Status response:`, statusRes);
+
+                if (!statusRes.ok) {
+                    console.error(`[Nuclei] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get Nuclei status");
+                }
+
+                progress = statusRes.data?.progress ?? 0;
+                const status = statusRes.data?.status?.toLowerCase();
+                console.log(`[Nuclei] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[Nuclei] Scan completed!`);
+                    break;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(`Nuclei task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+
+            // Step 3: Fetch Result
+            console.log(`[Nuclei] Step 3: Fetching result for task ${taskId}...`);
+            const resultRes = await scannersApi.nuclei.result(taskId);
+            console.log(`[Nuclei] Result response:`, resultRes);
+
+            if (!resultRes.ok) {
+                console.error(`[Nuclei] Result fetch failed:`, resultRes);
+                throw new Error((resultRes as any).message || (resultRes as any).error || "Failed to fetch Nuclei result");
+            }
+
+            // Extract nested data - actual results are in data.data
+            const nucleiData = resultRes.data?.data || resultRes.data;
+            console.log(`[Nuclei] Scan completed successfully! Found ${nucleiData?.results?.length || 0} findings`);
+
+            updateToolStatus(scanId, tool, {
+                status: "completed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                result: nucleiData,
+            });
+
+            // Parse vulnerabilities from result
+            try {
+                const toolVulns = parseToolResults(tool, nucleiData);
+                console.log(`[Nuclei] Parsed ${toolVulns.length} vulnerabilities`);
+                if (toolVulns.length > 0) {
+                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                        ...v,
+                        id: `${scanId}-${tool}-${idx}`,
+                    }));
+                    addVulnerabilities(scanId, scanVulns);
+                }
+            } catch (parseError) {
+                console.error(`[Nuclei] Failed to parse results:`, parseError);
+            }
+        } catch (err: any) {
+            console.error("[Nuclei] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
     // --- MobSF Dedicated Handler (2-step async flow: upload + scan) ---
     const executeMobSF = async (scanId: string, apkFile: File, batchId?: string) => {
         const tool: ToolKey = "mobsf";
@@ -320,6 +441,11 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             return executeOpenVAS(scanId, target, batchId);
         }
 
+        // Nuclei has its own dedicated async handler
+        if (tool === "nuclei") {
+            return executeNuclei(scanId, target, batchId);
+        }
+
         // MobSF has its own dedicated async handler
         if (tool === "mobsf") {
             if (!apkFile) {
@@ -349,9 +475,6 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                     break;
                 case "zap":
                     result = await scannersApi.zap.scan(target, batchId);
-                    break;
-                case "nuclei":
-                    result = await scannersApi.nuclei.scan(target, batchId);
                     break;
                 case "sslyze":
                     result = await scannersApi.sslyze.scan(target, batchId);

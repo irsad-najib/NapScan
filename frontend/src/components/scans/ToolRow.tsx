@@ -99,7 +99,8 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                             {getStatusIcon(data.status)}
                         </span>
                         <span className="capitalize">
-                            {data.status === 'running' && data.progress !== undefined
+                            {/* Only OpenVAS shows progress percentage */}
+                            {data.status === 'running' && data.tool === 'openvas' && data.progress !== undefined
                                 ? `${data.progress}%`
                                 : data.status}
                         </span>

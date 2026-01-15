@@ -59,7 +59,7 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
 
     try {
         console.log("[Nuclei Parser] Raw result type:", typeof rawResult);
-        console.log("[Nuclei Parser] Raw result:", rawResult);
+        console.log("[Nuclei Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
         let results: any[] = [];
 
@@ -68,7 +68,7 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             // Direct array of results
             results = rawResult;
         } else if (Array.isArray(rawResult?.results)) {
-            // Results in 'results' field
+            // Results in 'results' field (async format)
             results = rawResult.results;
         } else if (typeof rawResult === "string") {
             // NDJSON format (newline-delimited JSON)
@@ -98,7 +98,15 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             else if (severity === "low") vulnSeverity = "Low";
 
             const name = result.info?.name || result["template-id"] || result.templateID || result.template || "Nuclei Finding";
-            const description = result.info?.description || result.matcher_name || result.matched || result.host || "No description available";
+            const description = result.info?.description || result["matcher-name"] || result.matched || result.host || "No description available";
+            const matchedAt = result["matched-at"] || result.host || result.url || "";
+            const matcherName = result["matcher-name"] || "";
+            const templateId = result["template-id"] || result.templateID || "";
+            const references = result.info?.reference || [];
+            const remediation = result.info?.remediation || "";
+            const tags = result.info?.tags || [];
+            const cweId = result.info?.classification?.["cwe-id"] || [];
+            const cveId = result.info?.classification?.["cve-id"] || null;
 
             vulnerabilities.push({
                 id: `nuclei-${idx}`,
@@ -106,6 +114,15 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
                 severity: vulnSeverity,
                 description: description,
                 tool: "nuclei",
+                // Store additional data for display
+                affectedAsset: matchedAt,
+                recommendation: remediation,
+                cweId: Array.isArray(cweId) ? cweId.join(", ") : cweId,
+                cveId: cveId,
+                references: Array.isArray(references) ? references : [references],
+                tags: Array.isArray(tags) ? tags : [],
+                templateId: templateId,
+                matcherName: matcherName,
             });
         });
 
