@@ -229,30 +229,40 @@ func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string) {
 // @Success 200 {object} models.AuthResponse
 // @Router /auth/google [post]
 func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
+	log.Printf("[AUTH] Received Google ID token login request")
 	var req models.GoogleAuthRequest
 	if err := c.BodyParser(&req); err != nil {
+		log.Printf("[AUTH] Failed to parse request body: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
 	if req.IDToken == "" {
+		log.Printf("[AUTH] Missing id_token in request")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "id_token is required"})
 	}
 
 	// Verify Google Token
+	log.Printf("[AUTH] Verifying Google ID token")
 	user, err := h.authService.VerifyGoogleToken(c.Context(), req.IDToken)
 	if err != nil {
+		log.Printf("[AUTH] Google token verification failed: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid Google token: " + err.Error()})
 	}
+	log.Printf("[AUTH] Google token verified for user: %s", user.Email)
 
 	// Generate JWT
+	log.Printf("[AUTH] Generating JWT for user_id=%s", user.ID)
 	token, err := h.authService.GenerateJWT(user)
 	if err != nil {
+		log.Printf("[AUTH] Failed to generate JWT: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate session"})
 	}
 
 	h.setAuthCookie(c, token)
+	log.Printf("[AUTH] Auth cookie set successfully")
 
 	// UBAH DISINI: Kembalikan token agar frontend bisa menyimpannya di localStorage
+	log.Printf("[AUTH] Login successful for user: %s", user.Email)
 	return c.JSON(models.AuthResponse{
 		AccessToken: token, // DULU: "", SEKARANG: token
 		User:        *user,

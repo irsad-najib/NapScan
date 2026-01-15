@@ -1,0 +1,34 @@
+package models
+
+import (
+	"encoding/json"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// ScanResult stores the raw output of a tool scan.
+// For SQL backends, this maps to the "scan_results" table.
+type ScanResult struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	BatchID   string    `json:"batch_id" gorm:"type:varchar(191);index"`
+	Tool      string    `json:"tool" gorm:"type:varchar(64)"`
+	Target    string    `json:"target" gorm:"type:varchar(255)"`
+	ResultRaw []byte    `json:"-" gorm:"column:result"`
+	Result    interface{} `json:"result" gorm:"-"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (sr *ScanResult) BeforeSave(tx *gorm.DB) (err error) {
+	if sr.Result != nil {
+		sr.ResultRaw, err = json.Marshal(sr.Result)
+	}
+	return
+}
+
+func (sr *ScanResult) AfterFind(tx *gorm.DB) (err error) {
+	if sr.ResultRaw != nil {
+		err = json.Unmarshal(sr.ResultRaw, &sr.Result)
+	}
+	return
+}
