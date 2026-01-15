@@ -3,7 +3,8 @@ FROM golang:latest
 # Install tools (nmap, ffuf, zap, sslyze, nuclei, gvm-tools)
 RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb  xz-utils && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/opt/docker/.local/bin:$PATH"
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
 
 # Install SSLyze and Frida via pipx
 RUN pipx install sslyze frida-tools frida-tools
@@ -13,8 +14,6 @@ RUN useradd -m -s /bin/bash napscan
 
 # gvm-tools provides gvm-cli for talking to gvmd (OpenVAS/GMP)
 # Use pipx into a shared bin dir so `runuser -u napscan -- gvm-cli ...` works
-ENV PIPX_HOME=/opt/pipx
-ENV PIPX_BIN_DIR=/usr/local/bin
 RUN pipx install gvm-tools
 
 # Install Nuclei
