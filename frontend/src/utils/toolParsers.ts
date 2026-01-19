@@ -17,33 +17,116 @@ export type { ParsedZapVulnerability, ZapRiskSummary, ZapAlert } from "./zapPars
 // Note: parseZapResults is now exported from ./zapParser
 
 /**
- * Parse OpenVAS results
+ * Parse OpenVAS results - handles various response formats
  */
 export function parseOpenVasResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
     try {
-        // OpenVAS typically returns XML, but if it's been converted to JSON
-        const results = rawResult?.results || rawResult?.result || [];
-        const resultArray = Array.isArray(results) ? results : [results];
+        console.log("[OpenVAS Parser] Raw result type:", typeof rawResult);
+        console.log("[OpenVAS Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
-        resultArray.forEach((result: any, idx: number) => {
-            const threat = result.threat?.toLowerCase() || result.severity?.toLowerCase() || "log";
+        let results: any[] = [];
+
+        // Handle different possible structures
+        // Format 1: { results: { result: [...] } } (standard OpenVAS format)
+        if (rawResult?.results?.result && Array.isArray(rawResult.results.result)) {
+            results = rawResult.results.result;
+        }
+        // Format 2: { data: { results: { result: [...] } } } (wrapped format)
+        else if (rawResult?.data?.results?.result && Array.isArray(rawResult.data.results.result)) {
+            results = rawResult.data.results.result;
+        }
+        // Format 3: { results: [...] } (simplified format)
+        else if (Array.isArray(rawResult?.results)) {
+            results = rawResult.results;
+        }
+        // Format 4: { result: [...] } (direct result array)
+        else if (Array.isArray(rawResult?.result)) {
+            results = rawResult.result;
+        }
+        // Format 5: Direct array
+        else if (Array.isArray(rawResult)) {
+            results = rawResult;
+        }
+
+        console.log("[OpenVAS Parser] Found", results.length, "results to parse");
+
+        // Filter out "Log" level findings if there are other findings
+        // or keep them if they're the only findings
+        const hasRealFindings = results.some(r => {
+            const threat = (r.threat || "").toLowerCase();
+            return threat !== "log" && threat !== "";
+        });
+
+        results.forEach((result: any, idx: number) => {
+            const threat = (result.threat || "").toLowerCase();
+            const cvssScore = parseFloat(result.severity || result.nvt?.cvss_base || "0");
+
             let severity: "Critical" | "High" | "Medium" | "Low" | "Info" = "Info";
 
-            if (threat.includes("critical") || threat.includes("high")) severity = "High";
-            else if (threat.includes("medium")) severity = "Medium";
-            else if (threat.includes("low")) severity = "Low";
+            // Map OpenVAS threat levels to our severity
+            if (threat === "critical" || cvssScore >= 9.0) {
+                severity = "Critical";
+            } else if (threat === "high" || cvssScore >= 7.0) {
+                severity = "High";
+            } else if (threat === "medium" || cvssScore >= 4.0) {
+                severity = "Medium";
+            } else if (threat === "low" || cvssScore >= 0.1) {
+                severity = "Low";
+            } else {
+                // "Log" or empty threat = Info
+                severity = "Info";
+            }
+
+            // Skip "Log" level findings if we have real vulnerabilities
+            // to avoid cluttering the results
+            if (hasRealFindings && threat === "log" && cvssScore === 0) {
+                return;
+            }
+
+            const name = result.name || result.nvt?.name || "OpenVAS Finding";
+            const host = result.host || "";
+            const port = result.port || "";
+            const description = result.description || "";
+            const nvtFamily = result.nvt?.family || "";
+            const nvtOid = result.nvt?.oid || "";
+
+            // Build a more informative description
+            let fullDescription = description;
+            if (!fullDescription && result.nvt?.tags) {
+                // Try to extract summary from tags
+                const tagsStr = result.nvt.tags;
+                const summaryMatch = tagsStr.match(/summary=([^|]+)/);
+                if (summaryMatch) {
+                    fullDescription = summaryMatch[1].trim();
+                }
+            }
+            if (!fullDescription) {
+                fullDescription = `Detected on ${host}:${port}`;
+            }
+
+            // Extract solution from tags if available
+            let solution = "";
+            if (result.nvt?.tags) {
+                const solutionMatch = result.nvt.tags.match(/solution=([^|]+)/);
+                if (solutionMatch && solutionMatch[1].trim()) {
+                    solution = solutionMatch[1].trim();
+                }
+            }
 
             vulnerabilities.push({
                 id: `openvas-${idx}`,
-                name: result.name || result.nvt?.name || "OpenVAS Finding",
+                name: name,
                 severity,
-                description: result.description || "No description available",
+                description: fullDescription,
                 tool: "openvas",
+                affectedAsset: port ? `${host}:${port}` : host,
+                recommendation: solution,
             });
         });
 
+        console.log("[OpenVAS Parser] Parsed", vulnerabilities.length, "vulnerabilities");
         return vulnerabilities;
     } catch (error) {
         console.error("Error parsing OpenVAS results:", error);
