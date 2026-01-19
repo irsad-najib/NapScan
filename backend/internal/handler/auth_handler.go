@@ -110,16 +110,16 @@ func redactSetCookieValue(setCookie, cookieName string) string {
 	}
 }
 
-func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
+func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {	
 	// Fast path: simple cookie creation without complex checks
 	cookie := &fiber.Cookie{
 		Name:     authCookieName(),
 		Value:    jwtToken,
-		HTTPOnly: true,
+		HTTPOnly: false,
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		// Always use None + Secure for development (ngrok compatibility)
-		SameSite: "None",
+		SameSite: "Lax",
 		Secure:   true,
 	}
 	
@@ -136,7 +136,7 @@ func (h *AuthHandler) clearAuthCookie(c *fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     authCookieName(),
 		Value:    "",
-		HTTPOnly: true,
+		HTTPOnly: false,
 		Secure:   isSecureCookie(),
 		SameSite: sameSiteMode(),
 		Path:     "/",
@@ -151,6 +151,44 @@ func randomStateToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// isAllowedRedirectURL validates that redirectURL is safe to use.
+// It checks if the URL's origin is in the ALLOWED_REDIRECT_ORIGINS whitelist.
+func isAllowedRedirectURL(redirectURL string) bool {
+	if redirectURL == "" {
+		return false
+	}
+
+	// Parse redirect URL
+	parsed, err := url.Parse(redirectURL)
+	if err != nil {
+		return false
+	}
+
+	// Allow only http/https schemes
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+
+	// Get allowed origins from environment (comma-separated)
+	allowedOriginsEnv := strings.TrimSpace(os.Getenv("ALLOWED_REDIRECT_ORIGINS"))
+	if allowedOriginsEnv == "" {
+		// No whitelist configured, reject all custom redirects for safety
+		return false
+	}
+
+	allowedOrigins := strings.Split(allowedOriginsEnv, ",")
+	requestedOrigin := fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
+
+	for _, allowed := range allowedOrigins {
+		allowed = strings.TrimSpace(allowed)
+		if strings.EqualFold(requestedOrigin, allowed) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // oauthStateStore keeps OAuth state server-side to avoid relying on browser cookies.
@@ -295,11 +333,14 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 	if redirectTO == "" {
 		// Auto-detect from Referer if query param is missing
 		redirectTO = c.Get("Referer")
+		log.Printf("[AUTH_OAUTH_LOGIN] No redirect_to param, using Referer: %q", redirectTO)
+	} else {
+		log.Printf("[AUTH_OAUTH_LOGIN] Received redirect_to param: %q", redirectTO)
 	}
 	oauthStateStore.Put(state, redirectTO)
 
 	url := h.authService.GetGoogleLoginURL(state)
-	log.Printf("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s...)", state[:16])
+	log.Printf("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s..., will redirect back to: %q)", state[:16], redirectTO)
 	return c.Redirect(url)
 }
 
@@ -370,15 +411,30 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] set_cookie=%s", time.Since(stepStart))
 	stepStart = time.Now()
 
-	redirectURL := redirectFromState
-	if redirectURL == "" {
-		redirectURL = os.Getenv("FRONTEND_URL")
+	// Determine redirect URL with security validation
+	redirectURL := ""
+	
+	// First, check if we have a redirect_to from the OAuth state
+	if redirectFromState != "" {
+		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Validating redirect_to from state: %q", redirectFromState)
+		if isAllowedRedirectURL(redirectFromState) {
+			redirectURL = redirectFromState
+			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ✅ Using validated redirect_to from state: %q", redirectURL)
+		} else {
+			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ⚠️  Rejected redirect_to (not in whitelist): %q", redirectFromState)
+		}
 	}
+	
+	// Fallback to FRONTEND_URL if no valid redirect_to
 	if redirectURL == "" {
-		redirectURL = os.Getenv("AUTH_SUCCESS_REDIRECT_URL")
+		redirectURL = strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Using FRONTEND_URL fallback: %q", redirectURL)
 	}
+	
+	// Final fallback
 	if redirectURL == "" {
-		redirectURL = "http://localhost:3000" // Fallback default
+		redirectURL = "http://localhost:3000"
+		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Using hardcoded fallback: %q", redirectURL)
 	}
 	
 	log.Printf("[AUTH_OAUTH_CALLBACK] ✅ SUCCESS! Redirecting to %s", redirectURL)
