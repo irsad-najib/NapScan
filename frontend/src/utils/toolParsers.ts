@@ -52,7 +52,7 @@ export function parseOpenVasResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
- * Parse Nuclei results - handles various response formats
+ * Parse Nuclei results - handles various response formats including compact summary format
  */
 export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
@@ -64,21 +64,39 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
         let results: any[] = [];
 
         // Handle different possible structures
-        if (Array.isArray(rawResult)) {
-            // Direct array of results
+        // Format 1: Compact summary format { summary: { findings: [...] } }
+        if (rawResult?.summary?.findings && Array.isArray(rawResult.summary.findings)) {
+            console.log("[Nuclei Parser] Found compact summary format with", rawResult.summary.findings.length, "findings");
+            results = rawResult.summary.findings;
+        }
+        // Format 2: Direct array of results
+        else if (Array.isArray(rawResult)) {
             results = rawResult;
-        } else if (Array.isArray(rawResult?.results)) {
-            // Results in 'results' field (async format)
+        }
+        // Format 3: data wrapper { data: { results: [...] } } or { data: { summary: { findings: [...] } } }
+        else if (rawResult?.data) {
+            if (rawResult.data.summary?.findings && Array.isArray(rawResult.data.summary.findings)) {
+                results = rawResult.data.summary.findings;
+            } else if (Array.isArray(rawResult.data.results)) {
+                results = rawResult.data.results;
+            } else if (Array.isArray(rawResult.data)) {
+                results = rawResult.data;
+            }
+        }
+        // Format 4: Results in 'results' field (async format)
+        else if (Array.isArray(rawResult?.results)) {
             results = rawResult.results;
-        } else if (typeof rawResult === "string") {
-            // NDJSON format (newline-delimited JSON)
+        }
+        // Format 5: NDJSON string format
+        else if (typeof rawResult === "string") {
             try {
                 results = rawResult.split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
             } catch {
                 console.log("[Nuclei Parser] Failed to parse as NDJSON");
             }
-        } else if (rawResult?.output && typeof rawResult.output === "string") {
-            // Output field with NDJSON
+        }
+        // Format 6: Output field with NDJSON
+        else if (rawResult?.output && typeof rawResult.output === "string") {
             try {
                 results = rawResult.output.split("\n").filter((line: string) => line.trim()).map((line: string) => JSON.parse(line));
             } catch {
@@ -88,8 +106,12 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
 
         console.log("[Nuclei Parser] Found", results.length, "results to parse");
 
+        // Track unique findings to avoid duplicates (by template_id + matched_at)
+        const seenFindings = new Set<string>();
+
         results.forEach((result: any, idx: number) => {
-            const severity = (result.info?.severity || result.severity || "info").toLowerCase();
+            // Handle both compact format and full format
+            const severity = (result.severity || result.info?.severity || "info").toLowerCase();
             let vulnSeverity: "Critical" | "High" | "Medium" | "Low" | "Info" = "Info";
 
             if (severity === "critical") vulnSeverity = "Critical";
@@ -97,14 +119,26 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             else if (severity === "medium") vulnSeverity = "Medium";
             else if (severity === "low") vulnSeverity = "Low";
 
-            const name = result.info?.name || result["template-id"] || result.templateID || result.template || "Nuclei Finding";
-            const description = result.info?.description || result["matcher-name"] || result.matched || result.host || "No description available";
-            const matchedAt = result["matched-at"] || result.host || result.url || "";
-            const matcherName = result["matcher-name"] || "";
-            const templateId = result["template-id"] || result.templateID || "";
+            // Handle compact format fields
+            const name = result.name || result.info?.name || result["template-id"] || result.templateID || result.template || "Nuclei Finding";
+            const matchedAt = result.matched_at || result["matched-at"] || result.host || result.url || "";
+            const templateId = result.template_id || result["template-id"] || result.templateID || "";
+            const tags = result.tags || result.info?.tags || [];
+
+            // Create unique key for deduplication
+            const uniqueKey = `${templateId}:${matchedAt}`;
+            if (seenFindings.has(uniqueKey)) {
+                return; // Skip duplicate
+            }
+            seenFindings.add(uniqueKey);
+
+            // For compact format, description is not available
+            const description = result.info?.description ||
+                (tags.length > 0 ? `Tags: ${tags.join(", ")}` : `Template: ${templateId}`);
+
+            const matcherName = result["matcher-name"] || result.matcher_name || "";
             const references = result.info?.reference || [];
             const remediation = result.info?.remediation || "";
-            const tags = result.info?.tags || [];
             const cweId = result.info?.classification?.["cwe-id"] || [];
             const cveId = result.info?.classification?.["cve-id"] || null;
 
@@ -126,7 +160,7 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             });
         });
 
-        console.log("[Nuclei Parser] Parsed", vulnerabilities.length, "vulnerabilities");
+        console.log("[Nuclei Parser] Parsed", vulnerabilities.length, "unique vulnerabilities");
         return vulnerabilities;
     } catch (error) {
         console.error("Error parsing Nuclei results:", error);
@@ -298,37 +332,127 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
- * Parse Ffuf results
+ * Parse Ffuf results - handles various response formats
  */
 export function parseFfufResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
     try {
-        const results = rawResult?.results || [];
-        const resultArray = Array.isArray(results) ? results : [];
+        console.log("[FFUF Parser] Raw result type:", typeof rawResult);
+        console.log("[FFUF Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
-        resultArray.forEach((result: any, idx: number) => {
+        // Handle different possible structures
+        // Structure 1: { data: { results: [...] } } (API response)
+        // Structure 2: { results: [...] } (direct)
+        // Structure 3: Direct array
+        let results: any[] = [];
+
+        if (Array.isArray(rawResult)) {
+            results = rawResult;
+        } else if (rawResult?.data?.results && Array.isArray(rawResult.data.results)) {
+            results = rawResult.data.results;
+        } else if (rawResult?.results && Array.isArray(rawResult.results)) {
+            results = rawResult.results;
+        }
+
+        console.log("[FFUF Parser] Found", results.length, "results to parse");
+
+        results.forEach((result: any, idx: number) => {
             const status = result.status || result.statuscode || 0;
-            let severity: "Critical" | "High" | "Medium" | "Low" | "Info" = "Info";
+            const path = result.input?.FUZZ || result.url || "";
+            const url = result.url || "";
+            const length = result.length || 0;
+            const words = result.words || 0;
+            const lines = result.lines || 0;
+            const duration = result.duration || 0;
+            const redirectLocation = result.redirectlocation || "";
 
-            // Determine severity based on status code and content
-            if (status >= 200 && status < 300) {
-                severity = "Medium"; // Successful responses might expose sensitive paths
-            } else if (status >= 300 && status < 400) {
-                severity = "Low"; // Redirects
-            } else if (status === 401 || status === 403) {
-                severity = "Medium"; // Auth required but path exists
+            let severity: "Critical" | "High" | "Medium" | "Low" | "Info" = "Info";
+            let category = "Discovered Path";
+
+            // Critical: Sensitive files
+            if (/\.env($|\.)/i.test(path)) {
+                severity = "Critical";
+                category = "Environment File";
+            } else if (/\.git(\/|$)/i.test(path)) {
+                severity = "Critical";
+                category = "Git Repository";
+            } else if (/backup.*\.(sql|zip|tar|gz)$|dump\.sql$|db\.sql$|database\.sql$/i.test(path)) {
+                severity = "Critical";
+                category = "Backup/Database";
+            } else if (/\.htaccess$|\.htpasswd$/i.test(path)) {
+                severity = "Critical";
+                category = "Server Config";
+            } else if (/wp-config\.php|config\.php$/i.test(path)) {
+                severity = "Critical";
+                category = "Config File";
             }
+            // High: Admin & Config
+            else if (/admin|administrator|manager/i.test(path)) {
+                severity = "High";
+                category = "Admin Panel";
+            } else if (/swagger|openapi|api-docs/i.test(path)) {
+                severity = "High";
+                category = "API Documentation";
+            } else if (/config\.(json|yml|yaml|xml)$/i.test(path)) {
+                severity = "High";
+                category = "Configuration";
+            } else if (/composer|package.*\.json|docker|Dockerfile/i.test(path)) {
+                severity = "High";
+                category = "Build/Deploy Config";
+            } else if (/phpinfo|server-status|server-info/i.test(path)) {
+                severity = "High";
+                category = "Server Info";
+            }
+            // Medium: Debug & Test & API
+            else if (/debug|\.log$|error_log/i.test(path)) {
+                severity = "Medium";
+                category = "Debug/Logs";
+            } else if (/test(s)?$|staging|dev$|\.dev\./i.test(path)) {
+                severity = "Medium";
+                category = "Test/Dev Endpoint";
+            } else if (/api\/?$|\/v[0-9]+\/?$/i.test(path)) {
+                severity = "Medium";
+                category = "API Endpoint";
+            } else if (/upload|uploads|files|media/i.test(path)) {
+                severity = "Medium";
+                category = "File Upload";
+            }
+            // Low: Common paths
+            else if (/login|signin|auth|register|signup/i.test(path)) {
+                severity = "Low";
+                category = "Authentication";
+            } else if (/static|assets|css|js|images|fonts/i.test(path)) {
+                severity = "Info";
+                category = "Static Resources";
+            } else if (/dashboard|profile|settings|account/i.test(path)) {
+                severity = "Low";
+                category = "User Pages";
+            }
+            // Adjust severity based on status code
+            else if (status >= 200 && status < 300) {
+                severity = "Medium"; // Successful responses might expose something
+            } else if (status === 401 || status === 403) {
+                severity = "Low"; // Auth required but path exists
+            } else if (status >= 300 && status < 400) {
+                severity = "Info"; // Redirects
+            }
+
+            const name = severity === "Info"
+                ? `Path Found: /${path}`
+                : `${category}: /${path}`;
 
             vulnerabilities.push({
                 id: `ffuf-${idx}`,
-                name: `Directory/File Found: ${result.url || result.input?.FUZZ || "Unknown"}`,
+                name: name,
                 severity,
-                description: `HTTP ${status} - ${result.length || 0} bytes - ${result.words || 0} words`,
+                description: `HTTP ${status} | Size: ${length}B | Words: ${words} | Lines: ${lines}${redirectLocation ? ` | Redirect: ${redirectLocation}` : ""}`,
                 tool: "ffuf",
+                affectedAsset: url,
             });
         });
 
+        console.log("[FFUF Parser] Parsed", vulnerabilities.length, "vulnerabilities");
         return vulnerabilities;
     } catch (error) {
         console.error("Error parsing Ffuf results:", error);

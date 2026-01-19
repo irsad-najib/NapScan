@@ -9,7 +9,7 @@ interface LoginButtonProps {
 
 export default function LoginButton({ className = "" }: LoginButtonProps) {
   const buttonRef = useRef<HTMLDivElement>(null);
-  const { login, loading, isAuthenticated, user } = useAuth();
+  const { login, loginWithPopup, loading, isAuthenticated, user } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated) return;
@@ -84,7 +84,7 @@ export default function LoginButton({ className = "" }: LoginButtonProps) {
 
       {/* Fallback button if Google doesn't render */}
       <button
-        onClick={login}
+        onClick={loginWithPopup}
         className="hidden fallback-login-btn items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm hover:shadow-md">
         <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
           <path

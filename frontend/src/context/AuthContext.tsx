@@ -26,6 +26,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: () => void;
   loginWithRedirect: () => void;
+  loginWithPopup: () => void;
   logout: () => void;
   refreshUser: () => void;
 }
@@ -175,6 +176,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     redirectToGoogleLogin();
   }, []);
 
+  const loginWithPopup = useCallback(() => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+    const popupCallback = `${window.location.origin}/auth/popup-callback`;
+
+    const width = 500;
+    const height = 600;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+
+    const popup = window.open(
+      `${API_URL}/api/auth/google/login?redirect_to=${encodeURIComponent(popupCallback)}`,
+      "google_login",
+      `width=${width},height=${height},left=${left},top=${top}`
+    );
+
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "AUTH_SUCCESS") {
+        window.removeEventListener("message", handleMessage);
+        // Refresh user session from backend
+        setLoading(true);
+        const me = await fetchMe();
+        if (me) {
+          const storedToken = getStoredToken();
+          if (storedToken) {
+            setAuthData(storedToken, me);
+          } else {
+            localStorage.setItem("napscan_user", JSON.stringify(me));
+          }
+          setUser(me);
+        }
+        setLoading(false);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    // Cleanup if popup is closed without completing auth
+    const checkPopupClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkPopupClosed);
+        window.removeEventListener("message", handleMessage);
+      }
+    }, 500);
+  }, []);
+
   const logout = useCallback(() => {
     (async () => {
       await backendLogout();
@@ -205,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !!user,
     login,
     loginWithRedirect,
+    loginWithPopup,
     logout,
     refreshUser,
   };

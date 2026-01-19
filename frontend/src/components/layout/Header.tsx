@@ -14,7 +14,7 @@ export default function Header({
   showSearch = true,
   searchPlaceholder = "Search...",
 }: HeaderProps) {
-  const { user, isAuthenticated, loginWithRedirect, logout } = useAuth();
+  const { user, isAuthenticated, loginWithPopup, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -77,7 +77,7 @@ export default function Header({
         {/* Login/User Section */}
         {!isAuthenticated ? (
           <button
-            onClick={loginWithRedirect}
+            onClick={loginWithPopup}
             className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform hover:scale-105 active:scale-95">
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path

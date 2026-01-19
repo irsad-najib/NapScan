@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Image from "next/image";
 
 const navItems = [
     { label: "Dashboard", icon: "dashboard", href: "/" },
@@ -30,11 +31,13 @@ export default function Sidebar() {
                 <div className="flex flex-col gap-8">
                     {/* Logo */}
                     <div className="flex items-center gap-3 px-2">
-                        <div className="bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center aspect-square rounded-lg size-11 text-white shadow-lg shadow-blue-500/20">
-                            <span className="material-symbols-outlined text-xl font-bold">
-                                shield_lock
-                            </span>
-                        </div>
+                        <Image
+                            src="/napscan-logo.png"
+                            alt="NapScan Logo"
+                            width={44}
+                            height={44}
+                            className="rounded-lg"
+                        />
                         <div className="flex flex-col">
                             <h1 className="text-slate-900 dark:text-white text-base font-bold leading-tight">
                                 NapScan

@@ -1,11 +1,21 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: "Risk Management Dashboard",
-  description: "SecureScan Admin Console - Security and Risk Management Dashboard",
-  viewport: "width=device-width, initial-scale=1.0",
+  title: "NapScan",
+  description: "Security while you Nap",
+  keywords: ["NapScan", "Security", "Scanner", "NapScan Security", "NapScan Scanner"],
+  openGraph: {
+    title: "NapScan",
+    description: "Security while you Nap",
+    images: ["/napscan-logo.png"],
+  },
 };
 
 import { ScanProvider } from "@/context/ScanContext";
