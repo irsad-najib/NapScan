@@ -2,10 +2,11 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,10 +21,11 @@ import (
 type MobSFHandler struct {
 	scanRepo     repository.ScanResultRepository
 	batchService *service.BatchService
+	lifecycle    *service.LifecycleService
 }
 
-func NewMobSFHandler(scanRepo repository.ScanResultRepository, batchService *service.BatchService) *MobSFHandler {
-	return &MobSFHandler{scanRepo: scanRepo, batchService: batchService}
+func NewMobSFHandler(scanRepo repository.ScanResultRepository, batchService *service.BatchService, lifecycle *service.LifecycleService) *MobSFHandler {
+	return &MobSFHandler{scanRepo: scanRepo, batchService: batchService, lifecycle: lifecycle}
 }
 
 // UploadMobSFFile uploads a file for MobSF analysis
@@ -47,6 +49,7 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 		log.Printf("[MOBSF] Failed to get file from request: %v", err)
 		return response.BadRequest(c, "Failed to get file from request", err)
 	}
+	log.Printf("Temp file: %+v", fileHeader)
 
 	// Get batch_id from form data
 	batchID := c.FormValue("batch_id")
@@ -71,31 +74,74 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 	defer file.Close()
 
 	log.Printf("[MOBSF] Starting upload for file=%s", fileHeader.Filename)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-	defer cancel()
-
-	mobsf := service.NewMobSFService()
-
-	info, uploadRaw, err := mobsf.Upload(ctx, fileHeader.Filename, file)
+	
+	// Create uploaded file record via LifecycleService
+	// Note: We need to pass a reader that we can read. `file` is already open.
+	// But `Upload` in lifecycle expects to read fully.
+	// Also we need to calculate hash separately if Lifecycle doesn't do it?
+	// Actually `LifecycleService.Upload` saves it to disk.
+	// Check `LifecycleService.Upload` signature: (batchID string, fileName string, file io.Reader, size int64, hash string)
+	// Wait, I implemented `Upload(batchID string, fileName string, file io.Reader, size int64, hash string)`?
+	// Let me double check my implementation of lifecycle.go in step 50.
+	// "func (s *LifecycleService) Upload(batchID string, fileName string, file io.Reader, size int64, hash string) ..."
+	// No, step 50 implementation was:
+	// func (s *LifecycleService) Upload(batchID string, fileName string, file io.Reader, size int64, hash string) ...
+	// Wait, I should verify the implementation from step 50/51.
+	// Ah, I see "func (s *LifecycleService) Upload(batchID string, fileName string, file io.Reader, size int64, hash string)" in my thought but let me check the file content I wrote.
+	// It was: "Upload(batchID string, fileName string, file io.Reader, size int64, hash string)" ... wait, line 40 of step 50 output says:
+	// "func (s *LifecycleService) Upload(batchID string, fileName string, file io.Reader, size int64, hash string) (*models.UploadedFile, error) {"
+	// YES.
+	
+	// So I need to calculate hash first?
+	// MobSF usually calculates hash.
+	// But LifecycleService needs it for path: /data/uploads/{batch_id}/{hash}.{ext}
+	// So I MUST calculate hash before calling lifecycle.Upload.
+	// `file` is `multipart.File`.
+	
+	// We need to read file to calculate hash, then seek back to 0.
+	// Or use tee reader? But we need hash for filename.
+	// So: Read all -> Hash -> Seek 0 -> Pass to Lifecycle.
+	
+	// Helper to calc hash
+	hash, err := calculateHash(file)
 	if err != nil {
-		if isMobSFDebug() {
-			log.Printf("[mobsf] upload error: %v", err)
-		}
-		log.Printf("[MOBSF] Upload failed: %v", err)
-		return response.Error(c, fiber.StatusBadGateway, "MobSF upload failed", err.Error())
+		log.Printf("[MOBSF] Failed to calculate hash: %v", err)
+		return response.InternalServerError(c, "Failed to calculate file hash", err)
 	}
-	log.Printf("[MOBSF] Upload completed successfully, hash=%s", info.Hash)
+	if _, err := file.Seek(0, 0); err != nil {
+		log.Printf("[MOBSF] Failed to seek file: %v", err)
+		return response.InternalServerError(c, "Failed to reset file pointer", err)
+	}
+	
+	uploadedFile, err := h.lifecycle.Upload(batchID, fileHeader.Filename, file, fileHeader.Size, hash)
+	if err != nil {
+		log.Printf("[MOBSF] Lifecycle Upload failed: %v", err)
+		return response.InternalServerError(c, "Failed to process upload", err)
+	}
+	
+	log.Printf("[MOBSF] Lifecycle Upload completed, id=%d hash=%s", uploadedFile.ID, uploadedFile.Hash)
+	
+	// Trigger MobSF Scan Async
+	h.lifecycle.StartMobSF(uploadedFile.ID)
 
 	payload := fiber.Map{
-		"hash":      info.Hash,
-		"scan_type": info.ScanType,
-		"file_name": info.FileName,
-		"upload":    uploadRaw,
+		"hash":      uploadedFile.Hash,
+		"file_name": uploadedFile.FileName,
 		"batch_id":  batchID,
+		"file_id":   uploadedFile.ID,
+		"status":    models.FileStatusMobSFRunning,
 	}
 
 	log.Printf("[MOBSF] Upload request completed successfully")
-	return response.Success(c, "MobSF upload completed", payload)
+	return response.Success(c, "File uploaded and scan started", payload)
+}
+
+func calculateHash(r io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // StartMobSFScan starts a scan in MobSF for the uploaded file
@@ -194,7 +240,7 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 	compact := isTruthy(c.Query("compact"))
 	if compact {
 		log.Printf("[MOBSF] Building compact summary")
-		summary := buildMobSFSummary(info, scanRaw, reportRaw)
+		summary := service.BuildMobSFSummary(info, scanRaw, reportRaw)
 		payload := fiber.Map{
 			"hash":      info.Hash,
 			"scan_type": info.ScanType,
@@ -278,365 +324,4 @@ func isTruthy(v string) bool {
 	return s == "1" || s == "true" || s == "yes" || s == "on"
 }
 
-func buildMobSFSummary(info service.MobSFFileInfo, scanRaw, reportRaw map[string]interface{}) fiber.Map {
-	asString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case string:
-			return strings.TrimSpace(t)
-		case float64:
-			// JSON numbers decode as float64. Render without trailing .0 when possible.
-			if t == float64(int64(t)) {
-				return fmt.Sprintf("%d", int64(t))
-			}
-			return fmt.Sprintf("%v", t)
-		case bool:
-			if t {
-				return "true"
-			}
-			return "false"
-		default:
-			return strings.TrimSpace(fmt.Sprint(v))
-		}
-	}
-	getStr := func(m map[string]interface{}, key string) string {
-		if m == nil {
-			return ""
-		}
-		v, ok := m[key]
-		if !ok {
-			return ""
-		}
-		return asString(v)
-	}
-	asMap := func(v interface{}) map[string]interface{} {
-		if v == nil {
-			return nil
-		}
-		m, _ := v.(map[string]interface{})
-		return m
-	}
-	asSlice := func(v interface{}) []interface{} {
-		if v == nil {
-			return nil
-		}
-		s, _ := v.([]interface{})
-		return s
-	}
-	truncate := func(s string, max int) string {
-		s = strings.TrimSpace(s)
-		if max <= 0 {
-			return ""
-		}
-		if len(s) <= max {
-			return s
-		}
-		// keep a tiny suffix room for ellipsis
-		if max <= 3 {
-			return s[:max]
-		}
-		return s[:max-3] + "..."
-	}
-	uniqueStrings := func(in []string) []string {
-		seen := make(map[string]struct{}, len(in))
-		out := make([]string, 0, len(in))
-		for _, s := range in {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			if _, ok := seen[s]; ok {
-				continue
-			}
-			seen[s] = struct{}{}
-			out = append(out, s)
-		}
-		sort.Strings(out)
-		return out
-	}
-
-	// Prefer report_json fields as they tend to be richer.
-	md5 := getStr(reportRaw, "md5")
-	sha1 := getStr(reportRaw, "sha1")
-	sha256 := getStr(reportRaw, "sha256")
-	if md5 == "" {
-		md5 = getStr(scanRaw, "md5")
-	}
-	if sha1 == "" {
-		sha1 = getStr(scanRaw, "sha1")
-	}
-	if sha256 == "" {
-		sha256 = getStr(scanRaw, "sha256")
-	}
-
-	// --- Permissions ---
-	permStatusCounts := fiber.Map{}
-	dangerousPerms := make([]fiber.Map, 0)
-	permissions := asMap(reportRaw["permissions"])
-	if permissions != nil {
-		for permName, raw := range permissions {
-			p := asMap(raw)
-			status := strings.ToLower(getStr(p, "status"))
-			if status == "" {
-				status = "unknown"
-			}
-			prev, ok := permStatusCounts[status]
-			if !ok {
-				permStatusCounts[status] = 1
-			} else {
-				// counts are integers; keep as int for JSON encoder.
-				permStatusCounts[status] = prev.(int) + 1
-			}
-			if status == "dangerous" {
-				dangerousPerms = append(dangerousPerms, fiber.Map{
-					"permission":   permName,
-					"info":         truncate(getStr(p, "info"), 200),
-					"description":  truncate(getStr(p, "description"), 300),
-					"protection":   status,
-				})
-			}
-		}
-		sort.Slice(dangerousPerms, func(i, j int) bool {
-			return asString(dangerousPerms[i]["permission"]) < asString(dangerousPerms[j]["permission"])
-		})
-		if len(dangerousPerms) > 25 {
-			dangerousPerms = dangerousPerms[:25]
-		}
-	}
-
-	// --- AppSec (findings by severity) ---
-	appsec := asMap(reportRaw["appsec"])
-	getFindingList := func(section string, maxItems int) ([]fiber.Map, int) {
-		items := make([]fiber.Map, 0)
-		s := asSlice(appsec[section])
-		for _, raw := range s {
-			m := asMap(raw)
-			if m == nil {
-				continue
-			}
-			items = append(items, fiber.Map{
-				"title":       truncate(getStr(m, "title"), 180),
-				"section":     truncate(getStr(m, "section"), 60),
-				"description": truncate(getStr(m, "description"), 400),
-			})
-			if maxItems > 0 && len(items) >= maxItems {
-				break
-			}
-		}
-		return items, len(s)
-	}
-	highItems, highTotal := getFindingList("high", 10)
-	warningItems, warningTotal := getFindingList("warning", 10)
-	hotspotItems, hotspotTotal := getFindingList("hotspot", 10)
-	infoItems, infoTotal := getFindingList("info", 10)
-	secureItems, secureTotal := getFindingList("secure", 10)
-
-	// --- Manifest findings ---
-	manifest := asMap(reportRaw["manifest_analysis"])
-	manifestSummary := asMap(manifest["manifest_summary"])
-	manifestFindingsOut := make([]fiber.Map, 0)
-	manifestFindings := asSlice(manifest["manifest_findings"])
-	for _, raw := range manifestFindings {
-		m := asMap(raw)
-		if m == nil {
-			continue
-		}
-		manifestFindingsOut = append(manifestFindingsOut, fiber.Map{
-			"severity":    strings.ToLower(getStr(m, "severity")),
-			"rule":        truncate(getStr(m, "rule"), 80),
-			"title":       truncate(getStr(m, "title"), 180),
-			"description": truncate(getStr(m, "description"), 400),
-		})
-		if len(manifestFindingsOut) >= 10 {
-			break
-		}
-	}
-
-	// --- Certificate findings ---
-	cert := asMap(reportRaw["certificate_analysis"])
-	certSummary := asMap(cert["certificate_summary"])
-	certFindings := asSlice(cert["certificate_findings"])
-	certFindingsOut := make([]fiber.Map, 0)
-	for _, raw := range certFindings {
-		row := asSlice(raw)
-		if len(row) < 3 {
-			continue
-		}
-		certFindingsOut = append(certFindingsOut, fiber.Map{
-			"severity":     strings.ToLower(asString(row[0])),
-			"title":        truncate(asString(row[1]), 180),
-			"description":  truncate(asString(row[2]), 400),
-		})
-		if len(certFindingsOut) >= 10 {
-			break
-		}
-	}
-
-	// --- Trackers ---
-	trackers := asMap(reportRaw["trackers"])
-	trackerNames := make([]string, 0)
-	trackerList := asSlice(trackers["trackers"])
-	for _, raw := range trackerList {
-		m := asMap(raw)
-		if m != nil {
-			name := getStr(m, "name")
-			if name != "" {
-				trackerNames = append(trackerNames, name)
-				continue
-			}
-		}
-		if s, ok := raw.(string); ok {
-			trackerNames = append(trackerNames, s)
-		}
-	}
-	trackerNames = uniqueStrings(trackerNames)
-	if len(trackerNames) > 30 {
-		trackerNames = trackerNames[:30]
-	}
-
-	// --- URLs & Domains ---
-	urlEntries := asSlice(reportRaw["urls"])
-	flatURLs := make([]string, 0)
-	for _, raw := range urlEntries {
-		m := asMap(raw)
-		if m == nil {
-			continue
-		}
-		urls := asSlice(m["urls"])
-		for _, u := range urls {
-			flatURLs = append(flatURLs, asString(u))
-		}
-	}
-	flatURLs = uniqueStrings(flatURLs)
-	urlSample := flatURLs
-	if len(urlSample) > 30 {
-		urlSample = urlSample[:30]
-	}
-
-	domains := asMap(reportRaw["domains"])
-	domainNames := make([]string, 0, len(domains))
-	suspiciousDomains := make([]fiber.Map, 0)
-	for domain, raw := range domains {
-		domainNames = append(domainNames, domain)
-		m := asMap(raw)
-		if m == nil {
-			continue
-		}
-		bad := strings.ToLower(getStr(m, "bad"))
-		of := m["ofac"]
-		ofStr := strings.ToLower(asString(of))
-		if bad == "yes" || ofStr == "true" {
-			suspiciousDomains = append(suspiciousDomains, fiber.Map{
-				"domain": domain,
-				"bad":    bad,
-				"ofac":   ofStr == "true",
-			})
-		}
-	}
-	sort.Strings(domainNames)
-	if len(domainNames) > 50 {
-		domainNames = domainNames[:50]
-	}
-	if len(suspiciousDomains) > 30 {
-		suspiciousDomains = suspiciousDomains[:30]
-	}
-
-	// --- Secrets ---
-	secretsRaw := asSlice(reportRaw["secrets"])
-	secrets := make([]string, 0)
-	for _, s := range secretsRaw {
-		secrets = append(secrets, truncate(asString(s), 120))
-	}
-	secrets = uniqueStrings(secrets)
-	secretSample := secrets
-	if len(secretSample) > 30 {
-		secretSample = secretSample[:30]
-	}
-
-	// --- Small metadata ---
-	exportedCount := asMap(reportRaw["exported_count"])
-	activities := asSlice(reportRaw["activities"])
-	services := asSlice(reportRaw["services"])
-	receivers := asSlice(reportRaw["receivers"])
-	providers := asSlice(reportRaw["providers"])
-
-	return fiber.Map{
-		"hash": info.Hash,
-		"identity": fiber.Map{
-			"app_name":      getStr(reportRaw, "app_name"),
-			"package_name":  getStr(reportRaw, "package_name"),
-			"file_name":     getStr(reportRaw, "file_name"),
-			"version_name":  getStr(reportRaw, "version_name"),
-			"main_activity": getStr(reportRaw, "main_activity"),
-			"icon_path":     getStr(reportRaw, "icon_path"),
-			"timestamp":     getStr(reportRaw, "timestamp"),
-		},
-		"hashes": fiber.Map{
-			"md5":    md5,
-			"sha1":   sha1,
-			"sha256": sha256,
-		},
-		"sdk": fiber.Map{
-			"min_sdk":    getStr(reportRaw, "min_sdk"),
-			"target_sdk": getStr(reportRaw, "target_sdk"),
-			"max_sdk":    getStr(reportRaw, "max_sdk"),
-		},
-		"components": fiber.Map{
-			"activities":      len(activities),
-			"services":        len(services),
-			"receivers":       len(receivers),
-			"providers":       len(providers),
-			"exported_count":  exportedCount,
-		},
-		"permissions": fiber.Map{
-			"status_counts":   permStatusCounts,
-			"dangerous_sample": dangerousPerms,
-		},
-		"findings": fiber.Map{
-			"security_score": getStr(appsec, "security_score"),
-			"totals": fiber.Map{
-				"high":    highTotal,
-				"warning": warningTotal,
-				"hotspot": hotspotTotal,
-				"info":    infoTotal,
-				"secure":  secureTotal,
-			},
-			"high":    highItems,
-			"warning": warningItems,
-			"hotspot": hotspotItems,
-			"info":    infoItems,
-			"secure":  secureItems,
-		},
-		"manifest": fiber.Map{
-			"summary":  manifestSummary,
-			"findings": manifestFindingsOut,
-		},
-		"certificate": fiber.Map{
-			"summary":  certSummary,
-			"findings": certFindingsOut,
-		},
-		"network": fiber.Map{
-			"urls_total":   len(flatURLs),
-			"urls_sample":  urlSample,
-			"domains_total": len(domains),
-			"domains_sample": domainNames,
-			"suspicious_domains": suspiciousDomains,
-		},
-		"trackers": fiber.Map{
-			"detected_trackers": trackers["detected_trackers"],
-			"total_trackers":    trackers["total_trackers"],
-			"trackers_sample":   trackerNames,
-		},
-		"secrets": fiber.Map{
-			"total":  len(secrets),
-			"sample": secretSample,
-		},
-		"meta": fiber.Map{
-			"mobsf_version": getStr(reportRaw, "version"),
-			"has_scan":      scanRaw != nil,
-			"has_report":    reportRaw != nil,
-		},
-	}
-}
+// buildMobSFSummary removed (moved to service.BuildMobSFSummary)

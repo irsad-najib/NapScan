@@ -158,17 +158,22 @@ func randomStateToken() (string, error) {
 // SameSite/Secure/Domain cookie rules may prevent the state cookie from being sent.
 var oauthStateStore = newInMemoryOAuthStateStore(15 * time.Minute)
 
+type StateData struct {
+	CreatedAt   time.Time
+	RedirectURL string
+}
+
 type inMemoryOAuthStateStore struct {
 	mu  sync.Mutex
 	ttl time.Duration
-	m   map[string]time.Time
+	m   map[string]StateData
 }
 
 func newInMemoryOAuthStateStore(ttl time.Duration) *inMemoryOAuthStateStore {
-	return &inMemoryOAuthStateStore{ttl: ttl, m: make(map[string]time.Time)}
+	return &inMemoryOAuthStateStore{ttl: ttl, m: make(map[string]StateData)}
 }
 
-func (s *inMemoryOAuthStateStore) Put(state string) {
+func (s *inMemoryOAuthStateStore) Put(state string, redirectURL string) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -176,27 +181,30 @@ func (s *inMemoryOAuthStateStore) Put(state string) {
 	// Opportunistic cleanup to avoid unbounded growth if users abandon the flow.
 	if len(s.m) > 2048 {
 		cutoff := now.Add(-s.ttl)
-		for k, ts := range s.m {
-			if ts.Before(cutoff) {
+		for k, v := range s.m {
+			if v.CreatedAt.Before(cutoff) {
 				delete(s.m, k)
 			}
 		}
 	}
 
-	s.m[state] = now
+	s.m[state] = StateData{
+		CreatedAt:   now,
+		RedirectURL: redirectURL,
+	}
 	
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
-		log.Printf("[OAUTH_STATE_DEBUG] Stored state: %s (expires in %v, total_states=%d)", state[:16]+"...", s.ttl, len(s.m))
+		log.Printf("[OAUTH_STATE_DEBUG] Stored state: %s (expires in %v, total_states=%d, redirect=%s)", state[:16]+"...", s.ttl, len(s.m), redirectURL)
 	}
 }
 
 // Consume validates state and makes it single-use by deleting it.
-func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string) {
+func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string, string) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ts, ok := s.m[state]
+	data, ok := s.m[state]
 	delete(s.m, state) // single-use regardless of validity
 	
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
@@ -204,19 +212,19 @@ func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string) {
 	}
 	
 	if !ok {
-		return false, "state not found (already used, server restarted, or never created)"
+		return false, "state not found (already used, server restarted, or never created)", ""
 	}
 	
-	age := now.Sub(ts)
+	age := now.Sub(data.CreatedAt)
 	if age > s.ttl {
-		return false, fmt.Sprintf("state expired (age=%v, ttl=%v)", age.Round(time.Second), s.ttl)
+		return false, fmt.Sprintf("state expired (age=%v, ttl=%v)", age.Round(time.Second), s.ttl), ""
 	}
 	
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
 		log.Printf("[OAUTH_STATE_DEBUG] State valid (age=%v)", age.Round(time.Second))
 	}
 	
-	return true, ""
+	return true, "", data.RedirectURL
 }
 
 // GoogleLogin (POST) handles the ID Token flow (SPA/Mobile)
@@ -283,7 +291,12 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 
 	// Store state on the server (not in cookies) so cross-domain redirects (ngrok/prod)
 	// don't break due to SameSite/Secure/Domain cookie restrictions.
-	oauthStateStore.Put(state)
+	redirectTO := c.Query("redirect_to")
+	if redirectTO == "" {
+		// Auto-detect from Referer if query param is missing
+		redirectTO = c.Get("Referer")
+	}
+	oauthStateStore.Put(state, redirectTO)
 
 	url := h.authService.GetGoogleLoginURL(state)
 	log.Printf("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s...)", state[:16])
@@ -309,7 +322,7 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	c.Set("Access-Control-Allow-Credentials", "true")
 
 	state := c.Query("state")
-	valid, errMsg := oauthStateStore.Consume(state)
+	valid, errMsg, redirectFromState := oauthStateStore.Consume(state)
 	if !valid {
 		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: State validation failed: %s (state=%s)", errMsg, state[:16]+"...")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -357,7 +370,10 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] set_cookie=%s", time.Since(stepStart))
 	stepStart = time.Now()
 
-	redirectURL := os.Getenv("FRONTEND_URL")
+	redirectURL := redirectFromState
+	if redirectURL == "" {
+		redirectURL = os.Getenv("FRONTEND_URL")
+	}
 	if redirectURL == "" {
 		redirectURL = os.Getenv("AUTH_SUCCESS_REDIRECT_URL")
 	}

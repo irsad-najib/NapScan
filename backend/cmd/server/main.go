@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.User{}, &models.ScanResult{}, &models.Batch{})
+	err = db.AutoMigrate(&models.User{}, &models.ScanResult{}, &models.Batch{}, &models.UploadedFile{})
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate models: %v", err)
 	}
@@ -134,6 +134,10 @@ func main() {
 	openvasService := service.NewOpenVASService()
 	sslyzeService := service.NewSslyzeService()
 	batchService := service.NewBatchService(batchRepo) // <-- UPDATE THIS
+	lifecycleService := service.NewLifecycleService(db)
+	
+	// Start cleanup worker (TTL 24h, check every 1h)
+	lifecycleService.StartCleanupWorker(context.Background(), 24*time.Hour, 1*time.Hour)
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler()
@@ -143,7 +147,8 @@ func main() {
 	ffufHandler := handler.NewFfufHandler(ffufService, scanResultRepo, batchService)
 	openvasHandler := handler.NewOpenVASHandler(openvasService, scanResultRepo, batchService)
 	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService, scanResultRepo, batchService)
-	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService)
+	lifecycleHandler := handler.NewLifecycleHandler(lifecycleService, batchService)
+	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService, lifecycleService)
 
 	// Auth & Batch Handlers
 	batchHandler := handler.NewBatchHandler(batchService) // <-- UPDATE THIS
@@ -176,6 +181,7 @@ func main() {
 	routes.OpenVASRoutes(api, openvasHandler)
 	routes.SslyzeRoutes(api, sslyzeHandler)
 	routes.BatchRoutes(api, batchHandler) // <-- Batch routes are now protected
+	routes.LifecycleRoutes(api, lifecycleHandler)
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
