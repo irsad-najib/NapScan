@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -23,54 +25,152 @@ func NewNucleiHandler(s *service.NucleiService, scanRepo repository.ScanResultRe
 	return &NucleiHandler{service: s, scanRepo: scanRepo, batchService: batchService}
 }
 
+func buildNucleiSummary(results []map[string]interface{}) map[string]interface{} {
+	summary := map[string]interface{}{
+		"total_findings": len(results),
+		"severity_count": make(map[string]int),
+		"findings":       make([]map[string]interface{}, 0),
+	}
+
+	severityCounts := make(map[string]int)
+	compactFindings := make([]map[string]interface{}, 0)
+
+	for _, result := range results {
+		// Extract severity
+		if info, ok := result["info"].(map[string]interface{}); ok {
+			if severity, ok := info["severity"].(string); ok {
+				severityCounts[severity]++
+			}
+		}
+
+		// Create compact version - hanya info penting
+		compact := make(map[string]interface{})
+		if templateID, ok := result["template-id"].(string); ok {
+			compact["template_id"] = templateID
+		}
+		if matched, ok := result["matched-at"].(string); ok {
+			compact["matched_at"] = matched
+		}
+		if info, ok := result["info"].(map[string]interface{}); ok {
+			compact["name"] = info["name"]
+			compact["severity"] = info["severity"]
+			// Limit tags to first 3 only
+			if tags, ok := info["tags"].([]interface{}); ok && len(tags) > 0 {
+				if len(tags) > 3 {
+					compact["tags"] = tags[:3]
+				} else {
+					compact["tags"] = tags
+				}
+			}
+		}
+		// Hilangkan extracted-results karena bisa sangat besar
+		compactFindings = append(compactFindings, compact)
+	}
+
+	summary["severity_count"] = severityCounts
+	summary["findings"] = compactFindings
+
+	return summary
+}
+
 // StartScan initiates a Nuclei scan
 // @Summary Start Nuclei Scan
-// @Description Run Nuclei scan on a target
+// @Description Run Nuclei scan on a target. Use compact=true (default) for summary, compact=false for full results (max 100)
 // @Tags Nuclei
 // @Accept json
 // @Security BearerAuth
 // @Produce json
+// @Param compact query boolean false "Return compact summary (default: true). Set to false for full results"
 // @Param target body object{target=string,batch_id=string} true "Target URL or Hostname"
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /nuclei/scan [post]
 func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
+	log.Printf("[NUCLEI] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
+		log.Printf("[NUCLEI] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
+		log.Printf("[NUCLEI] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
+	log.Printf("[NUCLEI] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
+		log.Printf("[NUCLEI] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	req.Target = strings.TrimSpace(req.Target)
 	if req.Target == "" {
+		log.Printf("[NUCLEI] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
+	log.Printf("[NUCLEI] Starting scan on target=%s", req.Target)
 	ctx, cancel := context.WithTimeout(c.Context(), 300*time.Second)
 	defer cancel()
 
 	results, err := h.service.ExecuteScan(ctx, req.Target)
 	if err != nil {
+		log.Printf("[NUCLEI] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "Nuclei scan failed", err)
 	}
+	log.Printf("[NUCLEI] Scan completed successfully with %d findings", len(results))
 
-	payload := fiber.Map{
-		"target":   req.Target,
-		"results":  results,
-		"batch_id": req.BatchID,
+	// Check if compact mode is requested (default to true to avoid large responses)
+	compact := c.Query("compact", "true") // Default compact=true
+	isCompact := strings.ToLower(strings.TrimSpace(compact)) == "true"
+	
+	var payload fiber.Map
+
+	if isCompact {
+		log.Printf("[NUCLEI] Building compact summary")
+		summary := buildNucleiSummary(results)
+		payload = fiber.Map{
+			"target":   req.Target,
+			"summary":  summary,
+			"batch_id": req.BatchID,
+			"compact":  true,
+		}
+		// Extra check: jika compact summary masih besar, potong findings
+		if findings, ok := summary["findings"].([]map[string]interface{}); ok && len(findings) > 50 {
+			log.Printf("[NUCLEI] Compact summary has %d findings, truncating to 50", len(findings))
+			summary["findings"] = findings[:50]
+			summary["total_findings"] = len(results)
+			summary["shown_findings"] = 50
+			summary["truncated"] = true
+		}
+	} else {
+		// Limit full results to prevent too large response
+		const maxFullResults = 100
+		truncated := false
+		displayResults := results
+		
+		if len(results) > maxFullResults {
+			log.Printf("[NUCLEI] Truncating results from %d to %d", len(results), maxFullResults)
+			displayResults = results[:maxFullResults]
+			truncated = true
+		}
+		
+		payload = fiber.Map{
+			"target":        req.Target,
+			"results":       displayResults,
+			"batch_id":      req.BatchID,
+			"compact":       false,
+			"total_count":   len(results),
+			"returned_count": len(displayResults),
+			"truncated":     truncated,
+		}
 	}
 
 	if h.scanRepo != nil {
@@ -84,9 +184,21 @@ func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
+			log.Printf("[NUCLEI] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
+		}
+		log.Printf("[NUCLEI] Database insert success")
+	}
+
+	// Log ukuran response untuk debugging
+	if jsonBytes, err := json.Marshal(payload); err == nil {
+		log.Printf("[NUCLEI] Response size: %d bytes (%.2f KB)", len(jsonBytes), float64(len(jsonBytes))/1024)
+		// Warning jika masih terlalu besar
+		if len(jsonBytes) > 500*1024 { // 500KB
+			log.Printf("[NUCLEI] WARNING: Response size exceeds 500KB, may cause timeout")
 		}
 	}
 
+	log.Printf("[NUCLEI] Request completed successfully")
 	return response.Success(c, "Scan completed", payload)
 }

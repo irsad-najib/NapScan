@@ -1,5 +1,44 @@
 basePath: /api
 definitions:
+  handler.ScanTask:
+    properties:
+      batch_id:
+        type: string
+      error:
+        type: string
+      progress:
+        description: 0-100
+        type: integer
+      result:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      started_at:
+        type: string
+      status:
+        $ref: '#/definitions/handler.TaskStatus'
+      target:
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  handler.TaskStatus:
+    enum:
+    - pending
+    - running
+    - completed
+    - failed
+    type: string
+    x-enum-varnames:
+    - TaskStatusPending
+    - TaskStatusRunning
+    - TaskStatusCompleted
+    - TaskStatusFailed
   models.Address:
     properties:
       addr:
@@ -478,8 +517,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: Run Nuclei scan on a target
+      description: Run Nuclei scan on a target. Use compact=true (default) for summary,
+        compact=false for full results (max 100)
       parameters:
+      - description: 'Return compact summary (default: true). Set to false for full
+          results'
+        in: query
+        name: compact
+        type: boolean
       - description: Target URL or Hostname
         in: body
         name: target
@@ -509,6 +554,112 @@ paths:
       security:
       - BearerAuth: []
       summary: Start Nuclei Scan
+      tags:
+      - Nuclei
+  /nuclei/scan/async:
+    post:
+      consumes:
+      - application/json
+      description: Start a Nuclei scan asynchronously. Returns task_id immediately.
+      parameters:
+      - description: Target URL or Hostname
+        in: body
+        name: target
+        required: true
+        schema:
+          properties:
+            batch_id:
+              type: string
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            properties:
+              message:
+                type: string
+              status:
+                type: string
+              task_id:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Start Nuclei Scan (Async)
+      tags:
+      - Nuclei
+  /nuclei/scan/async/{taskId}:
+    get:
+      description: Get the status and progress of an async Nuclei scan
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ScanTask'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Nuclei Scan Task Status
+      tags:
+      - Nuclei
+  /nuclei/scan/async/{taskId}/result:
+    get:
+      description: Get the full result of a completed Nuclei scan
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      - description: 'Return compact summary (default: true)'
+        in: query
+        name: compact
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Nuclei Scan Result
       tags:
       - Nuclei
   /openvas/report/{reportId}:

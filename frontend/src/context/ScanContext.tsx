@@ -175,7 +175,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 updateToolStatus(scanId, tool, { progress });
 
                 if (status === "done" || status === "completed") {
-                    reportId = statusData?.reportID;
+                    // Handle both reportID and reportId (backend may return either)
+                    reportId = statusData?.reportID || statusData?.reportId;
                     console.log(`[OpenVAS] Scan completed! reportID: ${reportId}`);
                     break;
                 }

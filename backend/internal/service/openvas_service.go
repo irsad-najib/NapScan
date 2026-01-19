@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -246,6 +247,7 @@ func (s *OpenVASService) GetVersion(ctx context.Context) (string, error) {
 }
 
 func (s *OpenVASService) StartScan(ctx context.Context, target string, batchID string) (map[string]interface{}, error) {
+    log.Printf("[OPENVAS_SERVICE] Starting scan for target=%s batch_id=%s", target, batchID)
     namePrefix := "Scan"
     if strings.TrimSpace(batchID) != "" {
         namePrefix = "Batch_" + batchID + "_Scan"
@@ -253,43 +255,54 @@ func (s *OpenVASService) StartScan(ctx context.Context, target string, batchID s
     targetName := fmt.Sprintf("%s-%s-%s", namePrefix, target, time.Now().Format("20060102-150405"))
 	
 	// 1. Create Target
+	log.Printf("[OPENVAS_SERVICE] Creating target: %s", targetName)
 	portListID := "33d0cd82-57c6-11e1-8ed1-406186ea4fc5" // All IANA configured TCP
 	createTargetXML := fmt.Sprintf(`<create_target><name>%s</name><hosts>%s</hosts><port_list id="%s"/></create_target>`, 
 		targetName, target, portListID)
 	
 	out, err := s.RunGVMCLI(ctx, createTargetXML)
 	if err != nil {
+		log.Printf("[OPENVAS_SERVICE] Failed to create target: %v", err)
 		return nil, fmt.Errorf("failed to create target: %w, output: %s", err, string(out))
 	}
 	
 	targetID := s.extractIDFromXML(string(out))
 	if targetID == "" {
+		log.Printf("[OPENVAS_SERVICE] Failed to extract target ID")
 		return nil, fmt.Errorf("failed to extract target ID, output: %s", string(out))
 	}
+	log.Printf("[OPENVAS_SERVICE] Target created with ID: %s", targetID)
 
 	// 2. Create Task
+	log.Printf("[OPENVAS_SERVICE] Creating task")
 	configID := "daba56c8-73ec-11df-a475-002264764cea" // Full and fast
-	scannerID := "08b69003-5fc2-4037-a479-93b440211c73" // OpenVAS Default
+	scannerID := "164e355f-2f21-4d8d-b651-f7e994b5797c" // OpenVAS Default
 	createTaskXML := fmt.Sprintf(`<create_task><name>%s</name><target id="%s"/><config id="%s"/><scanner id="%s"/></create_task>`,
 		targetName, targetID, configID, scannerID)
 		
 	out, err = s.RunGVMCLI(ctx, createTaskXML)
 	if err != nil {
+		log.Printf("[OPENVAS_SERVICE] Failed to create task: %v", err)
 		return nil, fmt.Errorf("failed to create task: %w, output: %s", err, string(out))
 	}
 	
 	taskID := s.extractIDFromXML(string(out))
 	if taskID == "" {
+		log.Printf("[OPENVAS_SERVICE] Failed to extract task ID")
 		return nil, fmt.Errorf("failed to extract task ID, output: %s", string(out))
 	}
+	log.Printf("[OPENVAS_SERVICE] Task created with ID: %s", taskID)
 
 	// 3. Start Task
+	log.Printf("[OPENVAS_SERVICE] Starting task %s", taskID)
 	startTaskXML := fmt.Sprintf(`<start_task task_id="%s"/>`, taskID)
 	out, err = s.RunGVMCLI(ctx, startTaskXML)
 	if err != nil {
+		log.Printf("[OPENVAS_SERVICE] Failed to start task: %v", err)
 		return nil, fmt.Errorf("failed to start task: %w, output: %s", err, string(out))
 	}
 
+	log.Printf("[OPENVAS_SERVICE] Scan started successfully, task_id=%s", taskID)
 	return map[string]interface{}{
 		"message":  "OpenVAS scan started successfully",
 		"target":   target,
@@ -312,15 +325,18 @@ func (s *OpenVASService) extractBatchID(name string) string {
 }
 
 func (s *OpenVASService) GetTaskStatus(ctx context.Context, taskID string) (*GVMDTask, error) {
+	log.Printf("[OPENVAS_SERVICE] Getting task status for task_id=%s", taskID)
 	xmlCmd := fmt.Sprintf(`<get_tasks task_id="%s" details="1"/>`, taskID)
 	out, err := s.RunGVMCLI(ctx, xmlCmd)
 	if err != nil {
+		log.Printf("[OPENVAS_SERVICE] Failed to get task status: %v", err)
 		return nil, err
 	}
 
 	cleanXML := s.extractCleanXML(string(out))
 	var resp GVMDTaskResponse
 	if err := xml.Unmarshal([]byte(cleanXML), &resp); err != nil {
+		log.Printf("[OPENVAS_SERVICE] Failed to parse task XML: %v", err)
 		return nil, fmt.Errorf("failed to parse task XML: %w", err)
 	}
 
@@ -332,23 +348,28 @@ func (s *OpenVASService) GetTaskStatus(ctx context.Context, taskID string) (*GVM
 	}
 
 	resp.Task.BatchID = s.extractBatchID(resp.Task.Name)
+	log.Printf("[OPENVAS_SERVICE] Task status retrieved: status=%s progress=%s", resp.Task.Status, resp.Task.Progress)
 	
 	return &resp.Task, nil
 }
 
 func (s *OpenVASService) GetScanReport(ctx context.Context, reportID string) (*GVMDReportContent, error) {
+    log.Printf("[OPENVAS_SERVICE] Getting scan report for report_id=%s", reportID)
     xmlCmd := fmt.Sprintf(`<get_reports report_id="%s" format_id="a994b278-1f62-11e1-96ac-406186ea4fc5" details="1"/>`, reportID)
     out, err := s.RunGVMCLI(ctx, xmlCmd)
     if err != nil {
+        log.Printf("[OPENVAS_SERVICE] Failed to get scan report: %v", err)
         return nil, err
     }
 
     cleanXML := s.extractCleanXML(string(out))
     var resp GVMDReportResponse
     if err := xml.Unmarshal([]byte(cleanXML), &resp); err != nil {
+        log.Printf("[OPENVAS_SERVICE] Failed to parse report XML: %v", err)
         return nil, fmt.Errorf("failed to parse report XML: %w", err)
     }
 
     resp.Report.InnerReport.BatchID = s.extractBatchID(resp.Report.InnerReport.Task.Name)
+    log.Printf("[OPENVAS_SERVICE] Report retrieved successfully with %d results", len(resp.Report.InnerReport.Results.Result))
     return &resp.Report.InnerReport, nil
 }
