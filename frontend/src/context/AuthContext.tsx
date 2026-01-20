@@ -195,8 +195,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type === "AUTH_SUCCESS") {
         window.removeEventListener("message", handleMessage);
-        // Refresh user session from backend
         setLoading(true);
+
+        // Check if popup passed a token
+        const tokenFromPopup = event.data?.token;
+        if (tokenFromPopup) {
+          console.log("[Auth] Received token from popup, storing...");
+          localStorage.setItem("napscan_auth_token", tokenFromPopup);
+        }
+
+        // Refresh user session from backend
         const me = await fetchMe();
         if (me) {
           const storedToken = getStoredToken();
@@ -208,9 +216,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(me);
           setLoading(false);
         } else {
-          // fetchMe failed - reload page to restore session from cookies
+          // fetchMe failed - if we have token, try to use it anyway
+          const token = getStoredToken();
+          if (token) {
+            console.log("[Auth] fetchMe failed but have token, storing user from token");
+            // Decode JWT to get user info (basic decode without verification)
+            try {
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              const userFromToken = {
+                email: payload.email || '',
+                name: payload.name || payload.email || '',
+                picture: payload.picture || '',
+              };
+              setAuthData(token, userFromToken);
+              setUser(userFromToken);
+            } catch (e) {
+              console.error("[Auth] Failed to decode token:", e);
+            }
+          }
           setLoading(false);
-          window.location.reload();
         }
       }
     };
