@@ -43,27 +43,9 @@ export default function LoginButton({ className = "" }: LoginButtonProps) {
     }
   }, [isAuthenticated]);
 
-  if (isAuthenticated && user) {
-    return (
-      <div className={`flex items-center gap-3 ${className}`}>
-        <div
-          className="bg-center bg-no-repeat bg-cover rounded-lg size-9 shrink-0 ring-2 ring-blue-500/20"
-          style={{
-            backgroundImage: user.picture
-              ? `url(\"${user.picture}\")`
-              : undefined,
-          }}
-        />
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-            {user.name || "Signed in"}
-          </span>
-          <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
-            Authenticated
-          </span>
-        </div>
-      </div>
-    );
+  // Don't render anything if already authenticated - parent component shows UserMenu instead
+  if (isAuthenticated) {
+    return null;
   }
 
   if (loading) {

@@ -70,7 +70,7 @@ export function clearAuthData(): void {
  */
 export async function fetchMe(): Promise<User | null> {
   try {
-    const response = await api.get<User>("/api/auth/me");
+    const response = await api.get<User>("/auth/me");
     return response.data;
   } catch {
     return null;
@@ -82,7 +82,7 @@ export async function fetchMe(): Promise<User | null> {
  */
 export async function logout(): Promise<void> {
   try {
-    await api.post("/api/auth/logout");
+    await api.post("/auth/logout");
   } catch {
     // ignore
   } finally {
@@ -96,7 +96,7 @@ export async function logout(): Promise<void> {
 export async function loginWithGoogleToken(
   idToken: string
 ): Promise<AuthResponse> {
-  const response = await api.post<AuthResponse>("/api/auth/google", {
+  const response = await api.post<AuthResponse>("/auth/google", {
     id_token: idToken,
   });
   return response.data;

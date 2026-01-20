@@ -5,14 +5,19 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ToolList } from "@/components/scans/ToolList";
+import { MobSFDecisionDialog } from "@/components/scans/MobSFDecisionDialog";
 
 export default function ScanDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const { getScan } = useScan();
+    const { getScan, pendingDecisions, submitMobSFDecision } = useScan();
+    const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
 
     const scanId = params.id as string;
     const scan = getScan(scanId);
+
+    // Find pending decision for this scan (MobSF waiting for user input)
+    const pendingDecision = pendingDecisions.find(p => p.scanId === scanId);
 
     // If scan is not found, we might be loading or ID is invalid
     // For context-based state, if it's missing it usually means invalid ID or lost state (reload)
@@ -28,6 +33,15 @@ export default function ScanDetailPage() {
             return () => clearTimeout(timer);
         }
     }, [scan]);
+
+    const handleMobSFDecision = async (decision: "STOP" | "CONTINUE") => {
+        setIsSubmittingDecision(true);
+        try {
+            await submitMobSFDecision(scanId, decision);
+        } finally {
+            setIsSubmittingDecision(false);
+        }
+    };
 
     if (!scan) {
         return (
@@ -133,6 +147,15 @@ export default function ScanDetailPage() {
                     </div>
                 </main>
             </div>
+
+            {/* MobSF Decision Dialog */}
+            {pendingDecision && (
+                <MobSFDecisionDialog
+                    pending={pendingDecision}
+                    onDecision={handleMobSFDecision}
+                    isSubmitting={isSubmittingDecision}
+                />
+            )}
         </div>
     );
 }

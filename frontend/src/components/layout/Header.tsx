@@ -14,7 +14,7 @@ export default function Header({
   showSearch = true,
   searchPlaceholder = "Search...",
 }: HeaderProps) {
-  const { user, isAuthenticated, loginWithPopup, logout } = useAuth();
+  const { user, isAuthenticated, loading: authLoading, loginWithPopup, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -75,7 +75,11 @@ export default function Header({
         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
 
         {/* Login/User Section */}
-        {!isAuthenticated ? (
+        {authLoading ? (
+          <div className="flex items-center justify-center px-5 py-2.5">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
+          </div>
+        ) : !isAuthenticated ? (
           <button
             onClick={loginWithPopup}
             className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform hover:scale-105 active:scale-95">

@@ -206,8 +206,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem("napscan_user", JSON.stringify(me));
           }
           setUser(me);
+          setLoading(false);
+        } else {
+          // fetchMe failed - reload page to restore session from cookies
+          setLoading(false);
+          window.location.reload();
         }
-        setLoading(false);
       }
     };
 

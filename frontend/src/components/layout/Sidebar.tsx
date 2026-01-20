@@ -80,8 +80,9 @@ export default function Sidebar() {
                     </nav>
                 </div>
 
-                {/* Help & Resources Section - Matching Light Theme */}
+                {/* Bottom Section: Help & User Profile */}
                 <div className="flex flex-col gap-2">
+                    {/* Help & Resources */}
                     <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
                         {helpItems.map((item) => (
                             <a
@@ -108,7 +109,7 @@ export default function Sidebar() {
                         ))}
                     </div>
 
-                    {/* Upgrade Plan Button - Blue Gradient matching nav active state */}
+                    {/* Upgrade Plan Button */}
                     <button className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-500/20 transition-all duration-200 hover:shadow-blue-500/30 mt-2">
                         <span className="material-symbols-outlined text-lg">
                             rocket_launch
@@ -120,3 +121,4 @@ export default function Sidebar() {
         </aside>
     );
 }
+

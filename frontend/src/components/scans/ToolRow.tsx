@@ -26,6 +26,7 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
             nuclei: "Nuclei",
             sslyze: "SSLyze",
             ffuf: "Ffuf",
+            mobsf: "MobSF",
         };
         return names[key] || key;
     };
@@ -38,6 +39,8 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                 return "text-blue-600 bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30";
             case "failed":
                 return "text-red-600 bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30";
+            case "awaiting_decision":
+                return "text-amber-600 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30";
             default:
                 return "text-slate-600 bg-slate-50 dark:bg-slate-500/10 border-slate-200 dark:border-slate-500/30";
         }
@@ -48,6 +51,7 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
             case "completed": return "check_circle";
             case "running": return "sync";
             case "failed": return "error";
+            case "awaiting_decision": return "hourglass_top";
             default: return "pending";
         }
     };
@@ -185,7 +189,11 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                         {/* Tab Content */}
                         <div>
                             {activeTab === 'vulns' && (
-                                <VulnerabilityList vulnerabilities={toolVulns} />
+                                <VulnerabilityList
+                                    vulnerabilities={toolVulns}
+                                    status={data.status}
+                                    error={data.error}
+                                />
                             )}
                             {activeTab === 'metadata' && (
                                 <ToolMetadata toolData={data} target={target} />

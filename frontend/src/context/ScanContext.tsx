@@ -6,7 +6,7 @@ import { parseToolResults } from "@/utils/toolParsers";
 
 // --- Types ---
 
-export type ScanStatus = "pending" | "running" | "completed" | "failed";
+export type ScanStatus = "pending" | "running" | "completed" | "failed" | "awaiting_decision";
 
 export interface ScanVulnerability {
     id: string;
@@ -33,6 +33,8 @@ export interface ToolExecution {
     error?: string;
     startTime?: string;
     endTime?: string;
+    // MobSF specific - for tracking file status
+    fileId?: number;
 }
 
 export interface ScanJob {
@@ -46,6 +48,22 @@ export interface ScanJob {
     vulnerabilities: ScanVulnerability[];
 }
 
+// MobSF pending decision - when awaiting user input
+export interface MobSFPendingDecision {
+    scanId: string;
+    fileId: number;
+    fileName: string;
+    appName: string;
+    packageName: string;
+    securityScore: string;
+    severityCounts: {
+        high: number;
+        warning: number;
+        info: number;
+    };
+    mobsfResult: any;
+}
+
 interface ScanContextType {
     scans: ScanJob[];
     currentScan: ScanJob | null;
@@ -53,6 +71,9 @@ interface ScanContextType {
     startScan: (target: string, selectedTools: ToolKey[], name?: string, apkFile?: File) => Promise<string>;
     deleteScan: (id: string) => void;
     isLoading: boolean;
+    // MobSF decision flow
+    pendingDecisions: MobSFPendingDecision[];
+    submitMobSFDecision: (scanId: string, decision: "STOP" | "CONTINUE") => Promise<void>;
 }
 
 // --- Helper Functions ---
@@ -67,6 +88,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     const [scans, setScans] = useState<ScanJob[]>([]);
     // No more loading state since we don't load from localStorage
     const [isLoading] = useState(false);
+    // MobSF pending decisions - scans waiting for user to decide STOP/CONTINUE
+    const [pendingDecisions, setPendingDecisions] = useState<MobSFPendingDecision[]>([]);
 
     const getScan = useCallback((id: string) => {
         return scans.find((s) => s.id === id);
@@ -346,7 +369,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    // --- MobSF Dedicated Handler (2-step async flow: upload + scan) ---
+    // --- MobSF Dedicated Handler (async flow with user decision) ---
     const executeMobSF = async (scanId: string, apkFile: File, batchId?: string) => {
         const tool: ToolKey = "mobsf";
         console.log(`[MobSF] Starting scan for APK: ${apkFile.name}${batchId ? `, batchId: ${batchId}` : ''}`);
@@ -358,7 +381,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         });
 
         try {
-            // Step 1: Upload APK
+            // Step 1: Upload APK (triggers MobSF scan automatically)
             console.log(`[MobSF] Step 1: Uploading APK file...`);
             updateToolStatus(scanId, tool, { progress: 10 });
 
@@ -370,59 +393,114 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 throw new Error((uploadRes as any).message || "Failed to upload APK");
             }
 
-            // Handle nested data structure - response is { success, message, data: { file_name, hash, scan_type, upload } }
+            // Get file_id from response
             const uploadData = (uploadRes.data as any)?.data || uploadRes.data;
-            const hash = uploadData?.hash;
+            const fileId = uploadData?.file_id;
             const fileName = uploadData?.file_name;
-            const scanType = uploadData?.scan_type;
 
-            if (!hash || !fileName || !scanType) {
-                console.error(`[MobSF] Missing required data in upload response:`, uploadRes.data);
-                throw new Error("Missing hash, file_name, or scan_type from MobSF upload");
+            if (!fileId) {
+                console.error(`[MobSF] No file_id in upload response:`, uploadRes.data);
+                throw new Error("No file_id returned from MobSF upload");
             }
 
-            console.log(`[MobSF] APK uploaded - hash: ${hash}, file: ${fileName}, type: ${scanType}`);
-            updateToolStatus(scanId, tool, { progress: 40 });
+            console.log(`[MobSF] APK uploaded - file_id: ${fileId}, file: ${fileName}`);
+            updateToolStatus(scanId, tool, { progress: 20, fileId });
 
-            // Step 2: Scan using hash, file_name, scan_type, batch_id
-            console.log(`[MobSF] Step 2: Starting scan...`);
-            const scanRes = await scannersApi.mobsf.scan({
-                hash,
-                file_name: fileName,
-                scan_type: scanType,
-                ...(batchId && { batch_id: batchId })
-            });
-            console.log(`[MobSF] Scan response:`, scanRes);
+            // Step 2: Poll for status until WAITING_USER_DECISION or terminal state
+            const POLL_INTERVAL = 5000; // 5 seconds
+            let pollCount = 0;
 
-            if (!scanRes.ok) {
-                console.error(`[MobSF] Scan failed:`, scanRes);
-                throw new Error((scanRes as any).message || "Failed to scan APK");
-            }
+            console.log(`[MobSF] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
 
-            // Handle nested data structure
-            const scanData = (scanRes.data as any)?.data || scanRes.data;
+            while (true) {
+                pollCount++;
+                console.log(`[MobSF] Poll #${pollCount}...`);
 
-            console.log(`[MobSF] Scan completed successfully!`);
-            updateToolStatus(scanId, tool, {
-                status: "completed",
-                progress: 100,
-                endTime: new Date().toISOString(),
-                result: scanData,
-            });
+                const statusRes = await scannersApi.mobsf.fileStatus(fileId);
+                console.log(`[MobSF] Status response:`, statusRes);
 
-            // Parse vulnerabilities from scan result
-            try {
-                const toolVulns = parseToolResults(tool, scanData);
-                console.log(`[MobSF] Parsed ${toolVulns.length} vulnerabilities`);
-                if (toolVulns.length > 0) {
-                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
-                        ...v,
-                        id: `${scanId}-${tool}-${idx}`,
-                    }));
-                    addVulnerabilities(scanId, scanVulns);
+                if (!statusRes.ok) {
+                    console.error(`[MobSF] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || "Failed to get MobSF status");
                 }
-            } catch (parseError) {
-                console.error(`[MobSF] Failed to parse results:`, parseError);
+
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                const status = statusData?.status;
+                console.log(`[MobSF] Current status: ${status}`);
+
+                // Update progress based on status
+                if (status === "MOBSF_RUNNING") {
+                    updateToolStatus(scanId, tool, { progress: 30 + Math.min(pollCount * 5, 40) });
+                }
+
+                if (status === "WAITING_USER_DECISION") {
+                    console.log(`[MobSF] Scan complete, waiting for user decision`);
+
+                    // Extract MobSF findings for display
+                    const findings = statusData?.findings?.mobsf;
+                    const identity = findings?.identity || {};
+                    const findingsSummary = findings?.findings || {};
+
+                    const pendingDecision: MobSFPendingDecision = {
+                        scanId,
+                        fileId,
+                        fileName: identity.file_name || fileName,
+                        appName: identity.app_name || "Unknown App",
+                        packageName: identity.package_name || "Unknown Package",
+                        securityScore: findingsSummary.security_score || "N/A",
+                        severityCounts: {
+                            high: findingsSummary.totals?.high || 0,
+                            warning: findingsSummary.totals?.warning || 0,
+                            info: findingsSummary.totals?.info || 0,
+                        },
+                        mobsfResult: statusData,
+                    };
+
+                    // Add to pending decisions
+                    setPendingDecisions(prev => [...prev, pendingDecision]);
+
+                    // Update tool status to awaiting_decision
+                    updateToolStatus(scanId, tool, {
+                        status: "awaiting_decision",
+                        progress: 70,
+                        result: statusData,
+                    });
+
+                    // Stop polling - wait for user decision via submitMobSFDecision
+                    return;
+                }
+
+                if (status === "COMPLETED") {
+                    console.log(`[MobSF] Scan fully completed!`);
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: statusData,
+                    });
+
+                    // Parse vulnerabilities
+                    try {
+                        const toolVulns = parseToolResults(tool, statusData);
+                        console.log(`[MobSF] Parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[MobSF] Failed to parse results:`, parseError);
+                    }
+                    return;
+                }
+
+                if (status === "FAILED") {
+                    throw new Error(statusData?.error || "MobSF scan failed");
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
             }
         } catch (err: any) {
             console.error("[MobSF] Failed:", err);
@@ -650,6 +728,129 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         setScans((prev) => prev.filter((s) => s.id !== id));
     };
 
+    // Submit user decision for MobSF scan (STOP or CONTINUE with Frida)
+    const submitMobSFDecision = async (scanId: string, decision: "STOP" | "CONTINUE") => {
+        const pending = pendingDecisions.find(p => p.scanId === scanId);
+        if (!pending) {
+            console.error(`[MobSF] No pending decision found for scanId: ${scanId}`);
+            return;
+        }
+
+        console.log(`[MobSF] Submitting decision: ${decision} for file_id: ${pending.fileId}`);
+        const tool: ToolKey = "mobsf";
+
+        try {
+            // Submit decision to backend
+            const decisionRes = await scannersApi.mobsf.submitDecision(pending.fileId, decision);
+            console.log(`[MobSF] Decision response:`, decisionRes);
+
+            if (!decisionRes.ok) {
+                throw new Error((decisionRes as any).message || "Failed to submit decision");
+            }
+
+            // Remove from pending decisions
+            setPendingDecisions(prev => prev.filter(p => p.scanId !== scanId));
+
+            if (decision === "STOP") {
+                // Mark as completed with current MobSF results
+                updateToolStatus(scanId, tool, {
+                    status: "completed",
+                    progress: 100,
+                    endTime: new Date().toISOString(),
+                });
+
+                // Parse vulnerabilities from MobSF result
+                try {
+                    const toolVulns = parseToolResults(tool, pending.mobsfResult);
+                    console.log(`[MobSF] Parsed ${toolVulns.length} vulnerabilities`);
+                    if (toolVulns.length > 0) {
+                        const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                            ...v,
+                            id: `${scanId}-${tool}-${idx}`,
+                        }));
+                        addVulnerabilities(scanId, scanVulns);
+                    }
+                } catch (parseError) {
+                    console.error(`[MobSF] Failed to parse results:`, parseError);
+                }
+            } else {
+                // CONTINUE - Update status to running and poll for Frida completion
+                updateToolStatus(scanId, tool, {
+                    status: "running",
+                    progress: 75,
+                });
+
+                // Poll for Frida completion
+                const POLL_INTERVAL = 5000;
+                let pollCount = 0;
+
+                console.log(`[MobSF] Continuing with Frida, polling for completion...`);
+
+                while (true) {
+                    pollCount++;
+                    console.log(`[MobSF/Frida] Poll #${pollCount}...`);
+
+                    const statusRes = await scannersApi.mobsf.fileStatus(pending.fileId);
+                    console.log(`[MobSF/Frida] Status response:`, statusRes);
+
+                    if (!statusRes.ok) {
+                        throw new Error((statusRes as any).message || "Failed to get status");
+                    }
+
+                    const statusData = (statusRes.data as any)?.data || statusRes.data;
+                    const status = statusData?.status;
+                    console.log(`[MobSF/Frida] Current status: ${status}`);
+
+                    if (status === "FRIDA_RUNNING") {
+                        updateToolStatus(scanId, tool, { progress: 75 + Math.min(pollCount * 3, 20) });
+                    }
+
+                    if (status === "COMPLETED") {
+                        console.log(`[MobSF/Frida] Scan fully completed!`);
+                        updateToolStatus(scanId, tool, {
+                            status: "completed",
+                            progress: 100,
+                            endTime: new Date().toISOString(),
+                            result: statusData,
+                        });
+
+                        // Parse vulnerabilities
+                        try {
+                            const toolVulns = parseToolResults(tool, statusData);
+                            console.log(`[MobSF] Parsed ${toolVulns.length} vulnerabilities`);
+                            if (toolVulns.length > 0) {
+                                const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                    ...v,
+                                    id: `${scanId}-${tool}-${idx}`,
+                                }));
+                                addVulnerabilities(scanId, scanVulns);
+                            }
+                        } catch (parseError) {
+                            console.error(`[MobSF] Failed to parse results:`, parseError);
+                        }
+                        break;
+                    }
+
+                    if (status === "FAILED") {
+                        throw new Error(statusData?.error || "Frida scan failed");
+                    }
+
+                    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+                }
+            }
+        } catch (err: any) {
+            console.error("[MobSF] Decision failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+            // Remove from pending on error too
+            setPendingDecisions(prev => prev.filter(p => p.scanId !== scanId));
+        }
+    };
+
     return (
         <ScanContext.Provider
             value={{
@@ -659,6 +860,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 startScan,
                 deleteScan,
                 isLoading,
+                pendingDecisions,
+                submitMobSFDecision,
             }}
         >
             {children}

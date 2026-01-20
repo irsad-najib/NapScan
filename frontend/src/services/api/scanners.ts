@@ -79,18 +79,21 @@ export type OpenVASStartScanResponse = {
 
 export type OpenVASReportResponse = unknown;
 
-// MobSF Types
+// MobSF Types - New async flow with user decision
+export type MobSFFileStatus =
+  | "UPLOADED"
+  | "MOBSF_RUNNING"
+  | "WAITING_USER_DECISION"
+  | "FRIDA_RUNNING"
+  | "COMPLETED"
+  | "FAILED";
+
 export type MobSFUploadData = {
+  batch_id: string;
+  file_id: number;
   file_name: string;
   hash: string;
-  scan_type: string;
-  upload: {
-    analyzer: string;
-    file_name: string;
-    hash: string;
-    scan_type: string;
-    status: string;
-  };
+  status: MobSFFileStatus;
 };
 
 export type MobSFUploadResponse = {
@@ -99,35 +102,120 @@ export type MobSFUploadResponse = {
   data: MobSFUploadData;
 };
 
-export type MobSFScanRequest = {
-  hash: string;
-  file_name: string;
-  scan_type: string;
-  batch_id?: string;
+// MobSF Findings structure
+export type MobSFFindingSeverity = {
+  high?: number;
+  warning?: number;
+  info?: number;
+  hotspot?: number;
+  secure?: number;
 };
 
-export type MobSFScanResponse = {
-  hash: string;
-  scan_type: string;
-  file_name: string;
-  app_name?: string;
-  package_name?: string;
-  version_name?: string;
-  version_code?: string;
-  size?: string;
-  md5?: string;
-  sha1?: string;
-  sha256?: string;
-  permissions?: Record<string, unknown>;
-  security_score?: number;
-  average_cvss?: number;
-  findings?: Array<{
-    severity: string;
-    title: string;
-    description: string;
-  }>;
-  // Full scan result from MobSF
-  [key: string]: unknown;
+export type MobSFFinding = {
+  title: string;
+  description: string;
+  severity?: string;
+  section?: string;
+  rule?: string;
+};
+
+export type MobSFFindings = {
+  mobsf: {
+    identity: {
+      app_name: string;
+      package_name: string;
+      file_name: string;
+      version_name: string;
+      icon_path?: string;
+    };
+    findings: {
+      security_score: string;
+      totals: MobSFFindingSeverity;
+      high: MobSFFinding[];
+      warning: MobSFFinding[];
+      info: MobSFFinding[];
+      hotspot?: MobSFFinding[];
+      secure?: MobSFFinding[];
+    };
+    permissions: {
+      status_counts: {
+        dangerous: number;
+        normal: number;
+        unknown: number;
+      };
+      dangerous_sample: Array<{
+        permission: string;
+        description: string;
+        info: string;
+        protection: string;
+      }>;
+    };
+    hashes: {
+      md5: string;
+      sha1: string;
+      sha256: string;
+    };
+    sdk: {
+      min_sdk: string;
+      target_sdk: string;
+      max_sdk?: string;
+    };
+    components: {
+      activities: number;
+      services: number;
+      receivers: number;
+      providers: number;
+      exported_count: {
+        exported_activities: number;
+        exported_services: number;
+        exported_receivers: number;
+        exported_providers: number;
+      };
+    };
+    network: {
+      domains_total: number;
+      urls_total: number;
+      domains_sample: string[];
+      suspicious_domains: string[];
+    };
+    trackers: {
+      detected_trackers: number;
+      total_trackers: number;
+    };
+    secrets: {
+      total: number;
+      sample: string[];
+    };
+  };
+};
+
+export type MobSFFileStatusResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    id: number;
+    batch_id: string;
+    file_name: string;
+    hash: string;
+    status: MobSFFileStatus;
+    severity?: string;
+    error?: string;
+    findings?: MobSFFindings;
+    created_at: string;
+    updated_at: string;
+  };
+};
+
+export type MobSFDecisionRequest = {
+  decision: "STOP" | "CONTINUE";
+};
+
+export type MobSFDecisionResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    status: MobSFFileStatus;
+  };
 };
 
 function ensureNonEmptyTarget(target: string): string {
@@ -277,7 +365,7 @@ export const scannersApi = {
   },
 
   mobsf: {
-    // Step 1: Upload APK file
+    // Step 1: Upload APK file - triggers MobSF scan automatically
     upload: async (file: File, batchId?: string): Promise<ApiResult<MobSFUploadResponse>> => {
       const formData = new FormData();
       formData.append("file", file);
@@ -295,12 +383,22 @@ export const scannersApi = {
       });
     },
 
-    // Step 2: Scan using hash, file_name, scan_type from upload
-    scan: async (params: MobSFScanRequest): Promise<ApiResult<MobSFScanResponse>> =>
-      request<MobSFScanResponse>({
+    // Step 2: Poll file status until WAITING_USER_DECISION or COMPLETED
+    fileStatus: async (fileId: number): Promise<ApiResult<MobSFFileStatusResponse>> =>
+      request<MobSFFileStatusResponse>({
+        method: "GET",
+        url: `/api/files/${fileId}/status`,
+      }),
+
+    // Step 3: Submit user decision (STOP or CONTINUE with Frida)
+    submitDecision: async (
+      fileId: number,
+      decision: "STOP" | "CONTINUE"
+    ): Promise<ApiResult<MobSFDecisionResponse>> =>
+      request<MobSFDecisionResponse>({
         method: "POST",
-        url: "/api/mobsf/scan",
-        data: params,
+        url: `/api/files/${fileId}/decision`,
+        data: { decision },
       }),
   },
 } as const;
