@@ -1,5 +1,8 @@
 FROM golang:latest
 
+# Node.js and frida-compile are no longer needed
+
+
 # Install tools (nmap, ffuf, zap, sslyze, nuclei, gvm-tools)
 RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb  xz-utils && rm -rf /var/lib/apt/lists/*
 
@@ -36,6 +39,9 @@ RUN go mod download
 
 # Copy source
 COPY . .
+
+# Frida script is now pre-built as agent.js (ES module/CommonJS hybrid not needed, single file)
+
 
 # Generate Swagger Docs
 RUN swag init -d ./cmd/server,./internal/handler,./internal/routes,./pkg/response,./internal/service,./internal/models -o ./docs

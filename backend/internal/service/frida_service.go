@@ -1,12 +1,16 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,7 +24,7 @@ func NewFridaService() *FridaService {
 	// In production, we might want an env var
 	path := os.Getenv("FRIDA_SCRIPT_PATH")
 	if path == "" {
-		path = "frida_engine/entry.js"
+		path = "frida_engine/agent.js"
 	}
 	return &FridaService{
 		scriptPath: path,
@@ -28,49 +32,168 @@ func NewFridaService() *FridaService {
 }
 
 // RunScan executes the Frida script against the target package
-// It assumes a device is connected (-U) and ready.
 func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[string]interface{}, error) {
-	// frida -U -f <package> -l <script> --no-pause
-	// We use -U for USB device (or emulator).
-	// --no-pause to let app start immediately.
-	// We might need -q (quiet) to reduce noise, but our script handles markers.
-	
-	cmd := exec.CommandContext(ctx, "frida", "-U", "-f", packageName, "-l", s.scriptPath)
-	// Should we add a timeout via context? Caller handles context.
+	// 1. Create a timeout context for the scan duration (e.g., 30-60 seconds)
+	scanCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 
-	log.Printf("[FRIDA] Executing: %s", cmd.String())
-	
-	// Capture combined output
-	outputBytes, err := cmd.CombinedOutput()
-	output := string(outputBytes)
-	
+	// 2. Prepare Frida Argument list
+	// -U: USB device
+	// -f: Spawn package
+	// -l: Script path
+	// -q: Quiet mode (non-interactive)
+	args := []string{"-U", "-f", packageName, "-l", s.scriptPath, "-t", "18000"}
+
+	cmd := exec.CommandContext(scanCtx, "frida", args...)
+
+	// CRITICAL: Keep Stdin open to prevent Frida from treating it as EOF and exiting.
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		// Frida might exit with error if app crashes or device not found
-		log.Printf("[FRIDA] Execution failed: %v\nOutput: %s", err, output)
-		return nil, fmt.Errorf("frida execution failed: %w", err)
+		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+	// We do NOT write anything, just hold it open until function return
+	defer stdin.Close()
+
+	log.Printf("[FRIDA] Executing: %s %v", "frida", args)
+
+	// Use io.Pipe to stream output
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start frida: %w", err)
 	}
 
-	// Parse custom markers
+	var outputBuilder strings.Builder
+	done := make(chan bool)
+
+	// Stream output in background
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Log for debugging
+			log.Printf("[FRIDA] %s", line)
+			outputBuilder.WriteString(line + "\n")
+		}
+		done <- true
+	}()
+
+	// Wait for command to finish OR context timeout
+	err = cmd.Wait()
+	
+	// Close pipe to finish the scanner
+	pw.Close() 
+	<-done
+
+	output := outputBuilder.String()
+
+	// Check exit scenarios
+	if scanCtx.Err() == context.DeadlineExceeded {
+		log.Printf("[FRIDA] Scan timed out (expected lifecycle management). Process killed.")
+		err = nil 
+	} else if err != nil {
+		// If markers are present, we consider it a partial success (or crash after start)
+		if strings.Contains(output, "[[NAPSCAN_JSON_START]]") {
+			log.Println("[FRIDA] Process finished with error but JSON markers found. proceeding.")
+			err = nil
+		} else {
+			log.Printf("[FRIDA] Execution unexpectedly failed: %v\nOutput: %s", err, output)
+			return nil, fmt.Errorf("frida execution failed: %w", err)
+		}
+	}
+
+	// Parse custom markers - EXTRACT ALL EVENTS
 	startMarker := "[[NAPSCAN_JSON_START]]"
 	endMarker := "[[NAPSCAN_JSON_END]]"
 	
-	startIndex := strings.Index(output, startMarker)
-	endIndex := strings.Index(output, endMarker)
+	var events []map[string]interface{}
 	
-	if startIndex == -1 || endIndex == -1 || startIndex >= endIndex {
-		log.Printf("[FRIDA] Markers not found in output:\n%s", output)
+	remaining := output
+	for {
+		startIndex := strings.Index(remaining, startMarker)
+		if startIndex == -1 {
+			break
+		}
+		
+		// Advance past start marker
+		remaining = remaining[startIndex:]
+		
+		endIndex := strings.Index(remaining, endMarker)
+		if endIndex == -1 {
+			break
+		}
+		
+		jsonStr := remaining[len(startMarker):endIndex]
+		
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
+			log.Printf("[FRIDA] Warning: Failed to parse event JSON: %v", err)
+		} else {
+			events = append(events, event)
+		}
+		
+		// Advance past end marker
+		remaining = remaining[endIndex+len(endMarker):]
+	}
+
+	if len(events) == 0 {
+		log.Printf("[FRIDA] No valid JSON events found in output.")
 		return nil, fmt.Errorf("failed to find valid JSON markers in frida output")
 	}
-	
-	jsonStr := output[startIndex+len(startMarker) : endIndex]
-	var results map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &results); err != nil {
-		return nil, fmt.Errorf("failed to parse frida json: %w", err)
+
+	results := map[string]interface{}{
+		"scan_timestamp": time.Now().UTC(),
+		"package_name":   packageName,
+		"events":         events,
 	}
 	
-	// Add metadata
-	results["scan_timestamp"] = time.Now().UTC()
-	results["package_name"] = packageName
-	
 	return results, nil
+}
+// bundleScript reads a JS file and recursively inlines `load("path/to/file.js")` calls.
+func (s *FridaService) bundleScript(path string, visited map[string]bool) (string, error) {
+	// Prevent circular dependencies
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if visited[absPath] {
+		return "", nil // Already loaded
+	}
+	visited[absPath] = true
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", path, err)
+	}
+
+	scriptContent := string(content)
+	
+	// Regex to find load("...")
+	// Matches: load("path/to/file.js"); or load('path/to/file.js')
+	re := regexp.MustCompile(`load\(['"](.+?)['"]\);?`)
+	
+	result := re.ReplaceAllStringFunc(scriptContent, func(match string) string {
+		submatch := re.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		relPath := submatch[1]
+		
+		// Resolve path relative to the current file's directory
+		dir := filepath.Dir(path)
+		fullPath := filepath.Join(dir, relPath)
+		
+		bundled, err := s.bundleScript(fullPath, visited)
+		if err != nil {
+			log.Printf("Warning: failed to bundle %s: %v", fullPath, err)
+			return fmt.Sprintf("// Error loading %s: %v", relPath, err)
+		}
+		
+		return fmt.Sprintf("// Begin %s\n%s\n// End %s", relPath, bundled, relPath)
+	})
+	
+	return result, nil
 }

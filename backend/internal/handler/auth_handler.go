@@ -118,10 +118,14 @@ func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
 		HTTPOnly: false,
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
-		// Always use None + Secure for development (ngrok compatibility)
-		SameSite: "Lax",
-		Secure:   true,
+	// Use configured SameSite and Secure settings
+		SameSite: sameSiteMode(),
+		Secure:   isSecureCookie(),
 	}
+
+	// DEBUG: Log cookie details before setting
+	log.Printf("[AUTH_COOKIE] Setting cookie: Name=%s Path=%s Secure=%v SameSite=%s Expires=%v", 
+		cookie.Name, cookie.Path, cookie.Secure, cookie.SameSite, cookie.Expires)
 	
 	// Set cookie IMMEDIATELY - this is the critical path
 	c.Cookie(cookie)
@@ -337,6 +341,15 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 	} else {
 		log.Printf("[AUTH_OAUTH_LOGIN] Received redirect_to param: %q", redirectTO)
 	}
+
+	// CRITICAL FIX: Fiber/Fasthttp strings are backed by the request buffer which is reused.
+	// We MUST create a deep copy of the string before storing it in a global map.
+	// Otherwise, the value will be corrupted by subsequent requests (buffer reuse).
+	redirectTO = string([]byte(redirectTO))
+
+	// DEBUG: Explicitly log what we are storing
+	log.Printf("[DEBUG_FIX] Storing State: key=%s, value=%q", state, redirectTO)
+	
 	oauthStateStore.Put(state, redirectTO)
 
 	url := h.authService.GetGoogleLoginURL(state)
@@ -364,6 +377,10 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 
 	state := c.Query("state")
 	valid, errMsg, redirectFromState := oauthStateStore.Consume(state)
+	
+	// DEBUG: explicit log of what we got back
+	log.Printf("[DEBUG_FIX] Consumed State: key=%s, valid=%v, retrieved_url=%q", state, valid, redirectFromState)
+	
 	if !valid {
 		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: State validation failed: %s (state=%s)", errMsg, state[:16]+"...")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -416,13 +433,16 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	
 	// First, check if we have a redirect_to from the OAuth state
 	if redirectFromState != "" {
+		redirectFromState = strings.TrimSpace(redirectFromState) // Fix potential whitespace issues
 		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Validating redirect_to from state: %q", redirectFromState)
 		if isAllowedRedirectURL(redirectFromState) {
 			redirectURL = redirectFromState
 			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ✅ Using validated redirect_to from state: %q", redirectURL)
 		} else {
-			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ⚠️  Rejected redirect_to (not in whitelist): %q", redirectFromState)
+			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ⚠️  Rejected redirect_to (not in whitelist or invalid format): %q", redirectFromState)
 		}
+	} else {
+		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] State consumed but redirect_to was empty")
 	}
 	
 	// Fallback to FRONTEND_URL if no valid redirect_to
@@ -458,7 +478,8 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 // @Router /auth/dev/get-token [get]
 func (h *AuthHandler) GetDevToken(c *fiber.Ctx) error {
 	// CRITICAL: Only allow this in development environments.
-	if os.Getenv("APP_ENV") != "development" {
+	// CRITICAL: Only allow this in development environments OR if explicitly enabled.
+	if os.Getenv("APP_ENV") != "development" && os.Getenv("ENABLE_GUEST_LOGIN") != "true" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "This endpoint is for development use only.",
 		})

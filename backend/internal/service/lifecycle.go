@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -239,24 +240,30 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 
 // StartFrida initiates the Frida dynamic scan
 func (s *LifecycleService) StartFrida(fileID uint) error {
+	log.Printf("[LIFECYCLE] StartFrida called for file %d", fileID)
 	// Validate before async
 	file, err := s.GetFile(fileID)
 	if err != nil {
 		return err
 	}
 
+	log.Printf("[LIFECYCLE] Starting Frida scan for file %s", file.FileName)
+
 	// Sync state update first
 	if err := s.UpdateStatus(fileID, models.FileStatusFridaRunning, ""); err != nil {
 		return err
 	}
 
+	log.Printf("[LIFECYCLE] Frida: Starting scan--2 for file %d", fileID)
 	go func() {
+		log.Printf("[LIFECYCLE] Frida: Inside goroutine for file %d", fileID)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		
 		// Re-fetch file inside goroutine to be safe? or use `file` captured?
 		// `file` is captured by value (copy of struct). Safe. 
 
+		log.Printf("[LIFECYCLE] Frida: Parsing findings, Findings length: %d", len(file.Findings))
 		// Parse findings to get package_name
 		var findings map[string]interface{}
 		if err := json.Unmarshal([]byte(file.Findings), &findings); err != nil {
@@ -264,17 +271,59 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing previous scan data")
 			return
 		}
+		log.Printf("[LIFECYCLE] Frida: Successfully parsed findings")
 
 		mobsf, ok := findings["mobsf"].(map[string]interface{})
 		if !ok {
+			log.Printf("[LIFECYCLE] Frida: Missing MobSF data in findings")
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing MobSF data")
 			return
 		}
-		pkgName := fmt.Sprint(mobsf["package_name"])
+		log.Printf("[LIFECYCLE] Frida: Successfully extracted MobSF data")
+		
+		// Extract package_name from identity object
+		identity, ok := mobsf["identity"].(map[string]interface{})
+		if !ok {
+			log.Printf("[LIFECYCLE] Frida: Missing identity data in MobSF findings")
+			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing identity data")
+			return
+		}
+
+		pkgName := fmt.Sprint(identity["package_name"])
+		log.Printf("[LIFECYCLE] Frida: Extracted package name: %s", pkgName)
 		if pkgName == "" || pkgName == "<nil>" {
+			log.Printf("[LIFECYCLE] Frida: Package name is empty or nil")
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Package name not found")
 			return
 		}
+
+		// Setup deferred uninstall to ensure cleanup happens
+		defer func() {
+			log.Printf("[LIFECYCLE] Uninstalling APK from emulator: %s", pkgName)
+			uninstallCtx, uninstallCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer uninstallCancel()
+			
+			uninstallCmd := exec.CommandContext(uninstallCtx, "adb", "uninstall", pkgName)
+			if output, err := uninstallCmd.CombinedOutput(); err != nil {
+				log.Printf("[LIFECYCLE] Failed to uninstall APK (non-fatal): %v, output: %s", err, string(output))
+			} else {
+				log.Printf("[LIFECYCLE] APK uninstalled successfully")
+			}
+		}()
+
+		// Install APK to emulator before scanning
+		log.Printf("[LIFECYCLE] Installing APK to emulator: %s", file.FilePath)
+		installCtx, installCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer installCancel()
+		
+		installCmd := exec.CommandContext(installCtx, "adb", "install", "-r", file.FilePath)
+		installOutput, err := installCmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[LIFECYCLE] Failed to install APK: %v, output: %s", err, string(installOutput))
+			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("APK installation failed: %v", err))
+			return
+		}
+		log.Printf("[LIFECYCLE] APK installed successfully")
 
 		log.Printf("[LIFECYCLE] Starting Frida scan for %s (%s)", file.FileName, pkgName)
 		results, err := s.frida.RunScan(ctx, pkgName)
