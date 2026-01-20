@@ -1,22 +1,58 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { ToolKey } from "@/services/api";
-import { ToolExecution, ScanVulnerability } from "@/context/ScanContext";
+import { ToolExecution, ScanVulnerability, useScan } from "@/context/ScanContext";
 import { ToolRiskOverview } from "./ToolRiskOverview";
 import { ToolMetadata } from "./ToolMetadata";
 import { VulnerabilityList } from "./VulnerabilityList";
+import { parseFridaResults, extractMobsfAppInfo } from "@/utils/toolParsers";
 
 interface ToolRowProps {
     tool: ToolKey;
     data: ToolExecution;
     target: string;
     vulnerabilities: ScanVulnerability[];
+    scanId?: string;
+    // For MobSF: pass the full scan result to extract Frida findings
+    fullScanResult?: any;
 }
 
-export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
+export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanResult }: ToolRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [activeTab, setActiveTab] = useState<"vulns" | "metadata">("vulns");
+    const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
+    const [mobsfFridaView, setMobsfFridaView] = useState<"mobsf" | "frida">("mobsf");
+
+    // Parse Frida results if this is MobSF and we have full result with frida data
+    const fridaVulnerabilities = useMemo(() => {
+        if (tool !== "mobsf" || !fullScanResult) return [];
+        return parseFridaResults(fullScanResult);
+    }, [tool, fullScanResult]);
+
+    // Extract app info for MobSF
+    const appInfo = useMemo(() => {
+        if (tool !== "mobsf" || !fullScanResult) return null;
+        return extractMobsfAppInfo(fullScanResult);
+    }, [tool, fullScanResult]);
+
+    const hasFridaResults = fridaVulnerabilities.length > 0;
+
+    const { pendingDecisions, submitMobSFDecision } = useScan();
+
+    // Check if this tool has a pending decision
+    const pendingDecision = scanId ? pendingDecisions.find(p => p.scanId === scanId) : null;
+    const showDecisionUI = data.status === "awaiting_decision" && tool === "mobsf";
+
+    const handleDecision = async (decision: "STOP" | "CONTINUE") => {
+        if (!scanId) return;
+        setIsSubmittingDecision(true);
+        try {
+            await submitMobSFDecision(scanId, decision);
+        } finally {
+            setIsSubmittingDecision(false);
+        }
+    };
 
     const getToolName = (key: string) => {
         const names: Record<string, string> = {
@@ -27,6 +63,7 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
             sslyze: "SSLyze",
             ffuf: "Ffuf",
             mobsf: "MobSF",
+            frida: "Frida",
         };
         return names[key] || key;
     };
@@ -150,6 +187,51 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                 </div>
             </div>
 
+            {/* Decision UI for awaiting_decision status */}
+            {showDecisionUI && (
+                <div className="border-t border-amber-200 dark:border-amber-500/30 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 p-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-2xl">
+                                help
+                            </span>
+                            <div>
+                                <p className="font-bold text-slate-900 dark:text-white text-sm">
+                                    MobSF Analysis Complete - Action Required
+                                </p>
+                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                    Choose to stop here or continue with Frida dynamic analysis
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDecision("STOP");
+                                }}
+                                disabled={isSubmittingDecision}
+                                className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
+                            >
+                                <span className="material-symbols-outlined text-lg">stop_circle</span>
+                                {isSubmittingDecision ? "Processing..." : "Stop Here"}
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDecision("CONTINUE");
+                                }}
+                                disabled={isSubmittingDecision}
+                                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg font-semibold text-sm shadow-lg shadow-purple-500/30 transition-all disabled:opacity-50"
+                            >
+                                <span className="material-symbols-outlined text-lg">play_arrow</span>
+                                {isSubmittingDecision ? "Processing..." : "Continue with Frida"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Expanded Details */}
             {isExpanded && (
                 <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-6 animate-fade-in">
@@ -189,11 +271,54 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
                         {/* Tab Content */}
                         <div>
                             {activeTab === 'vulns' && (
-                                <VulnerabilityList
-                                    vulnerabilities={toolVulns}
-                                    status={data.status}
-                                    error={data.error}
-                                />
+                                <>
+                                    {/* MobSF/Frida Toggle for MobSF tool with Frida results */}
+                                    {tool === "mobsf" && hasFridaResults && (
+                                        <div className="flex items-center gap-2 mb-4 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg w-fit">
+                                            <button
+                                                onClick={() => setMobsfFridaView("mobsf")}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "mobsf"
+                                                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    }`}
+                                            >
+                                                <span className="material-symbols-outlined text-base">security</span>
+                                                Static Analysis
+                                                <span className="bg-slate-200 dark:bg-slate-600 text-xs px-1.5 py-0.5 rounded">
+                                                    {toolVulns.length}
+                                                </span>
+                                            </button>
+                                            <button
+                                                onClick={() => setMobsfFridaView("frida")}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "frida"
+                                                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    }`}
+                                            >
+                                                <span className="material-symbols-outlined text-base">bug_report</span>
+                                                Dynamic Analysis
+                                                <span className="bg-purple-200 dark:bg-purple-600 text-xs px-1.5 py-0.5 rounded">
+                                                    {fridaVulnerabilities.length}
+                                                </span>
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Show appropriate vulnerabilities */}
+                                    {tool === "mobsf" && hasFridaResults && mobsfFridaView === "frida" ? (
+                                        <VulnerabilityList
+                                            vulnerabilities={fridaVulnerabilities}
+                                            status={data.status}
+                                            error={data.error}
+                                        />
+                                    ) : (
+                                        <VulnerabilityList
+                                            vulnerabilities={toolVulns}
+                                            status={data.status}
+                                            error={data.error}
+                                        />
+                                    )}
+                                </>
                             )}
                             {activeTab === 'metadata' && (
                                 <ToolMetadata toolData={data} target={target} />
@@ -205,3 +330,4 @@ export function ToolRow({ tool, data, target, vulnerabilities }: ToolRowProps) {
         </div>
     );
 }
+

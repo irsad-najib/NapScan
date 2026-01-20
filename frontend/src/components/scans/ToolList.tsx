@@ -9,9 +9,10 @@ interface ToolListProps {
     tools: Record<ToolKey, ToolExecution>;
     target: string;
     vulnerabilities: ScanVulnerability[];
+    scanId?: string;
 }
 
-export function ToolList({ tools, target, vulnerabilities }: ToolListProps) {
+export function ToolList({ tools, target, vulnerabilities, scanId }: ToolListProps) {
     // Sort tools (optional, keep order consistent)
     const sortedKeys = Object.keys(tools) as ToolKey[];
 
@@ -35,8 +36,10 @@ export function ToolList({ tools, target, vulnerabilities }: ToolListProps) {
                     data={tools[key]}
                     target={target}
                     vulnerabilities={vulnerabilities}
+                    scanId={scanId}
                 />
             ))}
         </div>
     );
 }
+

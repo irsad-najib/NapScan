@@ -1,6 +1,6 @@
 import { ApiResult, request } from "./http";
 
-export type ToolKey = "nmap" | "zap" | "openvas" | "nuclei" | "sslyze" | "ffuf" | "mobsf";
+export type ToolKey = "nmap" | "zap" | "openvas" | "nuclei" | "sslyze" | "ffuf" | "mobsf" | "frida";
 
 export type NmapScanResponse = {
   tcp: unknown;

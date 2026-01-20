@@ -544,7 +544,10 @@ export function parseFfufResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
- * Parse MobSF scan results - handles both summary.findings and report.android_api formats
+ * Parse MobSF scan results - handles multiple API formats:
+ * - Format 1: findings.mobsf (new combined scan response with certificate, manifest, findings, etc.)
+ * - Format 2: report.android_api structure
+ * - Format 3: summary.findings structure (legacy)
  */
 export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
@@ -567,7 +570,181 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
             return "Info";
         };
 
-        // --- Format 1: report.android_api structure ---
+        // --- Format 1: findings.mobsf structure (new combined scan response) ---
+        const mobsfData = rawResult?.findings?.mobsf || data?.findings?.mobsf;
+        if (mobsfData) {
+            console.log("[MobSF Parser] Found findings.mobsf structure, parsing...");
+
+            // Parse certificate findings
+            const certificate = mobsfData?.certificate;
+            if (certificate?.findings && Array.isArray(certificate.findings)) {
+                certificate.findings.forEach((finding: any) => {
+                    vulnerabilities.push({
+                        id: `mobsf-cert-${vulnIdx++}`,
+                        name: finding.title || "Certificate Issue",
+                        severity: mapSeverity(finding.severity),
+                        description: finding.description || "No description",
+                        tool: "mobsf",
+                        affectedAsset: "Certificate",
+                    });
+                });
+            }
+
+            // Parse manifest findings
+            const manifest = mobsfData?.manifest;
+            if (manifest?.findings && Array.isArray(manifest.findings)) {
+                manifest.findings.forEach((finding: any) => {
+                    // Strip HTML tags from title
+                    const cleanTitle = (finding.title || "Manifest Issue").replace(/<[^>]*>/g, '').replace(/<br>/gi, ' - ');
+                    vulnerabilities.push({
+                        id: `mobsf-manifest-${vulnIdx++}`,
+                        name: cleanTitle,
+                        severity: mapSeverity(finding.severity),
+                        description: finding.description || "No description",
+                        tool: "mobsf",
+                        affectedAsset: "AndroidManifest.xml",
+                        recommendation: finding.rule ? `Rule: ${finding.rule}` : undefined,
+                    });
+                });
+            }
+
+            // Parse code/security findings
+            const findings = mobsfData?.findings;
+            if (findings) {
+                // Parse high severity findings
+                if (Array.isArray(findings.high)) {
+                    findings.high.forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-high-${vulnIdx++}`,
+                            name: finding.title || "High Severity Finding",
+                            severity: "High",
+                            description: finding.description || "No description",
+                            tool: "mobsf",
+                            affectedAsset: finding.section || "Code Analysis",
+                        });
+                    });
+                }
+
+                // Parse warning findings
+                if (Array.isArray(findings.warning)) {
+                    findings.warning.forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-warning-${vulnIdx++}`,
+                            name: finding.title || "Warning",
+                            severity: "Medium",
+                            description: finding.description || "No description",
+                            tool: "mobsf",
+                            affectedAsset: finding.section || "Code Analysis",
+                        });
+                    });
+                }
+
+                // Parse hotspot findings
+                if (Array.isArray(findings.hotspot)) {
+                    findings.hotspot.forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-hotspot-${vulnIdx++}`,
+                            name: finding.title || "Security Hotspot",
+                            severity: "Medium",
+                            description: finding.description || "No description",
+                            tool: "mobsf",
+                            affectedAsset: finding.section || "Permissions",
+                        });
+                    });
+                }
+
+                // Parse info findings
+                if (Array.isArray(findings.info)) {
+                    findings.info.forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-info-${vulnIdx++}`,
+                            name: finding.title || "Info",
+                            severity: "Info",
+                            description: finding.description || "No description",
+                            tool: "mobsf",
+                            affectedAsset: finding.section || "Code Analysis",
+                        });
+                    });
+                }
+
+                // Parse secure findings (positive security measures)
+                if (Array.isArray(findings.secure)) {
+                    findings.secure.forEach((finding: any) => {
+                        vulnerabilities.push({
+                            id: `mobsf-secure-${vulnIdx++}`,
+                            name: `✓ ${finding.title || "Secure"}`,
+                            severity: "Info",
+                            description: finding.description || "No description",
+                            tool: "mobsf",
+                            affectedAsset: finding.section || "Security",
+                        });
+                    });
+                }
+            }
+
+            // Parse dangerous permissions
+            const permissions = mobsfData?.permissions;
+            if (permissions?.dangerous_sample && Array.isArray(permissions.dangerous_sample)) {
+                permissions.dangerous_sample.forEach((perm: any) => {
+                    vulnerabilities.push({
+                        id: `mobsf-perm-${vulnIdx++}`,
+                        name: `Dangerous Permission: ${perm.permission?.split('.').pop() || "Unknown"}`,
+                        severity: "Medium",
+                        description: `${perm.description || ""} - ${perm.info || ""}`.trim(),
+                        tool: "mobsf",
+                        affectedAsset: perm.permission || "Permission",
+                        recommendation: `Protection level: ${perm.protection || "unknown"}`,
+                    });
+                });
+            }
+
+            // Parse secrets if total > 0
+            const secrets = mobsfData?.secrets;
+            if (secrets?.total > 0 && secrets?.sample && Array.isArray(secrets.sample)) {
+                vulnerabilities.push({
+                    id: `mobsf-secrets-${vulnIdx++}`,
+                    name: `Hardcoded Secrets Detected (${secrets.total} found)`,
+                    severity: "High",
+                    description: `Found ${secrets.total} potential hardcoded secrets. Sample: ${secrets.sample.slice(0, 3).join(", ")}...`,
+                    tool: "mobsf",
+                    affectedAsset: "Source Code",
+                    recommendation: "Review and remove hardcoded secrets. Use environment variables or secure storage.",
+                });
+            }
+
+            // Parse trackers
+            const trackers = mobsfData?.trackers;
+            if (trackers?.detected_trackers > 0) {
+                vulnerabilities.push({
+                    id: `mobsf-trackers-${vulnIdx++}`,
+                    name: `Privacy Trackers Detected (${trackers.detected_trackers} found)`,
+                    severity: "Medium",
+                    description: `Application contains ${trackers.detected_trackers} out of ${trackers.total_trackers} known trackers.`,
+                    tool: "mobsf",
+                    affectedAsset: "Application",
+                    recommendation: "Review tracker usage and ensure compliance with privacy regulations.",
+                });
+            }
+
+            // Check for suspicious domains
+            const network = mobsfData?.network;
+            if (network?.suspicious_domains && network.suspicious_domains.length > 0) {
+                vulnerabilities.push({
+                    id: `mobsf-network-${vulnIdx++}`,
+                    name: `Suspicious Domains Detected (${network.suspicious_domains.length} found)`,
+                    severity: "High",
+                    description: `Application communicates with suspicious domains: ${network.suspicious_domains.slice(0, 5).join(", ")}`,
+                    tool: "mobsf",
+                    affectedAsset: "Network",
+                    recommendation: "Review and validate all external domain communications.",
+                });
+            }
+
+            console.log(`[MobSF Parser] Parsed ${vulnerabilities.length} findings from findings.mobsf`);
+            return vulnerabilities;
+        }
+
+        // --- Format 2: report.android_api structure ---
         const report = data?.report;
         if (report) {
             console.log("[MobSF Parser] Found report object, parsing android_api...");
@@ -651,10 +828,10 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
             }
         }
 
-        // --- Format 2: summary.findings structure (legacy) ---
+        // --- Format 3: summary.findings structure (legacy) ---
         const summary = data?.summary;
-        const findings = summary?.findings;
-        if (findings) {
+        const legacyFindings = summary?.findings;
+        if (legacyFindings) {
             console.log("[MobSF Parser] Found summary.findings object, parsing...");
 
             const categories = ['high', 'warning', 'hotspot', 'info', 'secure'];
@@ -667,8 +844,8 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
             };
 
             categories.forEach(category => {
-                if (Array.isArray(findings[category])) {
-                    findings[category].forEach((finding: any) => {
+                if (Array.isArray(legacyFindings[category])) {
+                    legacyFindings[category].forEach((finding: any) => {
                         vulnerabilities.push({
                             id: `mobsf-${vulnIdx++}`,
                             name: category === 'secure' ? `✓ ${finding.title || "Secure"}` : finding.title || "Finding",
@@ -685,6 +862,195 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
         return vulnerabilities;
     } catch (error) {
         console.error("Error parsing MobSF results:", error);
+        return [];
+    }
+}
+
+/**
+ * Parse Frida dynamic analysis events
+ * Extracts security-relevant findings from Frida runtime analysis
+ */
+export function parseFridaResults(rawResult: any): ScanVulnerability[] {
+    const vulnerabilities: ScanVulnerability[] = [];
+    let vulnIdx = 0;
+
+    try {
+        console.log("[Frida Parser] Parsing results...");
+        console.log("[Frida Parser] Raw result keys:", Object.keys(rawResult || {}));
+
+        // Handle nested structure: findings.frida or direct frida object
+        const fridaData = rawResult?.findings?.frida || rawResult?.frida || rawResult;
+
+        if (!fridaData) {
+            console.log("[Frida Parser] No frida data found");
+            return vulnerabilities;
+        }
+
+        const events = fridaData?.events || [];
+        const packageName = fridaData?.package_name || "Unknown Package";
+
+        console.log(`[Frida Parser] Found ${events.length} events for ${packageName}`);
+
+        // Track loaded modules and installed hooks for analysis
+        const loadedModules: string[] = [];
+        const installedHooks: Map<string, { class: string; method: string; overloads: number }[]> = new Map();
+        let engineReady = false;
+        let engineVersion = "";
+
+        // Process events
+        events.forEach((event: any) => {
+            const eventType = event.event;
+            const eventData = event.data || {};
+            const timestamp = event.timestamp;
+
+            switch (eventType) {
+                case "engine_start":
+                    engineVersion = eventData.version || "unknown";
+                    break;
+
+                case "module_loaded":
+                    const moduleName = eventData.name;
+                    if (moduleName) {
+                        loadedModules.push(moduleName);
+                    }
+                    break;
+
+                case "hook_installed":
+                    const hookClass = eventData.class || "";
+                    const hookMethod = eventData.method || "";
+                    const overloads = eventData.overloads || 1;
+
+                    // Group hooks by module context (based on class patterns)
+                    let moduleContext = "other";
+                    if (hookClass.includes("ssl") || hookClass.includes("TrustManager") || hookClass.includes("CertificatePinner")) {
+                        moduleContext = "ssl_pinning";
+                    } else if (hookClass.includes("Debug")) {
+                        moduleContext = "anti_debug";
+                    } else if (hookClass.includes("Runtime")) {
+                        moduleContext = "root";
+                    } else if (hookClass.includes("Cipher") || hookClass.includes("crypto")) {
+                        moduleContext = "crypto";
+                    } else if (hookClass.includes("SQLite") || hookClass.includes("database")) {
+                        moduleContext = "storage";
+                    } else if (hookClass.includes("WebView")) {
+                        moduleContext = "webview";
+                    }
+
+                    if (!installedHooks.has(moduleContext)) {
+                        installedHooks.set(moduleContext, []);
+                    }
+                    installedHooks.get(moduleContext)!.push({ class: hookClass, method: hookMethod, overloads });
+                    break;
+
+                case "engine_ready":
+                    engineReady = true;
+                    break;
+            }
+        });
+
+        // Generate security findings based on what Frida detected
+
+        // SSL Pinning Analysis
+        const sslHooks = installedHooks.get("ssl_pinning") || [];
+        if (sslHooks.length > 0) {
+            const sslClasses = sslHooks.map(h => h.class).join(", ");
+            vulnerabilities.push({
+                id: `frida-ssl-${vulnIdx++}`,
+                name: "SSL Certificate Pinning Detected",
+                severity: "Info",
+                description: `Frida successfully hooked SSL pinning mechanisms. Classes monitored: ${sslClasses}. This indicates the app implements certificate pinning which can be bypassed.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Certificate pinning is a good security measure, but can be bypassed with Frida. Consider implementing additional tamper detection.",
+            });
+        }
+
+        // Anti-Debug Analysis
+        const debugHooks = installedHooks.get("anti_debug") || [];
+        if (debugHooks.length > 0) {
+            vulnerabilities.push({
+                id: `frida-debug-${vulnIdx++}`,
+                name: "Anti-Debug Mechanisms Hooked",
+                severity: "Info",
+                description: `Frida hooked anti-debugging functions: ${debugHooks.map(h => `${h.class}.${h.method}`).join(", ")}. App checks for debugger can be bypassed.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Implement multiple layers of anti-tampering and obfuscation.",
+            });
+        }
+
+        // Root Detection Analysis
+        const rootHooks = installedHooks.get("root") || [];
+        if (rootHooks.length > 0) {
+            vulnerabilities.push({
+                id: `frida-root-${vulnIdx++}`,
+                name: "Root Detection Hooked",
+                severity: "Info",
+                description: `Frida hooked potential root detection mechanisms via: ${rootHooks.map(h => `${h.class}.${h.method}`).join(", ")}. Runtime.exec calls are monitored.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Root detection alone is not sufficient. Implement integrity checks and use hardware-backed security.",
+            });
+        }
+
+        // Crypto Analysis
+        const cryptoHooks = installedHooks.get("crypto") || [];
+        if (cryptoHooks.length > 0) {
+            vulnerabilities.push({
+                id: `frida-crypto-${vulnIdx++}`,
+                name: "Cryptographic Operations Monitored",
+                severity: "Medium",
+                description: `Frida is monitoring cryptographic operations: ${cryptoHooks.map(h => `${h.class}.${h.method}`).join(", ")}. Encryption keys and operations can be intercepted.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Use hardware-backed keystore and avoid storing sensitive keys in memory longer than necessary.",
+            });
+        }
+
+        // Storage Analysis
+        const storageHooks = installedHooks.get("storage") || [];
+        if (storageHooks.length > 0) {
+            vulnerabilities.push({
+                id: `frida-storage-${vulnIdx++}`,
+                name: "Database Operations Monitored",
+                severity: "Medium",
+                description: `Frida is monitoring database operations: ${storageHooks.map(h => `${h.class}.${h.method}`).join(", ")}. Database contents and queries can be intercepted.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Encrypt sensitive data before storing in SQLite. Use SQLCipher for database encryption.",
+            });
+        }
+
+        // WebView Analysis
+        const webviewHooks = installedHooks.get("webview") || [];
+        if (webviewHooks.length > 0) {
+            vulnerabilities.push({
+                id: `frida-webview-${vulnIdx++}`,
+                name: "WebView Activity Monitored",
+                severity: "Medium",
+                description: `Frida is monitoring WebView operations: ${webviewHooks.map(h => `${h.class}.${h.method}`).join(", ")}. URLs loaded in WebView can be intercepted.`,
+                tool: "frida",
+                affectedAsset: packageName,
+                recommendation: "Implement secure WebView configuration. Disable JavaScript if not needed, and validate URLs before loading.",
+            });
+        }
+
+        // Overall Dynamic Analysis Summary
+        if (loadedModules.length > 0) {
+            vulnerabilities.push({
+                id: `frida-summary-${vulnIdx++}`,
+                name: "Dynamic Analysis Summary",
+                severity: "Info",
+                description: `Frida engine v${engineVersion} successfully attached and loaded ${loadedModules.length} modules: ${loadedModules.join(", ")}. Total hooks installed: ${Array.from(installedHooks.values()).flat().length}.`,
+                tool: "frida",
+                affectedAsset: packageName,
+            });
+        }
+
+        console.log(`[Frida Parser] Parsed ${vulnerabilities.length} findings`);
+        return vulnerabilities;
+    } catch (error) {
+        console.error("Error parsing Frida results:", error);
         return [];
     }
 }
@@ -711,6 +1077,8 @@ export function parseToolResults(tool: ToolKey, rawResult: any): ScanVulnerabili
                 return parseFfufResults(rawResult);
             case "mobsf":
                 return parseMobsfResults(rawResult);
+            case "frida":
+                return parseFridaResults(rawResult);
             default:
                 console.warn(`No parser available for tool: ${tool}`);
                 return [];
@@ -718,5 +1086,139 @@ export function parseToolResults(tool: ToolKey, rawResult: any): ScanVulnerabili
     } catch (error) {
         console.error(`Error parsing ${tool} results:`, error);
         return [];
+    }
+}
+
+/**
+ * Parse combined MobSF + Frida scan results
+ * Used when the scan is completed with both static (MobSF) and dynamic (Frida) analysis
+ */
+export function parseCombinedMobsfFridaResults(rawResult: any): {
+    mobsfFindings: ScanVulnerability[];
+    fridaFindings: ScanVulnerability[];
+    combined: ScanVulnerability[];
+    appInfo: MobSFAppInfo | null;
+} {
+    const mobsfFindings = parseMobsfResults(rawResult);
+    const fridaFindings = parseFridaResults(rawResult);
+
+    return {
+        mobsfFindings,
+        fridaFindings,
+        combined: [...mobsfFindings, ...fridaFindings],
+        appInfo: extractMobsfAppInfo(rawResult),
+    };
+}
+
+/**
+ * App info extracted from MobSF results
+ */
+export interface MobSFAppInfo {
+    appName: string;
+    packageName: string;
+    versionName: string;
+    fileName: string;
+    iconPath?: string;
+    securityScore: string;
+    minSdk: string;
+    targetSdk: string;
+    maxSdk?: string;
+    hashes: {
+        md5: string;
+        sha1: string;
+        sha256: string;
+    };
+    components: {
+        activities: number;
+        services: number;
+        receivers: number;
+        providers: number;
+        exportedActivities: number;
+        exportedServices: number;
+        exportedReceivers: number;
+        exportedProviders: number;
+    };
+    network: {
+        domainsTotal: number;
+        urlsTotal: number;
+        domainsSample: string[];
+        suspiciousDomains: string[];
+    };
+    permissions: {
+        dangerousCount: number;
+        normalCount: number;
+        unknownCount: number;
+    };
+    trackers: {
+        detected: number;
+        total: number;
+    };
+}
+
+/**
+ * Extract app information from MobSF results
+ */
+export function extractMobsfAppInfo(rawResult: any): MobSFAppInfo | null {
+    try {
+        const mobsfData = rawResult?.findings?.mobsf || rawResult?.mobsf;
+
+        if (!mobsfData) {
+            console.log("[MobSF] No mobsf data found for app info extraction");
+            return null;
+        }
+
+        const identity = mobsfData?.identity || {};
+        const sdk = mobsfData?.sdk || {};
+        const hashes = mobsfData?.hashes || {};
+        const components = mobsfData?.components || {};
+        const network = mobsfData?.network || {};
+        const permissions = mobsfData?.permissions || {};
+        const trackers = mobsfData?.trackers || {};
+        const findings = mobsfData?.findings || {};
+
+        return {
+            appName: identity.app_name || "Unknown",
+            packageName: identity.package_name || "Unknown",
+            versionName: identity.version_name || "Unknown",
+            fileName: identity.file_name || "Unknown",
+            iconPath: identity.icon_path,
+            securityScore: findings.security_score || "N/A",
+            minSdk: sdk.min_sdk || "Unknown",
+            targetSdk: sdk.target_sdk || "Unknown",
+            maxSdk: sdk.max_sdk,
+            hashes: {
+                md5: hashes.md5 || "",
+                sha1: hashes.sha1 || "",
+                sha256: hashes.sha256 || "",
+            },
+            components: {
+                activities: components.activities || 0,
+                services: components.services || 0,
+                receivers: components.receivers || 0,
+                providers: components.providers || 0,
+                exportedActivities: components.exported_count?.exported_activities || 0,
+                exportedServices: components.exported_count?.exported_services || 0,
+                exportedReceivers: components.exported_count?.exported_receivers || 0,
+                exportedProviders: components.exported_count?.exported_providers || 0,
+            },
+            network: {
+                domainsTotal: network.domains_total || 0,
+                urlsTotal: network.urls_total || 0,
+                domainsSample: network.domains_sample || [],
+                suspiciousDomains: network.suspicious_domains || [],
+            },
+            permissions: {
+                dangerousCount: permissions.status_counts?.dangerous || 0,
+                normalCount: permissions.status_counts?.normal || 0,
+                unknownCount: permissions.status_counts?.unknown || 0,
+            },
+            trackers: {
+                detected: trackers.detected_trackers || 0,
+                total: trackers.total_trackers || 0,
+            },
+        };
+    } catch (error) {
+        console.error("Error extracting MobSF app info:", error);
+        return null;
     }
 }

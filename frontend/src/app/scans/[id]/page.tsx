@@ -141,6 +141,7 @@ export default function ScanDetailPage() {
                                 tools={scan.tools}
                                 target={scan.target}
                                 vulnerabilities={scan.vulnerabilities}
+                                scanId={scanId}
                             />
                         </div>
 

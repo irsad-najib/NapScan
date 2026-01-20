@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
-import { MobSFPendingDecision } from "@/context/ScanContext";
+import React, { useState, useMemo } from "react";
+import { MobSFPendingDecision, ScanVulnerability } from "@/context/ScanContext";
+import { parseMobsfResults } from "@/utils/toolParsers";
 
 interface MobSFDecisionDialogProps {
     pending: MobSFPendingDecision;
@@ -10,389 +11,288 @@ interface MobSFDecisionDialogProps {
 }
 
 export function MobSFDecisionDialog({ pending, onDecision, isSubmitting = false }: MobSFDecisionDialogProps) {
+    const [activeTab, setActiveTab] = useState<"summary" | "details">("summary");
+    const [expandedSection, setExpandedSection] = useState<string | null>("high");
+
+    // Parse vulnerabilities from mobsfResult
+    const vulnerabilities = useMemo(() => {
+        if (!pending.mobsfResult) return [];
+        return parseMobsfResults(pending.mobsfResult);
+    }, [pending.mobsfResult]);
+
+    // Group vulnerabilities by severity
+    const groupedVulns = useMemo(() => {
+        const groups: Record<string, ScanVulnerability[]> = {
+            critical: [],
+            high: [],
+            medium: [],
+            low: [],
+            info: [],
+        };
+        vulnerabilities.forEach(v => {
+            const sev = v.severity.toLowerCase();
+            if (groups[sev]) {
+                groups[sev].push(v);
+            } else {
+                groups.info.push(v);
+            }
+        });
+        return groups;
+    }, [vulnerabilities]);
+
+    const getScoreLevel = (score: string): string => {
+        const numScore = parseInt(score, 10);
+        if (isNaN(numScore)) return "medium";
+        if (numScore < 25) return "critical";
+        if (numScore < 50) return "low";
+        if (numScore < 75) return "medium";
+        return "high";
+    };
+
+    const getScoreDescription = (score: string): string => {
+        const numScore = parseInt(score, 10);
+        if (isNaN(numScore)) return "Unable to determine security score.";
+        if (numScore < 25) {
+            return "Critical security issues detected. This app has severe vulnerabilities that should be addressed immediately.";
+        }
+        if (numScore < 50) {
+            return "Multiple security concerns found. The app has significant issues that need attention.";
+        }
+        if (numScore < 75) {
+            return "Moderate security posture. Some issues were found that should be reviewed.";
+        }
+        return "Good security posture. Few issues detected, but dynamic analysis may reveal more.";
+    };
+
+    const getScoreColor = (score: string) => {
+        const level = getScoreLevel(score);
+        switch (level) {
+            case "critical": return "from-red-600 to-red-800";
+            case "low": return "from-orange-500 to-orange-700";
+            case "medium": return "from-yellow-500 to-yellow-700";
+            case "high": return "from-green-500 to-green-700";
+            default: return "from-slate-500 to-slate-700";
+        }
+    };
+
+    const getSeverityStyle = (severity: string) => {
+        switch (severity.toLowerCase()) {
+            case "critical":
+                return "bg-red-500/20 text-red-300 border-red-500/30";
+            case "high":
+                return "bg-orange-500/20 text-orange-300 border-orange-500/30";
+            case "medium":
+                return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+            case "low":
+                return "bg-blue-500/20 text-blue-300 border-blue-500/30";
+            default:
+                return "bg-slate-500/20 text-slate-300 border-slate-500/30";
+        }
+    };
+
+    const severityLabels: Record<string, { label: string; icon: string; color: string }> = {
+        critical: { label: "Critical", icon: "error", color: "text-red-400" },
+        high: { label: "High", icon: "warning", color: "text-orange-400" },
+        medium: { label: "Medium", icon: "info", color: "text-amber-400" },
+        low: { label: "Low", icon: "check_circle", color: "text-blue-400" },
+        info: { label: "Info", icon: "info", color: "text-slate-400" },
+    };
+
     return (
-        <div className="mobsf-decision-overlay">
-            <div className="mobsf-decision-dialog">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[1000] p-5">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
                 {/* Header */}
-                <div className="dialog-header">
-                    <div className="header-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 9v4m0 4h.01M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" />
-                        </svg>
-                    </div>
-                    <h2>MobSF Analysis Complete</h2>
-                    <p className="subtitle">Review the static analysis results and decide how to proceed</p>
-                </div>
-
-                {/* App Info */}
-                <div className="app-info">
-                    <div className="app-icon">📱</div>
-                    <div className="app-details">
-                        <h3>{pending.appName}</h3>
-                        <p className="package-name">{pending.packageName}</p>
-                        <p className="file-name">{pending.fileName}</p>
-                    </div>
-                </div>
-
-                {/* Security Score */}
-                <div className="security-score-section">
-                    <div className="score-circle" data-score={getScoreLevel(pending.securityScore)}>
-                        <span className="score-value">{pending.securityScore}</span>
-                        <span className="score-label">Security Score</span>
-                    </div>
-                    <div className="score-description">
-                        {getScoreDescription(pending.securityScore)}
-                    </div>
-                </div>
-
-                {/* Severity Breakdown */}
-                <div className="severity-breakdown">
-                    <h4>Findings Summary</h4>
-                    <div className="severity-grid">
-                        <div className="severity-item high">
-                            <span className="count">{pending.severityCounts.high}</span>
-                            <span className="label">High</span>
+                <div className="p-6 border-b border-white/10">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+                            <span className="material-symbols-outlined text-white text-2xl">security</span>
                         </div>
-                        <div className="severity-item warning">
-                            <span className="count">{pending.severityCounts.warning}</span>
-                            <span className="label">Warning</span>
+                        <div className="flex-1">
+                            <h2 className="text-xl font-semibold text-white m-0">MobSF Analysis Complete</h2>
+                            <p className="text-white/60 text-sm mt-1">Review findings and decide how to proceed</p>
                         </div>
-                        <div className="severity-item info">
-                            <span className="count">{pending.severityCounts.info}</span>
-                            <span className="label">Info</span>
+                        <div className={`w-16 h-16 rounded-full bg-gradient-to-br ${getScoreColor(pending.securityScore)} flex flex-col items-center justify-center`}>
+                            <span className="text-xl font-bold text-white">{pending.securityScore}</span>
+                            <span className="text-[9px] text-white/80">SCORE</span>
                         </div>
                     </div>
-                </div>
 
-                {/* Frida Section */}
-                <div className="frida-section">
-                    <div className="frida-icon">🔬</div>
-                    <div className="frida-info">
-                        <h4>Continue with Dynamic Analysis?</h4>
-                        <p>
-                            Frida will perform runtime analysis on the app to detect additional
-                            vulnerabilities that static analysis cannot find, such as insecure
-                            data storage, runtime tampering, and API security issues.
-                        </p>
+                    {/* App Info */}
+                    <div className="flex items-center gap-3 mt-4 bg-white/5 p-3 rounded-xl">
+                        <span className="text-2xl">📱</span>
+                        <div className="flex-1 min-w-0">
+                            <h3 className="text-white font-semibold text-sm truncate">{pending.appName}</h3>
+                            <p className="text-white/50 text-xs font-mono truncate">{pending.packageName}</p>
+                        </div>
+                        <span className="text-white/40 text-xs truncate max-w-[150px]">{pending.fileName}</span>
                     </div>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="dialog-actions">
+                {/* Tab Buttons */}
+                <div className="flex border-b border-white/10">
                     <button
-                        className="btn-stop"
-                        onClick={() => onDecision("STOP")}
-                        disabled={isSubmitting}
+                        onClick={() => setActiveTab("summary")}
+                        className={`flex-1 py-3 text-sm font-semibold transition-all ${activeTab === "summary"
+                                ? "text-white border-b-2 border-indigo-500"
+                                : "text-white/50 hover:text-white/80"
+                            }`}
                     >
-                        {isSubmitting ? "Processing..." : "Stop Here"}
-                        <span className="btn-hint">Save current results</span>
+                        Summary
                     </button>
                     <button
-                        className="btn-continue"
-                        onClick={() => onDecision("CONTINUE")}
-                        disabled={isSubmitting}
+                        onClick={() => setActiveTab("details")}
+                        className={`flex-1 py-3 text-sm font-semibold transition-all flex items-center justify-center gap-2 ${activeTab === "details"
+                                ? "text-white border-b-2 border-indigo-500"
+                                : "text-white/50 hover:text-white/80"
+                            }`}
                     >
-                        {isSubmitting ? "Processing..." : "Continue with Frida"}
-                        <span className="btn-hint">Run dynamic analysis</span>
+                        Vulnerability Details
+                        <span className="bg-white/10 text-xs px-2 py-0.5 rounded-full">{vulnerabilities.length}</span>
                     </button>
+                </div>
+
+                {/* Content Area - Scrollable */}
+                <div className="flex-1 overflow-y-auto p-6">
+                    {activeTab === "summary" ? (
+                        <div className="space-y-6">
+                            {/* Score Description */}
+                            <p className="text-white/70 text-sm leading-relaxed">
+                                {getScoreDescription(pending.securityScore)}
+                            </p>
+
+                            {/* Severity Breakdown */}
+                            <div>
+                                <h4 className="text-white/80 text-sm font-medium mb-3">Findings Summary</h4>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {Object.entries(severityLabels).map(([key, { label, color }]) => (
+                                        <div key={key} className={`bg-white/5 rounded-lg p-3 text-center ${groupedVulns[key]?.length > 0 ? '' : 'opacity-40'}`}>
+                                            <span className={`block text-2xl font-bold ${color}`}>
+                                                {groupedVulns[key]?.length || 0}
+                                            </span>
+                                            <span className="text-[10px] text-white/60 uppercase tracking-wide">{label}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Top Issues Preview */}
+                            {(groupedVulns.critical.length > 0 || groupedVulns.high.length > 0) && (
+                                <div>
+                                    <h4 className="text-white/80 text-sm font-medium mb-3">Top Issues</h4>
+                                    <div className="space-y-2">
+                                        {[...groupedVulns.critical, ...groupedVulns.high].slice(0, 3).map((vuln, idx) => (
+                                            <div key={idx} className="flex items-start gap-3 bg-white/5 p-3 rounded-lg">
+                                                <span className={`material-symbols-outlined text-lg ${vuln.severity.toLowerCase() === 'critical' ? 'text-red-400' : 'text-orange-400'}`}>
+                                                    {vuln.severity.toLowerCase() === 'critical' ? 'error' : 'warning'}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-white text-sm font-medium truncate">{vuln.name}</p>
+                                                    <p className="text-white/50 text-xs truncate">{vuln.description}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {(groupedVulns.critical.length + groupedVulns.high.length) > 3 && (
+                                            <button
+                                                onClick={() => setActiveTab("details")}
+                                                className="text-indigo-400 text-xs hover:text-indigo-300 transition-colors"
+                                            >
+                                                View all {groupedVulns.critical.length + groupedVulns.high.length} critical/high issues →
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Frida Section */}
+                            <div className="flex gap-4 bg-indigo-500/10 border border-indigo-500/30 p-4 rounded-xl">
+                                <div className="text-3xl">🔬</div>
+                                <div>
+                                    <h4 className="text-white font-medium m-0 mb-2">Continue with Dynamic Analysis?</h4>
+                                    <p className="text-white/60 text-sm m-0 leading-relaxed">
+                                        Frida will perform runtime analysis to detect issues that static analysis cannot find,
+                                        such as insecure data storage, SSL pinning bypass, and API security.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {Object.entries(severityLabels).map(([key, { label, icon, color }]) => {
+                                const vulns = groupedVulns[key] || [];
+                                if (vulns.length === 0) return null;
+
+                                return (
+                                    <div key={key} className="border border-white/10 rounded-xl overflow-hidden">
+                                        <button
+                                            onClick={() => setExpandedSection(expandedSection === key ? null : key)}
+                                            className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <span className={`material-symbols-outlined ${color}`}>{icon}</span>
+                                                <span className="text-white font-medium">{label}</span>
+                                                <span className="bg-white/10 text-white/60 text-xs px-2 py-0.5 rounded-full">
+                                                    {vulns.length}
+                                                </span>
+                                            </div>
+                                            <span className={`material-symbols-outlined text-white/40 transition-transform ${expandedSection === key ? 'rotate-180' : ''}`}>
+                                                expand_more
+                                            </span>
+                                        </button>
+
+                                        {expandedSection === key && (
+                                            <div className="border-t border-white/10 max-h-[250px] overflow-y-auto">
+                                                {vulns.map((vuln, idx) => (
+                                                    <div key={idx} className="p-4 border-b border-white/5 last:border-b-0 hover:bg-white/5">
+                                                        <div className="flex items-start gap-3">
+                                                            <span className={`shrink-0 px-2 py-1 rounded text-[10px] font-bold uppercase border ${getSeverityStyle(vuln.severity)}`}>
+                                                                {vuln.severity}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-white text-sm font-medium mb-1">{vuln.name}</p>
+                                                                <p className="text-white/50 text-xs leading-relaxed">{vuln.description}</p>
+                                                                {vuln.affectedAsset && (
+                                                                    <p className="text-white/30 text-xs mt-2 font-mono">
+                                                                        📍 {vuln.affectedAsset}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Action Buttons - Fixed at bottom */}
+                <div className="p-6 border-t border-white/10 bg-slate-900/50">
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={() => onDecision("STOP")}
+                            disabled={isSubmitting}
+                            className="flex flex-col items-center gap-1 p-4 rounded-xl font-semibold bg-white/10 hover:bg-white/15 text-white border border-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span>{isSubmitting ? "Processing..." : "Stop Here"}</span>
+                            <span className="text-xs font-normal text-white/70">Save MobSF results only</span>
+                        </button>
+                        <button
+                            onClick={() => onDecision("CONTINUE")}
+                            disabled={isSubmitting}
+                            className="flex flex-col items-center gap-1 p-4 rounded-xl font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span>{isSubmitting ? "Processing..." : "Continue with Frida"}</span>
+                            <span className="text-xs font-normal text-white/80">Run dynamic analysis</span>
+                        </button>
+                    </div>
                 </div>
             </div>
-
-            <style jsx>{`
-                .mobsf-decision-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.7);
-                    backdrop-filter: blur(4px);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 1000;
-                    padding: 20px;
-                }
-
-                .mobsf-decision-dialog {
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 16px;
-                    padding: 32px;
-                    max-width: 520px;
-                    width: 100%;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-                }
-
-                .dialog-header {
-                    text-align: center;
-                    margin-bottom: 24px;
-                }
-
-                .header-icon {
-                    width: 48px;
-                    height: 48px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    border-radius: 12px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin: 0 auto 16px;
-                    color: white;
-                }
-
-                .dialog-header h2 {
-                    margin: 0;
-                    font-size: 1.5rem;
-                    font-weight: 600;
-                    color: #fff;
-                }
-
-                .dialog-header .subtitle {
-                    margin: 8px 0 0;
-                    color: rgba(255, 255, 255, 0.6);
-                    font-size: 0.9rem;
-                }
-
-                .app-info {
-                    display: flex;
-                    align-items: center;
-                    gap: 16px;
-                    background: rgba(255, 255, 255, 0.05);
-                    padding: 16px;
-                    border-radius: 12px;
-                    margin-bottom: 24px;
-                }
-
-                .app-icon {
-                    font-size: 2.5rem;
-                }
-
-                .app-details h3 {
-                    margin: 0;
-                    font-size: 1.1rem;
-                    color: #fff;
-                }
-
-                .app-details .package-name {
-                    margin: 4px 0 0;
-                    font-size: 0.85rem;
-                    color: rgba(255, 255, 255, 0.6);
-                    font-family: monospace;
-                }
-
-                .app-details .file-name {
-                    margin: 2px 0 0;
-                    font-size: 0.8rem;
-                    color: rgba(255, 255, 255, 0.4);
-                }
-
-                .security-score-section {
-                    display: flex;
-                    align-items: center;
-                    gap: 20px;
-                    margin-bottom: 24px;
-                }
-
-                .score-circle {
-                    width: 80px;
-                    height: 80px;
-                    border-radius: 50%;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    flex-shrink: 0;
-                }
-
-                .score-circle[data-score="critical"] {
-                    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-                }
-                .score-circle[data-score="low"] {
-                    background: linear-gradient(135deg, #f97316 0%, #c2410c 100%);
-                }
-                .score-circle[data-score="medium"] {
-                    background: linear-gradient(135deg, #eab308 0%, #a16207 100%);
-                }
-                .score-circle[data-score="high"] {
-                    background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
-                }
-
-                .score-value {
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    color: white;
-                }
-
-                .score-label {
-                    font-size: 0.7rem;
-                    color: rgba(255, 255, 255, 0.8);
-                }
-
-                .score-description {
-                    color: rgba(255, 255, 255, 0.7);
-                    font-size: 0.9rem;
-                    line-height: 1.5;
-                }
-
-                .severity-breakdown {
-                    margin-bottom: 24px;
-                }
-
-                .severity-breakdown h4 {
-                    margin: 0 0 12px;
-                    font-size: 0.9rem;
-                    color: rgba(255, 255, 255, 0.8);
-                    font-weight: 500;
-                }
-
-                .severity-grid {
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: 12px;
-                }
-
-                .severity-item {
-                    background: rgba(255, 255, 255, 0.05);
-                    padding: 12px;
-                    border-radius: 8px;
-                    text-align: center;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                }
-
-                .severity-item.high {
-                    border-color: rgba(239, 68, 68, 0.5);
-                    background: rgba(239, 68, 68, 0.1);
-                }
-
-                .severity-item.warning {
-                    border-color: rgba(245, 158, 11, 0.5);
-                    background: rgba(245, 158, 11, 0.1);
-                }
-
-                .severity-item.info {
-                    border-color: rgba(59, 130, 246, 0.5);
-                    background: rgba(59, 130, 246, 0.1);
-                }
-
-                .severity-item .count {
-                    display: block;
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    color: #fff;
-                }
-
-                .severity-item .label {
-                    font-size: 0.75rem;
-                    color: rgba(255, 255, 255, 0.6);
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }
-
-                .frida-section {
-                    display: flex;
-                    gap: 16px;
-                    background: rgba(99, 102, 241, 0.1);
-                    border: 1px solid rgba(99, 102, 241, 0.3);
-                    padding: 16px;
-                    border-radius: 12px;
-                    margin-bottom: 24px;
-                }
-
-                .frida-icon {
-                    font-size: 2rem;
-                }
-
-                .frida-info h4 {
-                    margin: 0 0 8px;
-                    font-size: 1rem;
-                    color: #fff;
-                }
-
-                .frida-info p {
-                    margin: 0;
-                    font-size: 0.85rem;
-                    color: rgba(255, 255, 255, 0.6);
-                    line-height: 1.5;
-                }
-
-                .dialog-actions {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 12px;
-                }
-
-                .dialog-actions button {
-                    padding: 16px;
-                    border-radius: 12px;
-                    font-size: 1rem;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    border: none;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    gap: 4px;
-                }
-
-                .dialog-actions button:disabled {
-                    opacity: 0.6;
-                    cursor: not-allowed;
-                }
-
-                .btn-stop {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
-                    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-                }
-
-                .btn-stop:hover:not(:disabled) {
-                    background: rgba(255, 255, 255, 0.15);
-                }
-
-                .btn-continue {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                }
-
-                .btn-continue:hover:not(:disabled) {
-                    transform: translateY(-2px);
-                    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-                }
-
-                .btn-hint {
-                    font-size: 0.75rem;
-                    font-weight: 400;
-                    opacity: 0.7;
-                }
-            `}</style>
         </div>
     );
 }
 
-function getScoreLevel(score: string): string {
-    const numScore = parseInt(score, 10);
-    if (isNaN(numScore)) return "medium";
-    if (numScore < 25) return "critical";
-    if (numScore < 50) return "low";
-    if (numScore < 75) return "medium";
-    return "high";
-}
-
-function getScoreDescription(score: string): string {
-    const numScore = parseInt(score, 10);
-    if (isNaN(numScore)) return "Unable to determine security score.";
-    if (numScore < 25) {
-        return "Critical security issues detected. This app has severe vulnerabilities that should be addressed immediately.";
-    }
-    if (numScore < 50) {
-        return "Multiple security concerns found. The app has significant issues that need attention.";
-    }
-    if (numScore < 75) {
-        return "Moderate security posture. Some issues were found that should be reviewed.";
-    }
-    return "Good security posture. Few issues detected, but dynamic analysis may reveal more.";
-}
-
 export default MobSFDecisionDialog;
+

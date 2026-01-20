@@ -137,6 +137,31 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         );
     };
 
+    // Helper function to check and update overall scan status
+    const checkAndUpdateScanStatus = (scanId: string) => {
+        setScans((currentScans) => {
+            const scan = currentScans.find(s => s.id === scanId);
+            if (!scan) return currentScans;
+
+            const allTools = Object.values(scan.tools);
+            // Check if all tools are in a terminal state (completed, failed)
+            // Note: awaiting_decision is NOT terminal - scan should stay running while waiting
+            const allFinished = allTools.every(t =>
+                t.status === 'completed' || t.status === 'failed'
+            );
+
+            if (allFinished && scan.status !== 'completed') {
+                console.log(`[ScanContext] All tools finished for scan ${scanId}, marking scan as completed`);
+                return currentScans.map(s =>
+                    s.id === scanId
+                        ? { ...s, status: 'completed' as ScanStatus, updatedAt: new Date().toISOString() }
+                        : s
+                );
+            }
+            return currentScans;
+        });
+    };
+
     // --- OpenVAS Dedicated Handler (3-step async flow) ---
     const executeOpenVAS = async (scanId: string, target: string, batchId?: string) => {
         const tool: ToolKey = "openvas";
@@ -701,23 +726,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         // Step 2: Start tools in "background" with batchId
         selectedTools.forEach((tool) => {
             executeTool(newScanId, tool, target, apkFile, batchId).then(() => {
-                // Check if all tools finished
-                setScans((currentScans) => {
-                    const s = currentScans.find(scan => scan.id === newScanId);
-                    if (!s) return currentScans;
-
-                    const allTools = Object.values(s.tools);
-                    const allFinished = allTools.every(t => t.status === 'completed' || t.status === 'failed');
-
-                    if (allFinished) {
-                        return currentScans.map(scan =>
-                            scan.id === newScanId
-                                ? { ...scan, status: 'completed', updatedAt: new Date().toISOString() }
-                                : scan
-                        );
-                    }
-                    return currentScans;
-                });
+                // Check if all tools finished and update overall scan status
+                checkAndUpdateScanStatus(newScanId);
             });
         });
 
@@ -849,6 +859,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             // Remove from pending on error too
             setPendingDecisions(prev => prev.filter(p => p.scanId !== scanId));
         }
+
+        // After decision is processed, check if overall scan should be completed
+        checkAndUpdateScanStatus(scanId);
     };
 
     return (

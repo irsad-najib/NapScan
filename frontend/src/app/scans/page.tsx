@@ -6,11 +6,13 @@ import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
 import { ToolList } from "@/components/scans/ToolList";
 import { Sidebar, Header } from "@/components/layout";
+import { MobSFDecisionDialog } from "@/components/scans/MobSFDecisionDialog";
 
 export default function ScansPage() {
-  const { scans, startScan, deleteScan } = useScan();
+  const { scans, startScan, deleteScan, pendingDecisions, submitMobSFDecision } = useScan();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
 
   // Scan type: web or apk
   const [scanType, setScanType] = useState<"web" | "apk">("web");
@@ -769,6 +771,7 @@ export default function ScansPage() {
                                         tools={scan.tools}
                                         target={scan.target}
                                         vulnerabilities={scan.vulnerabilities}
+                                        scanId={scan.id}
                                       />
                                     </div>
                                   </div>
@@ -809,6 +812,22 @@ export default function ScansPage() {
           </div>
         </main>
       </div>
+
+      {/* MobSF Decision Dialog - show for any pending decision */}
+      {pendingDecisions.length > 0 && (
+        <MobSFDecisionDialog
+          pending={pendingDecisions[0]}
+          onDecision={async (decision) => {
+            setIsSubmittingDecision(true);
+            try {
+              await submitMobSFDecision(pendingDecisions[0].scanId, decision);
+            } finally {
+              setIsSubmittingDecision(false);
+            }
+          }}
+          isSubmitting={isSubmittingDecision}
+        />
+      )}
     </div >
   );
 }
