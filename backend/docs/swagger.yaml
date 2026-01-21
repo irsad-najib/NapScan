@@ -1,5 +1,12 @@
 basePath: /api
 definitions:
+  handler.DecisionRequest:
+    properties:
+      decision:
+        description: STOP or CONTINUE
+        example: CONTINUE
+        type: string
+    type: object
   handler.ScanTask:
     properties:
       batch_id:
@@ -131,6 +138,48 @@ definitions:
         items:
           $ref: '#/definitions/models.Port'
         type: array
+    type: object
+  models.ScanStatus:
+    enum:
+    - pending
+    - running
+    - stopped
+    - failed
+    - completed
+    type: string
+    x-enum-varnames:
+    - StatusPending
+    - StatusRunning
+    - StatusStopped
+    - StatusFailed
+    - StatusCompleted
+  models.ScanTaskResponse:
+    properties:
+      batch_id:
+        type: string
+      error:
+        type: string
+      progress:
+        type: integer
+      result:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      started_at:
+        description: RFC3339 format
+        type: string
+      status:
+        $ref: '#/definitions/models.ScanStatus'
+      target:
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        description: RFC3339 format
+        type: string
+      user_id:
+        type: string
     type: object
   models.Service:
     properties:
@@ -386,6 +435,191 @@ paths:
       summary: Start FFUF Scan
       tags:
       - FFUF
+  /ffuf/scan/{task_id}/report:
+    get:
+      description: Returns the scan report/results. Only available when status is
+        'completed' (works for all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              result:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Report
+      tags:
+      - Scan Control
+  /ffuf/scan/{task_id}/status:
+    get:
+      description: Returns the unified status and progress of a scan task (works for
+        all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Status
+      tags:
+      - Scan Control
+  /ffuf/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
+  /ffuf/scan/async:
+    post:
+      consumes:
+      - application/json
+      description: Start a FFUF scan asynchronously. Returns task_id immediately.
+      parameters:
+      - description: Scan Request
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            batch_id:
+              type: string
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Start FFUF Scan (Async)
+      tags:
+      - FFUF
+  /files/{id}/decision:
+    post:
+      description: Choose to STOP or CONTINUE to dynamic analysis
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: User decision
+        in: body
+        name: decision
+        required: true
+        schema:
+          $ref: '#/definitions/handler.DecisionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Submit User Decision
+      tags:
+      - Lifecycle
+  /files/{id}/status:
+    get:
+      description: Get lifecycle status and scanning summary
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get File Status
+      tags:
+      - Lifecycle
   /health:
     get:
       consumes:
@@ -511,6 +745,137 @@ paths:
       security:
       - BearerAuth: []
       summary: Start Nmap Full Scan
+      tags:
+      - Nmap
+  /nmap/scan/{task_id}/report:
+    get:
+      description: Returns the scan report/results. Only available when status is
+        'completed' (works for all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              result:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Report
+      tags:
+      - Scan Control
+  /nmap/scan/{task_id}/status:
+    get:
+      description: Returns the unified status and progress of a scan task (works for
+        all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Status
+      tags:
+      - Scan Control
+  /nmap/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
+  /nmap/scan/async:
+    post:
+      consumes:
+      - application/json
+      description: Start a Nmap scan asynchronously. Returns task_id immediately.
+      parameters:
+      - description: Scan Request
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            batch_id:
+              type: string
+            scan_type:
+              type: string
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Start Nmap Scan (Async)
       tags:
       - Nmap
   /nuclei/scan:
@@ -813,6 +1178,135 @@ paths:
       summary: Start SSLyze Scan
       tags:
       - SSLyze
+  /sslyze/scan/{task_id}/report:
+    get:
+      description: Returns the scan report/results. Only available when status is
+        'completed' (works for all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              result:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Report
+      tags:
+      - Scan Control
+  /sslyze/scan/{task_id}/status:
+    get:
+      description: Returns the unified status and progress of a scan task (works for
+        all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Status
+      tags:
+      - Scan Control
+  /sslyze/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
+  /sslyze/scan/async:
+    post:
+      consumes:
+      - application/json
+      description: Start a SSLyze scan asynchronously. Returns task_id immediately.
+      parameters:
+      - description: Scan Request
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            batch_id:
+              type: string
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Start SSLyze Scan (Async)
+      tags:
+      - SSLyze
   /zap/scan:
     post:
       consumes:
@@ -848,6 +1342,135 @@ paths:
       security:
       - BearerAuth: []
       summary: Start ZAP Scan
+      tags:
+      - ZAP
+  /zap/scan/{task_id}/report:
+    get:
+      description: Returns the scan report/results. Only available when status is
+        'completed' (works for all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              result:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Report
+      tags:
+      - Scan Control
+  /zap/scan/{task_id}/status:
+    get:
+      description: Returns the unified status and progress of a scan task (works for
+        all scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Scan Status
+      tags:
+      - Scan Control
+  /zap/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
+  /zap/scan/async:
+    post:
+      consumes:
+      - application/json
+      description: Start a ZAP scan asynchronously. Returns task_id immediately.
+      parameters:
+      - description: Scan Request
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            batch_id:
+              type: string
+            target:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Start ZAP Scan (Async)
       tags:
       - ZAP
 securityDefinitions:

@@ -54,7 +54,7 @@ func (h *BatchHandler) CreateBatch(c *fiber.Ctx) error {
 // @Tags Batch
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {array} models.Batch
+// @Success 200 {array} models.BatchSummaryResponse
 // @Failure 401 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /batch/list [get]
@@ -72,6 +72,7 @@ func (h *BatchHandler) GetUserBatches(c *fiber.Ctx) error {
 		log.Printf("[BATCH] Failed to retrieve batches: %v", err)
 		return response.InternalServerError(c, "Failed to retrieve batches", err)
 	}
+	
 
 	log.Printf("[BATCH] Retrieved %d batches", len(batches))
 	return c.JSON(batches)

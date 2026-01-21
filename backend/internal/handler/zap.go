@@ -13,19 +13,26 @@ import (
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type ZapHandler struct {
 	service      *service.ZapService
 	scanRepo     repository.ScanResultRepository
 	batchService *service.BatchService
+	scanManager  *service.ScanManager
 }
 
-func NewZapHandler(s *service.ZapService, scanRepo repository.ScanResultRepository, batchService *service.BatchService) *ZapHandler {
-	return &ZapHandler{service: s, scanRepo: scanRepo, batchService: batchService}
+func NewZapHandler(s *service.ZapService, scanRepo repository.ScanResultRepository, batchService *service.BatchService, scanManager *service.ScanManager) *ZapHandler {
+	return &ZapHandler{
+		service:      s,
+		scanRepo:     scanRepo,
+		batchService: batchService,
+		scanManager:  scanManager,
+	}
 }
 
-// StartScan initiates a full ZAP scan
+// StartScan initiates a full ZAP scan (LEGACY SYNC)
 // @Summary Start ZAP Scan
 // @Description Run ZAP Spider and Active Scan
 // @Tags ZAP
@@ -106,4 +113,119 @@ func (h *ZapHandler) StartScan(c *fiber.Ctx) error {
 
 	log.Printf("[ZAP] Request completed successfully")
 	return response.Success(c, "ZAP scan completed", result)
+}
+
+// StartScanAsync initiates an async ZAP scan
+// @Summary Start ZAP Scan (Async)
+// @Description Start a ZAP scan asynchronously. Returns task_id immediately.
+// @Tags ZAP
+// @Accept json
+// @Security BearerAuth
+// @Produce json
+// @Param request body object{target=string,batch_id=string} true "Scan Request"
+// @Success 200 {object} models.ScanTaskResponse
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /zap/scan/async [post]
+func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
+	log.Printf("[ZAP_ASYNC] Received async scan request")
+
+	var req struct {
+		Target  string `json:"target"`
+		BatchID string `json:"batch_id"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		log.Printf("[ZAP_ASYNC] Failed to parse request body: %v", err)
+		return response.BadRequest(c, "Invalid request payload", err)
+	}
+
+	if req.BatchID == "" {
+		return response.BadRequest(c, "batch_id is required", nil)
+	}
+
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		return response.BadRequest(c, "target is required", nil)
+	}
+	
+	// Add protocol if missing
+	if !strings.HasPrefix(strings.ToLower(target), "http://") && !strings.HasPrefix(strings.ToLower(target), "https://") {
+		target = "https://" + target
+	}
+	
+	// Validate URL
+	if _, err := url.ParseRequestURI(target); err != nil {
+		log.Printf("[ZAP_ASYNC] Invalid URL: %v", err)
+		return response.BadRequest(c, "Invalid request URL", err)
+	}
+
+	// Validate batch ownership
+	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
+		log.Printf("[ZAP_ASYNC] Batch ownership validation failed: %v", err)
+		return err
+	}
+
+	// Get user ID from context (safe type assertion)
+	userID := "unknown"
+	if uid, ok := c.Locals("userID").(string); ok && uid != "" {
+		userID = uid
+	}
+
+	// Create task
+	taskID := uuid.New().String()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	task := &models.ScanTask{
+		BatchID:   req.BatchID,
+		TaskID:    taskID,
+		UserID:    userID,
+		Target:    target,
+		Status:    models.StatusPending,
+		Progress:  0,
+		Error:     nil,
+		Result:    []map[string]interface{}{},
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Cancel:    cancel,
+	}
+
+	// Register task with manager
+	h.scanManager.Register(task)
+
+	// Start scan in background
+	go func() {
+		err := service.RunZapAsync(ctx, taskID, h.scanManager)
+		if err != nil {
+			log.Printf("[ZAP_ASYNC] Scan goroutine error: %v", err)
+		}
+
+		// Save to database if completed successfully
+		if task, _ := h.scanManager.Get(taskID); task != nil && task.Status == models.StatusCompleted {
+			if h.scanRepo != nil {
+				dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer dbCancel()
+				_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
+					BatchID:   task.BatchID,
+					Tool:      "zap",
+					Target:    task.Target,
+					Result:    task.Result,
+					CreatedAt: time.Now().UTC(),
+				})
+				if dbErr != nil {
+					log.Printf("[ZAP_ASYNC] Failed to save to database: %v", dbErr)
+				} else {
+					log.Printf("[ZAP_ASYNC] Database insert success for task=%s", taskID)
+				}
+			}
+		}
+	}()
+
+	log.Printf("[ZAP_ASYNC] Task created: task_id=%s, target=%s", taskID, target)
+
+	return response.Success(c, "scan started", fiber.Map{
+		"task_id":  taskID,
+		"status":   models.StatusRunning,
+		"progress": 0,
+	})
 }
