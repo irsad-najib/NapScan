@@ -638,13 +638,67 @@ export function parseRawNmapToVulnerabilities(rawResult: RawNmapScanResult): Sca
 }
 
 /**
+ * Normalize the new nested Nmap format to the expected format
+ * New format: { tcp: [{ tcp: { hosts: [...] }, udp: { hosts: [...] } }], udp: [] }
+ * Expected format: { tcp: { hosts: [...] }, udp: { hosts: [...] } }
+ */
+function normalizeNmapResult(rawResult: any): RawNmapScanResult {
+    // Check if it's the new nested array format
+    if (Array.isArray(rawResult?.tcp) && rawResult.tcp.length > 0) {
+        console.log("[NmapParser] Detected new nested array format");
+
+        // The first element in the tcp array contains both tcp and udp data
+        const firstItem = rawResult.tcp[0];
+
+        // Combine all hosts from all items in the array
+        const allTcpHosts: RawNmapHost[] = [];
+        const allUdpHosts: RawNmapHost[] = [];
+
+        // Process tcp array items
+        for (const item of rawResult.tcp) {
+            if (item.tcp?.hosts) {
+                allTcpHosts.push(...item.tcp.hosts);
+            }
+            if (item.udp?.hosts) {
+                allUdpHosts.push(...item.udp.hosts);
+            }
+        }
+
+        // Also check if there's a separate udp array at the top level
+        if (Array.isArray(rawResult?.udp)) {
+            for (const item of rawResult.udp) {
+                if (item.udp?.hosts) {
+                    allUdpHosts.push(...item.udp.hosts);
+                }
+                if (item.tcp?.hosts) {
+                    allTcpHosts.push(...item.tcp.hosts);
+                }
+            }
+        }
+
+        return {
+            tcp: allTcpHosts.length > 0 ? { hosts: allTcpHosts } : undefined,
+            udp: allUdpHosts.length > 0 ? { hosts: allUdpHosts } : undefined,
+        };
+    }
+
+    // Already in expected format
+    return rawResult;
+}
+
+/**
  * Detect format and parse accordingly
  */
 export function parseNmapAuto(rawResult: any): ScanVulnerability[] {
-    // Check if it's raw Nmap format (has tcp or udp keys)
-    if (rawResult?.tcp || rawResult?.udp) {
+    console.log("[NmapParser] Parsing result:", rawResult);
+
+    // Normalize the format first
+    const normalizedResult = normalizeNmapResult(rawResult);
+
+    // Check if it's raw Nmap format (has tcp or udp keys with hosts)
+    if (normalizedResult?.tcp?.hosts || normalizedResult?.udp?.hosts) {
         console.log("[NmapParser] Detected raw Nmap format");
-        return parseRawNmapToVulnerabilities(rawResult);
+        return parseRawNmapToVulnerabilities(normalizedResult);
     }
 
     // Check if it's the processed API format (has risks key)
@@ -653,7 +707,7 @@ export function parseNmapAuto(rawResult: any): ScanVulnerability[] {
         return parseNmapResults(rawResult);
     }
 
-    console.warn("[NmapParser] Unknown Nmap result format");
+    console.warn("[NmapParser] Unknown Nmap result format:", rawResult);
     return [];
 }
 

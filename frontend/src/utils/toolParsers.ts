@@ -252,17 +252,36 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
- * Parse SSLyze results - handles CLI text output format
+ * Parse SSLyze results - handles both CLI text output and new JSON format
  */
 export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
     let vulnIdx = 0;
 
     try {
-        // Extract text output from the raw result
-        let textOutput = "";
+        console.log("[SSLyze Parser] Raw result type:", typeof rawResult);
+        console.log("[SSLyze Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
-        // Handle different possible structures
+        // Check if it's the new JSON format with server_scan_results
+        if (Array.isArray(rawResult) && rawResult.length > 0 && rawResult[0]?.server_scan_results) {
+            console.log("[SSLyze Parser] Detected new JSON array format");
+            return parseSslyzeJsonFormat(rawResult[0], vulnIdx);
+        }
+
+        // Check if it's directly server_scan_results array
+        if (Array.isArray(rawResult) && rawResult.length > 0 && rawResult[0]?.connectivity_result) {
+            console.log("[SSLyze Parser] Detected server_scan_results array format");
+            return parseSslyzeServerScanResults(rawResult, vulnIdx);
+        }
+
+        // Check if it's the wrapper format with server_scan_results
+        if (rawResult?.server_scan_results && Array.isArray(rawResult.server_scan_results)) {
+            console.log("[SSLyze Parser] Detected JSON format with server_scan_results");
+            return parseSslyzeServerScanResults(rawResult.server_scan_results, vulnIdx);
+        }
+
+        // Fallback to text parsing for legacy format
+        let textOutput = "";
         if (typeof rawResult === "string") {
             textOutput = rawResult;
         } else if (typeof rawResult?.error === "string") {
@@ -273,17 +292,14 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
             textOutput = rawResult.message;
         }
 
-        console.log("[SSLyze Parser] Raw result type:", typeof rawResult);
         console.log("[SSLyze Parser] Text output length:", textOutput.length);
-        console.log("[SSLyze Parser] Contains SCAN RESULTS:", textOutput.includes("SCAN RESULTS FOR"));
 
-        // If no text output found, return empty
         if (!textOutput || textOutput.length < 100) {
             console.log("[SSLyze Parser] No valid text output found");
             return vulnerabilities;
         }
 
-        // Check for TLS 1.0 support
+        // Legacy text parsing (keep existing logic)
         if (textOutput.includes("TLS 1.0 Cipher Suites") &&
             textOutput.includes("The server accepted the following") &&
             textOutput.match(/\* TLS 1\.0 Cipher Suites:[\s\S]*?The server accepted the following \d+ cipher suites/)) {
@@ -291,12 +307,11 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
                 id: `sslyze-${vulnIdx++}`,
                 name: "Deprecated TLS 1.0 Supported",
                 severity: "Medium",
-                description: "Server supports TLS 1.0 which is deprecated. Consider disabling for better security.",
+                description: "Server supports TLS 1.0 which is deprecated.",
                 tool: "sslyze",
             });
         }
 
-        // Check for TLS 1.1 support
         if (textOutput.includes("TLS 1.1 Cipher Suites") &&
             textOutput.includes("The server accepted the following") &&
             textOutput.match(/\* TLS 1\.1 Cipher Suites:[\s\S]*?The server accepted the following \d+ cipher suites/)) {
@@ -304,104 +319,7 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
                 id: `sslyze-${vulnIdx++}`,
                 name: "Deprecated TLS 1.1 Supported",
                 severity: "Medium",
-                description: "Server supports TLS 1.1 which is deprecated. Consider disabling for better security.",
-                tool: "sslyze",
-            });
-        }
-
-        // Check for SSL 2.0/3.0 (critical)
-        if (textOutput.includes("SSL 2.0") && !textOutput.match(/SSL 2\.0[\s\S]*?rejected all cipher suites/)) {
-            const ssl2Match = textOutput.match(/\* SSL 2\.0 Cipher Suites:[\s\S]*?(rejected all|accepted the following)/);
-            if (ssl2Match && ssl2Match[1].includes("accepted")) {
-                vulnerabilities.push({
-                    id: `sslyze-${vulnIdx++}`,
-                    name: "Critical: SSL 2.0 Supported",
-                    severity: "Critical",
-                    description: "Server supports SSL 2.0 which has major security vulnerabilities. Disable immediately!",
-                    tool: "sslyze",
-                });
-            }
-        }
-
-        // Check for 3DES cipher
-        if (textOutput.includes("TLS_RSA_WITH_3DES_EDE_CBC_SHA")) {
-            vulnerabilities.push({
-                id: `sslyze-${vulnIdx++}`,
-                name: "Weak Cipher: 3DES Supported",
-                severity: "High",
-                description: "Server supports 3DES cipher suite which is considered weak.",
-                tool: "sslyze",
-            });
-        }
-
-        // Check for compliance failures
-        if (textOutput.includes("FAILED - Not compliant")) {
-            // Extract tls_versions issue
-            const tlsVersionsMatch = textOutput.match(/\* tls_versions:([^\n]+)/);
-            if (tlsVersionsMatch) {
-                vulnerabilities.push({
-                    id: `sslyze-${vulnIdx++}`,
-                    name: "Compliance: TLS Versions",
-                    severity: "Medium",
-                    description: tlsVersionsMatch[1].trim(),
-                    tool: "sslyze",
-                });
-            }
-
-            // Extract ciphers issue
-            const ciphersMatch = textOutput.match(/\* ciphers:([^\n]+)/);
-            if (ciphersMatch) {
-                vulnerabilities.push({
-                    id: `sslyze-${vulnIdx++}`,
-                    name: "Compliance: Cipher Suites",
-                    severity: "Medium",
-                    description: "Non-compliant cipher suites are supported (see raw output for details)",
-                    tool: "sslyze",
-                });
-            }
-
-            // Extract curves issue
-            const curvesMatch = textOutput.match(/\* tls_curves:([^\n]+)/);
-            if (curvesMatch) {
-                vulnerabilities.push({
-                    id: `sslyze-${vulnIdx++}`,
-                    name: "Compliance: TLS Curves",
-                    severity: "Low",
-                    description: curvesMatch[1].trim(),
-                    tool: "sslyze",
-                });
-            }
-        }
-
-        // Check for Heartbleed
-        if (textOutput.includes("Heartbleed") && textOutput.toLowerCase().includes("vulnerable")) {
-            vulnerabilities.push({
-                id: `sslyze-${vulnIdx++}`,
-                name: "Heartbleed Vulnerability",
-                severity: "Critical",
-                description: "Server is vulnerable to the Heartbleed attack (CVE-2014-0160)",
-                tool: "sslyze",
-            });
-        }
-
-        // Check for ROBOT attack
-        if (textOutput.includes("ROBOT") && textOutput.toLowerCase().includes("vulnerable")) {
-            vulnerabilities.push({
-                id: `sslyze-${vulnIdx++}`,
-                name: "ROBOT Attack Vulnerability",
-                severity: "Critical",
-                description: "Server is vulnerable to the ROBOT attack",
-                tool: "sslyze",
-            });
-        }
-
-        // Check Certificate Transparency warning
-        if (textOutput.includes("Certificate Transparency") && textOutput.includes("WARNING")) {
-            vulnerabilities.push({
-                id: `sslyze-${vulnIdx++}`,
-                name: "Certificate Transparency Warning",
-                severity: "Low",
-                description: "Certificate has fewer SCTs than recommended by Google",
+                description: "Server supports TLS 1.1 which is deprecated.",
                 tool: "sslyze",
             });
         }
@@ -415,6 +333,210 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
 }
 
 /**
+ * Parse SSLyze JSON format with server_scan_results
+ */
+function parseSslyzeJsonFormat(data: any, startIdx: number): ScanVulnerability[] {
+    const vulnerabilities: ScanVulnerability[] = [];
+    let vulnIdx = startIdx;
+
+    if (data.server_scan_results && Array.isArray(data.server_scan_results)) {
+        return parseSslyzeServerScanResults(data.server_scan_results, vulnIdx);
+    }
+
+    return vulnerabilities;
+}
+
+/**
+ * Parse server_scan_results array
+ */
+function parseSslyzeServerScanResults(serverScanResults: any[], startIdx: number): ScanVulnerability[] {
+    const vulnerabilities: ScanVulnerability[] = [];
+    let vulnIdx = startIdx;
+
+    serverScanResults.forEach((scanResult: any, serverIdx: number) => {
+        const serverName = scanResult.network_configuration?.tls_server_name_indication || `Server ${serverIdx + 1}`;
+
+        // Check connectivity
+        if (scanResult.connectivity_status !== "COMPLETED") {
+            vulnerabilities.push({
+                id: `sslyze-${vulnIdx++}`,
+                name: "Connection Failed",
+                severity: "High",
+                description: `Could not connect to ${serverName}: ${scanResult.connectivity_error_trace || "Unknown error"}`,
+                tool: "sslyze",
+                affectedAsset: serverName,
+            });
+            return;
+        }
+
+        const connectivity = scanResult.connectivity_result;
+        const scanData = scanResult.scan_result;
+
+        // Check TLS version
+        if (connectivity?.highest_tls_version_supported) {
+            const tlsVersion = connectivity.highest_tls_version_supported;
+            vulnerabilities.push({
+                id: `sslyze-${vulnIdx++}`,
+                name: `TLS Version: ${tlsVersion}`,
+                severity: "Info",
+                description: `Server supports ${tlsVersion} with cipher ${connectivity.cipher_suite_supported || "unknown"}`,
+                tool: "sslyze",
+                affectedAsset: serverName,
+            });
+
+            // Check for deprecated TLS versions  
+            if (tlsVersion === "TLS_1_0" || tlsVersion === "TLS 1.0") {
+                vulnerabilities.push({
+                    id: `sslyze-${vulnIdx++}`,
+                    name: "Deprecated TLS 1.0 Supported",
+                    severity: "Medium",
+                    description: "Server's highest TLS version is 1.0 which is deprecated.",
+                    tool: "sslyze",
+                    affectedAsset: serverName,
+                });
+            } else if (tlsVersion === "TLS_1_1" || tlsVersion === "TLS 1.1") {
+                vulnerabilities.push({
+                    id: `sslyze-${vulnIdx++}`,
+                    name: "Deprecated TLS 1.1 Supported",
+                    severity: "Medium",
+                    description: "Server's highest TLS version is 1.1 which is deprecated.",
+                    tool: "sslyze",
+                    affectedAsset: serverName,
+                });
+            }
+        }
+
+        // Parse certificate info
+        const certInfo = scanData?.certificate_info?.result;
+        if (certInfo?.certificate_deployments) {
+            certInfo.certificate_deployments.forEach((deployment: any, depIdx: number) => {
+                // Check OCSP status
+                if (deployment.ocsp_response) {
+                    const ocsp = deployment.ocsp_response;
+                    if (ocsp.certificate_status !== "GOOD") {
+                        vulnerabilities.push({
+                            id: `sslyze-${vulnIdx++}`,
+                            name: `Certificate OCSP Status: ${ocsp.certificate_status}`,
+                            severity: ocsp.certificate_status === "REVOKED" ? "Critical" : "High",
+                            description: `Certificate OCSP status is ${ocsp.certificate_status}`,
+                            tool: "sslyze",
+                            affectedAsset: serverName,
+                        });
+                    }
+                }
+
+                // Check must-staple extension
+                if (deployment.leaf_certificate_has_must_staple_extension && !deployment.ocsp_response) {
+                    vulnerabilities.push({
+                        id: `sslyze-${vulnIdx++}`,
+                        name: "Missing OCSP Stapling",
+                        severity: "Medium",
+                        description: "Certificate has Must-Staple extension but no OCSP response was received",
+                        tool: "sslyze",
+                        affectedAsset: serverName,
+                    });
+                }
+
+                // Check SCT count
+                if (deployment.leaf_certificate_signed_certificate_timestamps_count !== undefined) {
+                    const sctCount = deployment.leaf_certificate_signed_certificate_timestamps_count;
+                    if (sctCount < 2) {
+                        vulnerabilities.push({
+                            id: `sslyze-${vulnIdx++}`,
+                            name: "Low SCT Count",
+                            severity: "Low",
+                            description: `Certificate has ${sctCount} SCTs (recommended: 2+)`,
+                            tool: "sslyze",
+                            affectedAsset: serverName,
+                        });
+                    }
+                }
+
+                // Check path validation results
+                if (deployment.path_validation_results) {
+                    deployment.path_validation_results.forEach((validation: any) => {
+                        const trustStore = validation.trust_store?.name || "Unknown";
+                        if (!validation.was_validation_successful) {
+                            vulnerabilities.push({
+                                id: `sslyze-${vulnIdx++}`,
+                                name: `Certificate Validation Failed (${trustStore})`,
+                                severity: "High",
+                                description: validation.validation_error || "Certificate validation failed",
+                                tool: "sslyze",
+                                affectedAsset: serverName,
+                            });
+                        }
+                    });
+                }
+
+                // Extract certificate details
+                const chain = deployment.verified_certificate_chain || deployment.received_certificate_chain;
+                if (chain && chain.length > 0) {
+                    const leafCert = chain[0];
+                    const subject = leafCert.subject?.rfc4514_string || "Unknown";
+                    const issuer = leafCert.issuer?.rfc4514_string || "Unknown";
+                    const notAfter = leafCert.not_valid_after;
+                    const keySize = leafCert.public_key?.key_size;
+                    const algorithm = leafCert.public_key?.algorithm;
+
+                    // Check expiration
+                    if (notAfter) {
+                        const expiryDate = new Date(notAfter);
+                        const now = new Date();
+                        const daysUntilExpiry = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+                        if (daysUntilExpiry < 0) {
+                            vulnerabilities.push({
+                                id: `sslyze-${vulnIdx++}`,
+                                name: "Certificate Expired",
+                                severity: "Critical",
+                                description: `Certificate expired on ${notAfter}`,
+                                tool: "sslyze",
+                                affectedAsset: subject,
+                            });
+                        } else if (daysUntilExpiry < 30) {
+                            vulnerabilities.push({
+                                id: `sslyze-${vulnIdx++}`,
+                                name: "Certificate Expiring Soon",
+                                severity: "Medium",
+                                description: `Certificate expires in ${daysUntilExpiry} days (${notAfter})`,
+                                tool: "sslyze",
+                                affectedAsset: subject,
+                            });
+                        }
+                    }
+
+                    // Check key size
+                    if (algorithm === "RSAPublicKey" && keySize && keySize < 2048) {
+                        vulnerabilities.push({
+                            id: `sslyze-${vulnIdx++}`,
+                            name: "Weak RSA Key Size",
+                            severity: "High",
+                            description: `RSA key size is ${keySize} bits (recommended: 2048+)`,
+                            tool: "sslyze",
+                            affectedAsset: subject,
+                        });
+                    }
+
+                    // Add certificate info
+                    vulnerabilities.push({
+                        id: `sslyze-${vulnIdx++}`,
+                        name: "Certificate Info",
+                        severity: "Info",
+                        description: `Subject: ${subject} | Issuer: ${issuer} | ${algorithm} ${keySize}-bit | Valid until: ${notAfter}`,
+                        tool: "sslyze",
+                        affectedAsset: serverName,
+                    });
+                }
+            });
+        }
+    });
+
+    console.log(`[SSLyze Parser] Found ${vulnerabilities.length} findings from JSON format`);
+    return vulnerabilities;
+}
+
+/**
  * Parse Ffuf results - handles various response formats
  */
 export function parseFfufResults(rawResult: any): ScanVulnerability[] {
@@ -425,13 +547,27 @@ export function parseFfufResults(rawResult: any): ScanVulnerability[] {
         console.log("[FFUF Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
         // Handle different possible structures
-        // Structure 1: { data: { results: [...] } } (API response)
-        // Structure 2: { results: [...] } (direct)
-        // Structure 3: Direct array
+        // Structure 1: New async format: array where each item has .results
+        //   e.g., [{ commandline, config, results: [...] }]
+        // Structure 2: { data: { results: [...] } } (API response)
+        // Structure 3: { results: [...] } (direct)
+        // Structure 4: Direct array of results
         let results: any[] = [];
 
         if (Array.isArray(rawResult)) {
-            results = rawResult;
+            // Check if this is the new format where each item contains .results
+            if (rawResult.length > 0 && rawResult[0]?.results && Array.isArray(rawResult[0].results)) {
+                console.log("[FFUF Parser] Detected new format with nested results");
+                // Flatten all results from all items
+                rawResult.forEach(item => {
+                    if (item.results && Array.isArray(item.results)) {
+                        results.push(...item.results);
+                    }
+                });
+            } else {
+                // Direct array of results
+                results = rawResult;
+            }
         } else if (rawResult?.data?.results && Array.isArray(rawResult.data.results)) {
             results = rawResult.data.results;
         } else if (rawResult?.results && Array.isArray(rawResult.results)) {

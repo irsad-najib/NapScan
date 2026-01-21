@@ -133,9 +133,9 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                         <span className="font-bold text-slate-900 dark:text-white text-sm">
                             {getToolName(tool)}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded w-fit">
+                        {/* <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded w-fit">
                             Lite
-                        </span>
+                        </span> */}
                     </div>
                 </div>
 
