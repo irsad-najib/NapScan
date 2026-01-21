@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Sidebar, Header } from "@/components/layout";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
 
 type ThemeOption = "light" | "dark" | "system";
 
@@ -18,43 +19,14 @@ const settingsSections: SettingsSection[] = [
     { id: "account", label: "Account", icon: "person" },
 ];
 
-// Helper to get theme from localStorage or system preference
-const getInitialTheme = (): ThemeOption => {
-    if (typeof window === "undefined") return "dark";
-    const stored = localStorage.getItem("napscan-theme") as ThemeOption | null;
-    if (stored) return stored;
-    return "system";
-};
-
-// Apply theme to document
-const applyTheme = (theme: ThemeOption) => {
-    if (typeof window === "undefined") return;
-
-    const root = document.documentElement;
-    let effectiveTheme: "light" | "dark" = "dark";
-
-    if (theme === "system") {
-        effectiveTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    } else {
-        effectiveTheme = theme;
-    }
-
-    if (effectiveTheme === "dark") {
-        root.classList.add("dark");
-        root.classList.remove("light");
-    } else {
-        root.classList.remove("dark");
-        root.classList.add("light");
-    }
-};
-
 export default function SettingsPage() {
     const { user, logout } = useAuth();
+    const { theme, setTheme } = useTheme();
     const [activeSection, setActiveSection] = useState("general");
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
     // General Settings
-    const [theme, setTheme] = useState<ThemeOption>("dark");
+    // Theme is now managed by ThemeContext
     const [language, setLanguage] = useState("en");
     const [autoSave, setAutoSave] = useState(true);
 
@@ -66,10 +38,6 @@ export default function SettingsPage() {
 
     // Load settings from localStorage on mount
     useEffect(() => {
-        const initialTheme = getInitialTheme();
-        setTheme(initialTheme);
-        applyTheme(initialTheme);
-
         // Load other settings
         const storedLanguage = localStorage.getItem("napscan-language");
         if (storedLanguage) setLanguage(storedLanguage);
@@ -90,26 +58,8 @@ export default function SettingsPage() {
         if (storedWeeklyDigest !== null) setWeeklyDigest(storedWeeklyDigest === "true");
     }, []);
 
-    // Apply theme whenever it changes
-    useEffect(() => {
-        applyTheme(theme);
-    }, [theme]);
-
-    // Listen for system theme changes when using "system" preference
-    useEffect(() => {
-        if (theme !== "system") return;
-
-        const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-        const handleChange = () => applyTheme("system");
-
-        mediaQuery.addEventListener("change", handleChange);
-        return () => mediaQuery.removeEventListener("change", handleChange);
-    }, [theme]);
-
     const handleThemeChange = (newTheme: ThemeOption) => {
         setTheme(newTheme);
-        localStorage.setItem("napscan-theme", newTheme);
-        applyTheme(newTheme);
     };
 
     const handleSave = () => {

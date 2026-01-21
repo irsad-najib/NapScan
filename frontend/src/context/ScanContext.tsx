@@ -33,6 +33,8 @@ export interface ToolExecution {
     error?: string;
     startTime?: string;
     endTime?: string;
+    // For async tools - track task_id for stop functionality
+    taskId?: string;
     // MobSF specific - for tracking file status
     fileId?: number;
 }
@@ -70,6 +72,7 @@ interface ScanContextType {
     getScan: (id: string) => ScanJob | undefined;
     startScan: (target: string, selectedTools: ToolKey[], name?: string, apkFile?: File) => Promise<string>;
     deleteScan: (id: string) => void;
+    stopTool: (scanId: string, tool: ToolKey) => Promise<void>;
     isLoading: boolean;
     // MobSF decision flow
     pendingDecisions: MobSFPendingDecision[];
@@ -273,6 +276,438 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             }
         } catch (err: any) {
             console.error("[OpenVAS] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
+    // --- Nmap Dedicated Handler (async flow with progress) ---
+    const executeNmap = async (scanId: string, target: string, batchId?: string) => {
+        const tool: ToolKey = "nmap";
+        console.log(`[Nmap] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Start Async Scan
+            console.log(`[Nmap] Step 1: Starting async scan...`);
+            const startRes = await scannersApi.nmap.scanAsync(target, batchId);
+            console.log(`[Nmap] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[Nmap] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start Nmap scan");
+            }
+
+            // Handle nested data structure
+            const responseData = (startRes.data as any)?.data || startRes.data;
+            const taskId = responseData?.task_id;
+
+            if (!taskId) {
+                console.error(`[Nmap] No task_id in response:`, startRes.data);
+                throw new Error("No task_id returned from Nmap");
+            }
+
+            console.log(`[Nmap] Scan started, task_id: ${taskId}`);
+
+            // Save taskId for stop functionality
+            updateToolStatus(scanId, tool, { taskId });
+
+            // Step 2: Poll for status (until completed)
+            let progress = 0;
+            const POLL_INTERVAL = 5000; // 5 seconds
+            let pollCount = 0;
+
+            console.log(`[Nmap] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+                console.log(`[Nmap] Poll #${pollCount}...`);
+                const statusRes = await scannersApi.nmap.taskStatus(taskId);
+                console.log(`[Nmap] Status response:`, statusRes);
+
+                if (!statusRes.ok) {
+                    console.error(`[Nmap] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get Nmap status");
+                }
+
+                // Handle nested data structure
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+                console.log(`[Nmap] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[Nmap] Scan completed!`);
+
+                    // Extract result from status response
+                    const result = statusData?.result || [];
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: { tcp: result, udp: [] }, // Format as expected by parser
+                    });
+
+                    // Parse vulnerabilities from result
+                    try {
+                        const toolVulns = parseToolResults(tool, { tcp: result, udp: [] });
+                        console.log(`[Nmap] Parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[Nmap] Failed to parse results:`, parseError);
+                    }
+                    return;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `Nmap task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error("[Nmap] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
+    // --- FFUF Dedicated Handler (async flow with progress) ---
+    const executeFfuf = async (scanId: string, target: string, batchId?: string) => {
+        const tool: ToolKey = "ffuf";
+        console.log(`[FFUF] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Start Async Scan
+            console.log(`[FFUF] Step 1: Starting async scan...`);
+            const startRes = await scannersApi.ffuf.scanAsync(target, batchId);
+            console.log(`[FFUF] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[FFUF] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start FFUF scan");
+            }
+
+            // Handle nested data structure
+            const responseData = (startRes.data as any)?.data || startRes.data;
+            const taskId = responseData?.task_id;
+
+            if (!taskId) {
+                console.error(`[FFUF] No task_id in response:`, startRes.data);
+                throw new Error("No task_id returned from FFUF");
+            }
+
+            console.log(`[FFUF] Scan started, task_id: ${taskId}`);
+
+            // Save taskId for stop functionality
+            updateToolStatus(scanId, tool, { taskId });
+
+            // Step 2: Poll for status (until completed)
+            let progress = 0;
+            const POLL_INTERVAL = 5000; // 5 seconds
+            let pollCount = 0;
+
+            console.log(`[FFUF] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+                console.log(`[FFUF] Poll #${pollCount}...`);
+                const statusRes = await scannersApi.ffuf.taskStatus(taskId);
+                console.log(`[FFUF] Status response:`, statusRes);
+
+                if (!statusRes.ok) {
+                    console.error(`[FFUF] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get FFUF status");
+                }
+
+                // Handle nested data structure
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+                console.log(`[FFUF] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[FFUF] Scan completed!`);
+
+                    // Extract result from status response
+                    const result = statusData?.result || [];
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: result,
+                    });
+
+                    // Parse vulnerabilities from result
+                    try {
+                        const toolVulns = parseToolResults(tool, result);
+                        console.log(`[FFUF] Parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[FFUF] Failed to parse results:`, parseError);
+                    }
+                    return;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `FFUF task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error("[FFUF] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
+    // --- SSLyze Dedicated Handler (async flow with progress) ---
+    const executeSslyze = async (scanId: string, target: string, batchId?: string) => {
+        const tool: ToolKey = "sslyze";
+        console.log(`[SSLyze] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Start Async Scan
+            console.log(`[SSLyze] Step 1: Starting async scan...`);
+            const startRes = await scannersApi.sslyze.scanAsync(target, batchId);
+            console.log(`[SSLyze] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[SSLyze] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start SSLyze scan");
+            }
+
+            // Handle nested data structure
+            const responseData = (startRes.data as any)?.data || startRes.data;
+            const taskId = responseData?.task_id;
+
+            if (!taskId) {
+                console.error(`[SSLyze] No task_id in response:`, startRes.data);
+                throw new Error("No task_id returned from SSLyze");
+            }
+
+            console.log(`[SSLyze] Scan started, task_id: ${taskId}`);
+
+            // Save taskId for stop functionality
+            updateToolStatus(scanId, tool, { taskId });
+
+            // Step 2: Poll for status (until completed)
+            let progress = 0;
+            const POLL_INTERVAL = 5000; // 5 seconds
+            let pollCount = 0;
+
+            console.log(`[SSLyze] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+                console.log(`[SSLyze] Poll #${pollCount}...`);
+                const statusRes = await scannersApi.sslyze.taskStatus(taskId);
+                console.log(`[SSLyze] Status response:`, statusRes);
+
+                if (!statusRes.ok) {
+                    console.error(`[SSLyze] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get SSLyze status");
+                }
+
+                // Handle nested data structure
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+                console.log(`[SSLyze] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[SSLyze] Scan completed!`);
+
+                    // Extract result from status response
+                    const result = statusData?.result || [];
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: result,
+                    });
+
+                    // Parse vulnerabilities from result
+                    try {
+                        const toolVulns = parseToolResults(tool, result);
+                        console.log(`[SSLyze] Parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[SSLyze] Failed to parse results:`, parseError);
+                    }
+                    return;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `SSLyze task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error("[SSLyze] Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        }
+    };
+
+    // --- ZAP Dedicated Handler (async flow with progress) ---
+    const executeZap = async (scanId: string, target: string, batchId?: string) => {
+        const tool: ToolKey = "zap";
+        console.log(`[ZAP] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
+
+        updateToolStatus(scanId, tool, {
+            status: "running",
+            progress: 0,
+            startTime: new Date().toISOString(),
+        });
+
+        try {
+            // Step 1: Start Async Scan
+            console.log(`[ZAP] Step 1: Starting async scan...`);
+            const startRes = await scannersApi.zap.scanAsync(target, batchId);
+            console.log(`[ZAP] Start response:`, startRes);
+
+            if (!startRes.ok) {
+                console.error(`[ZAP] Start scan failed:`, startRes);
+                throw new Error((startRes as any).message || (startRes as any).error || "Failed to start ZAP scan");
+            }
+
+            // Handle nested data structure
+            const responseData = (startRes.data as any)?.data || startRes.data;
+            const taskId = responseData?.task_id;
+
+            if (!taskId) {
+                console.error(`[ZAP] No task_id in response:`, startRes.data);
+                throw new Error("No task_id returned from ZAP");
+            }
+
+            console.log(`[ZAP] Scan started, task_id: ${taskId}`);
+
+            // Save taskId for stop functionality
+            updateToolStatus(scanId, tool, { taskId });
+
+            // Step 2: Poll for status (until completed)
+            let progress = 0;
+            const POLL_INTERVAL = 10000; // 10 seconds (ZAP scans can be longer)
+            let pollCount = 0;
+
+            console.log(`[ZAP] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+                console.log(`[ZAP] Poll #${pollCount}...`);
+                const statusRes = await scannersApi.zap.taskStatus(taskId);
+                console.log(`[ZAP] Status response:`, statusRes);
+
+                if (!statusRes.ok) {
+                    console.error(`[ZAP] Status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get ZAP status");
+                }
+
+                // Handle nested data structure
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+                console.log(`[ZAP] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[ZAP] Scan completed!`);
+
+                    // Extract result from status response
+                    const result = statusData?.result || [];
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: result,
+                    });
+
+                    // Parse vulnerabilities from result
+                    try {
+                        const toolVulns = parseToolResults(tool, result);
+                        console.log(`[ZAP] Parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[ZAP] Failed to parse results:`, parseError);
+                    }
+                    return;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `ZAP task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error("[ZAP] Failed:", err);
             updateToolStatus(scanId, tool, {
                 status: "failed",
                 progress: 100,
@@ -550,6 +985,26 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             return executeNuclei(scanId, target, batchId);
         }
 
+        // Nmap has its own dedicated async handler
+        if (tool === "nmap") {
+            return executeNmap(scanId, target, batchId);
+        }
+
+        // FFUF has its own dedicated async handler
+        if (tool === "ffuf") {
+            return executeFfuf(scanId, target, batchId);
+        }
+
+        // SSLyze has its own dedicated async handler
+        if (tool === "sslyze") {
+            return executeSslyze(scanId, target, batchId);
+        }
+
+        // ZAP has its own dedicated async handler
+        if (tool === "zap") {
+            return executeZap(scanId, target, batchId);
+        }
+
         // MobSF has its own dedicated async handler
         if (tool === "mobsf") {
             if (!apkFile) {
@@ -564,110 +1019,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             return executeMobSF(scanId, apkFile, batchId);
         }
 
-        // Mark tool as running
-        updateToolStatus(scanId, tool, {
-            status: "running",
-            progress: 0,
-            startTime: new Date().toISOString(),
-        });
-
-        try {
-            let result;
-            switch (tool) {
-                case "nmap":
-                    result = await scannersApi.nmap.scan(target, batchId);
-                    break;
-                case "zap":
-                    result = await scannersApi.zap.scan(target, batchId);
-                    break;
-                case "sslyze":
-                    result = await scannersApi.sslyze.scan(target, batchId);
-                    break;
-                case "ffuf":
-                    result = await scannersApi.ffuf.scan(target, batchId);
-                    break;
-                default:
-                    throw new Error(`Unknown tool: ${tool}`);
-            }
-
-            const res = result as any;
-
-            // Special handling for SSLyze - it may return HTTP 500 but still have valid results
-            // SSLyze exits with status 1 when compliance check fails, but scan data is in the error/data field
-            // Check both res.data (for HTTP 200 with success:false) and res.data (for HTTP 500 error body)
-            if (tool === "sslyze") {
-                const sslyzeData = res.data as { success?: boolean; error?: string; message?: string } | undefined;
-                const errorStr = sslyzeData?.error || res.message || "";
-
-                console.log(`[ScanContext] SSLyze response:`, { ok: res.ok, hasData: !!sslyzeData, errorLength: errorStr.length });
-
-                if (typeof errorStr === "string" && errorStr.includes("SCAN RESULTS FOR")) {
-                    console.log(`[ScanContext] SSLyze has scan results in response, parsing...`);
-
-                    // Store the data even though it's technically a "failure"
-                    updateToolStatus(scanId, tool, {
-                        status: "completed",
-                        progress: 100,
-                        endTime: new Date().toISOString(),
-                        result: sslyzeData || { error: errorStr },
-                    });
-
-                    // Parse vulnerabilities from the response
-                    try {
-                        const toolVulns = parseToolResults(tool, sslyzeData || { error: errorStr });
-                        console.log(`[ScanContext] Parsed ${toolVulns.length} SSLyze vulnerabilities:`, toolVulns);
-                        if (toolVulns.length > 0) {
-                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
-                                ...v,
-                                id: `${scanId}-${tool}-${idx}`,
-                            }));
-                            addVulnerabilities(scanId, scanVulns);
-                        }
-                    } catch (parseError) {
-                        console.error(`Failed to parse SSLyze results:`, parseError);
-                    }
-                    return; // Exit early, don't throw error
-                }
-            }
-
-            if (!res.ok) {
-                throw new Error(res.error || res.message || "Unknown error");
-            }
-
-            updateToolStatus(scanId, tool, {
-                status: "completed",
-                progress: 100,
-                endTime: new Date().toISOString(),
-                result: res.data,
-            });
-
-            // Parse tool results and extract vulnerabilities
-            if (res.data) {
-                console.log(`[ScanContext] Parsing ${tool} results:`, res.data);
-                try {
-                    const toolVulns = parseToolResults(tool, res.data);
-                    console.log(`[ScanContext] Parsed ${toolVulns.length} vulnerabilities:`, toolVulns);
-                    if (toolVulns.length > 0) {
-                        const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
-                            ...v,
-                            id: `${scanId}-${tool}-${idx}`,
-                        }));
-                        console.log(`[ScanContext] Adding vulnerabilities to scan:`, scanVulns);
-                        addVulnerabilities(scanId, scanVulns);
-                    }
-                } catch (parseError) {
-                    console.error(`Failed to parse ${tool} results:`, parseError);
-                }
-            }
-        } catch (err: any) {
-            console.error(`Tool ${tool} failed`, err);
-            updateToolStatus(scanId, tool, {
-                status: "failed",
-                progress: 100,
-                endTime: new Date().toISOString(),
-                error: err.message,
-            });
-        }
+        // All tools are now using dedicated async handlers above
+        // Only Frida remains handled by MobSF flow
+        throw new Error(`Unknown tool: ${tool}`);
     };
 
     const startScan = async (target: string, selectedTools: ToolKey[], name?: string, apkFile?: File) => {
@@ -736,6 +1090,65 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
     const deleteScan = (id: string) => {
         setScans((prev) => prev.filter((s) => s.id !== id));
+    };
+
+    // Stop a running tool scan
+    const stopTool = async (scanId: string, tool: ToolKey) => {
+        const scan = scans.find(s => s.id === scanId);
+        if (!scan) {
+            console.error(`[StopTool] Scan not found: ${scanId}`);
+            return;
+        }
+
+        const toolExecution = scan.tools[tool];
+        if (!toolExecution || toolExecution.status !== 'running') {
+            console.error(`[StopTool] Tool ${tool} is not running`);
+            return;
+        }
+
+        const taskId = toolExecution.taskId;
+        if (!taskId) {
+            console.error(`[StopTool] No taskId found for tool ${tool}`);
+            return;
+        }
+
+        console.log(`[StopTool] Stopping ${tool} with taskId: ${taskId}`);
+
+        try {
+            let stopRes;
+            switch (tool) {
+                case 'nmap':
+                    stopRes = await scannersApi.nmap.stop(taskId);
+                    break;
+                case 'ffuf':
+                    stopRes = await scannersApi.ffuf.stop(taskId);
+                    break;
+                case 'sslyze':
+                    stopRes = await scannersApi.sslyze.stop(taskId);
+                    break;
+                case 'zap':
+                    stopRes = await scannersApi.zap.stop(taskId);
+                    break;
+                default:
+                    console.error(`[StopTool] Tool ${tool} does not support stop`);
+                    return;
+            }
+
+            if (stopRes.ok) {
+                console.log(`[StopTool] Successfully stopped ${tool}`);
+                updateToolStatus(scanId, tool, {
+                    status: 'failed',
+                    progress: 100,
+                    endTime: new Date().toISOString(),
+                    error: 'Scan stopped by user',
+                });
+                checkAndUpdateScanStatus(scanId);
+            } else {
+                console.error(`[StopTool] Failed to stop ${tool}:`, stopRes);
+            }
+        } catch (err: any) {
+            console.error(`[StopTool] Error stopping ${tool}:`, err);
+        }
     };
 
     // Submit user decision for MobSF scan (STOP or CONTINUE with Frida)
@@ -872,6 +1285,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 getScan,
                 startScan,
                 deleteScan,
+                stopTool,
                 isLoading,
                 pendingDecisions,
                 submitMobSFDecision,

@@ -38,11 +38,25 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
 
     const hasFridaResults = fridaVulnerabilities.length > 0;
 
-    const { pendingDecisions, submitMobSFDecision } = useScan();
+    const { pendingDecisions, submitMobSFDecision, stopTool } = useScan();
 
     // Check if this tool has a pending decision
     const pendingDecision = scanId ? pendingDecisions.find(p => p.scanId === scanId) : null;
     const showDecisionUI = data.status === "awaiting_decision" && tool === "mobsf";
+
+    // Check if this tool supports stop functionality
+    const canStop = data.status === 'running' && ['nmap', 'ffuf', 'sslyze', 'zap'].includes(tool) && data.taskId;
+    const [isStopping, setIsStopping] = useState(false);
+
+    const handleStop = async () => {
+        if (!scanId || !canStop) return;
+        setIsStopping(true);
+        try {
+            await stopTool(scanId, tool);
+        } finally {
+            setIsStopping(false);
+        }
+    };
 
     const handleDecision = async (decision: "STOP" | "CONTINUE") => {
         if (!scanId) return;
@@ -140,8 +154,8 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                             {getStatusIcon(data.status)}
                         </span>
                         <span className="capitalize">
-                            {/* Only OpenVAS shows progress percentage */}
-                            {data.status === 'running' && data.tool === 'openvas' && data.progress !== undefined
+                            {/* Show progress percentage for tools with async polling */}
+                            {data.status === 'running' && ['openvas', 'nmap', 'nuclei', 'ffuf', 'sslyze', 'zap'].includes(data.tool) && data.progress !== undefined
                                 ? `${data.progress}%`
                                 : data.status}
                         </span>
@@ -158,6 +172,26 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                 : '-'}
                     </span>
                 </div>
+
+                {/* Stop Button */}
+                {canStop && (
+                    <div className="w-20 flex items-center justify-center">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleStop();
+                            }}
+                            disabled={isStopping}
+                            className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 border border-red-200 dark:border-red-500/30 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Stop this scan"
+                        >
+                            <span className={`material-symbols-outlined text-sm ${isStopping ? 'animate-spin' : ''}`}>
+                                {isStopping ? 'sync' : 'stop_circle'}
+                            </span>
+                            <span>{isStopping ? 'Stopping' : 'Stop'}</span>
+                        </button>
+                    </div>
+                )}
 
                 {/* Risks Mini Summary (Dots) */}
                 <div className="w-32 flex items-center justify-end gap-1.5 px-4 text-xs font-mono text-slate-400">
@@ -278,8 +312,8 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                             <button
                                                 onClick={() => setMobsfFridaView("mobsf")}
                                                 className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "mobsf"
-                                                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                                                     }`}
                                             >
                                                 <span className="material-symbols-outlined text-base">security</span>
@@ -291,8 +325,8 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                             <button
                                                 onClick={() => setMobsfFridaView("frida")}
                                                 className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "frida"
-                                                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                                                     }`}
                                             >
                                                 <span className="material-symbols-outlined text-base">bug_report</span>

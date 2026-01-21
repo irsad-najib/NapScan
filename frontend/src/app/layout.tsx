@@ -20,6 +20,7 @@ export const metadata: Metadata = {
 
 import { ScanProvider } from "@/context/ScanContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 
 export default function RootLayout({
   children,
@@ -27,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         {/* Google Fonts: Manrope */}
         <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -67,9 +68,11 @@ export default function RootLayout({
           strategy="afterInteractive"
         />
         <AuthProvider>
-          <ScanProvider>
-            {children}
-          </ScanProvider>
+          <ThemeProvider>
+            <ScanProvider>
+              {children}
+            </ScanProvider>
+          </ThemeProvider>
         </AuthProvider>
       </body>
     </html>

@@ -241,20 +241,119 @@ export const batchApi = {
 
 export const scannersApi = {
   nmap: {
+    // Legacy sync scan
     scan: async (target: string, batchId?: string): Promise<ApiResult<NmapScanResponse>> =>
       request<NmapScanResponse>({
         method: "POST",
         url: "/api/nmap/scan",
         data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
+
+    // Async scan - Start scan and get task_id
+    scanAsync: async (target: string, batchId?: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        progress: number;
+        status: string;
+        task_id: string;
+      };
+    }>> =>
+      request({
+        method: "POST",
+        url: "/api/nmap/scan/async",
+        data: {
+          target: ensureNonEmptyTarget(target),
+          scan_type: "parallel",
+          ...(batchId && { batch_id: batchId }),
+        },
+      }),
+
+    // Get task status
+    taskStatus: async (taskId: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        batch_id: string;
+        task_id: string;
+        user_id: string;
+        target: string;
+        status: string;
+        progress: number;
+        error: string | null;
+        result: unknown[];
+        started_at: string;
+        updated_at: string;
+      };
+    }>> =>
+      request({
+        method: "GET",
+        url: `/api/nmap/scan/${encodeURIComponent(taskId)}/status`,
+      }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/nmap/scan/${encodeURIComponent(taskId)}/stop`,
+      }),
   },
 
   ffuf: {
+    // Legacy sync scan
     scan: async (target: string, batchId?: string): Promise<ApiResult<unknown>> =>
       request<unknown>({
         method: "POST",
         url: "/api/ffuf/scan",
         data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
+      }),
+
+    // Async scan - Start scan and get task_id
+    scanAsync: async (target: string, batchId?: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        progress: number;
+        status: string;
+        task_id: string;
+      };
+    }>> =>
+      request({
+        method: "POST",
+        url: "/api/ffuf/scan/async",
+        data: {
+          target: ensureNonEmptyTarget(target),
+          ...(batchId && { batch_id: batchId }),
+        },
+      }),
+
+    // Get task status
+    taskStatus: async (taskId: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        batch_id: string;
+        task_id: string;
+        user_id: string;
+        target: string;
+        status: string;
+        progress: number;
+        error: string | null;
+        result: unknown[];
+        started_at: string;
+        updated_at: string;
+      };
+    }>> =>
+      request({
+        method: "GET",
+        url: `/api/ffuf/scan/${encodeURIComponent(taskId)}/status`,
+      }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/ffuf/scan/${encodeURIComponent(taskId)}/stop`,
       }),
   },
 
@@ -304,20 +403,118 @@ export const scannersApi = {
   },
 
   sslyze: {
+    // Legacy sync scan
     scan: async (target: string, batchId?: string): Promise<ApiResult<unknown>> =>
       request<unknown>({
         method: "POST",
         url: "/api/sslyze/scan",
         data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
       }),
+
+    // Async scan - Start scan and get task_id
+    scanAsync: async (target: string, batchId?: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        progress: number;
+        status: string;
+        task_id: string;
+      };
+    }>> =>
+      request({
+        method: "POST",
+        url: "/api/sslyze/scan/async",
+        data: {
+          target: ensureNonEmptyTarget(target),
+          ...(batchId && { batch_id: batchId }),
+        },
+      }),
+
+    // Get task status
+    taskStatus: async (taskId: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        batch_id: string;
+        task_id: string;
+        user_id: string;
+        target: string;
+        status: string;
+        progress: number;
+        error: string | null;
+        result: unknown[];
+        started_at: string;
+        updated_at: string;
+      };
+    }>> =>
+      request({
+        method: "GET",
+        url: `/api/sslyze/scan/${encodeURIComponent(taskId)}/status`,
+      }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/sslyze/scan/${encodeURIComponent(taskId)}/stop`,
+      }),
   },
 
   zap: {
+    // Legacy sync scan
     scan: async (target: string, batchId?: string): Promise<ApiResult<ZapScanResponse>> =>
       request<ZapScanResponse>({
         method: "POST",
         url: "/api/zap/scan",
         data: { target: ensureNonEmptyTarget(target), ...(batchId && { batch_id: batchId }) },
+      }),
+
+    // Async scan - Start scan and get task_id
+    scanAsync: async (target: string, batchId?: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        progress: number;
+        status: string;
+        task_id: string;
+      };
+    }>> =>
+      request({
+        method: "POST",
+        url: "/api/zap/scan/async",
+        data: {
+          target: ensureNonEmptyTarget(target),
+          ...(batchId && { batch_id: batchId }),
+        },
+      }),
+
+    // Get task status
+    taskStatus: async (taskId: string): Promise<ApiResult<{
+      success: boolean;
+      message: string;
+      data: {
+        batch_id: string;
+        task_id: string;
+        user_id: string;
+        target: string;
+        status: string;
+        progress: number;
+        error: string | null;
+        result: unknown[];
+        started_at: string;
+        updated_at: string;
+      };
+    }>> =>
+      request({
+        method: "GET",
+        url: `/api/zap/scan/${encodeURIComponent(taskId)}/status`,
+      }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/zap/scan/${encodeURIComponent(taskId)}/stop`,
       }),
   },
 

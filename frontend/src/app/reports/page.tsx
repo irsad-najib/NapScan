@@ -1,16 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { useScan } from "@/context/ScanContext";
+import { useScan, ScanVulnerability } from "@/context/ScanContext";
 import { Sidebar, Header } from "@/components/layout";
+
+// Severity priority map (higher value = more severe)
+const SEVERITY_ORDER: Record<string, number> = {
+  critical: 5,
+  high: 4,
+  medium: 3,
+  low: 2,
+  info: 1,
+};
+
+type SortOrder = "desc" | "asc";
+
 export default function ReportsPage() {
   const { scans } = useScan();
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "html">("pdf");
+  const [vulnSortOrder, setVulnSortOrder] = useState<SortOrder>("desc");
 
   const selectedScan = scans.find(s => s.id === selectedScanId);
+
+  // Sort vulnerabilities by severity
+  const sortedVulnerabilities = useMemo(() => {
+    if (!selectedScan) return [];
+    return [...selectedScan.vulnerabilities].sort((a, b) => {
+      const severityA = SEVERITY_ORDER[a.severity.toLowerCase()] || 0;
+      const severityB = SEVERITY_ORDER[b.severity.toLowerCase()] || 0;
+      return vulnSortOrder === "desc" ? severityB - severityA : severityA - severityB;
+    });
+  }, [selectedScan, vulnSortOrder]);
 
   const handleExport = () => {
     if (!selectedScan) return;
@@ -257,12 +280,24 @@ export default function ReportsPage() {
                     ))}
                   </ul>
 
-                  <h2>Vulnerabilities Found</h2>
-                  {selectedScan.vulnerabilities.length === 0 ? (
+                  <div className="flex items-center justify-between mt-8 mb-4">
+                    <h2 className="m-0">Vulnerabilities Found</h2>
+                    <button
+                      onClick={() => setVulnSortOrder(vulnSortOrder === "desc" ? "asc" : "desc")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                      title={vulnSortOrder === "desc" ? "Showing: Highest severity first" : "Showing: Lowest severity first"}
+                    >
+                      <span className="material-symbols-outlined text-sm">
+                        {vulnSortOrder === "desc" ? "arrow_downward" : "arrow_upward"}
+                      </span>
+                      <span>Severity {vulnSortOrder === "desc" ? "↓" : "↑"}</span>
+                    </button>
+                  </div>
+                  {sortedVulnerabilities.length === 0 ? (
                     <p>No vulnerabilities detected.</p>
                   ) : (
                     <div className="space-y-4">
-                      {selectedScan.vulnerabilities.map((vuln) => (
+                      {sortedVulnerabilities.map((vuln) => (
                         <div
                           key={vuln.id}
                           className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg">

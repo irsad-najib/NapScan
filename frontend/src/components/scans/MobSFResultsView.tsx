@@ -1,8 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { ScanVulnerability } from "@/context/ScanContext";
 import { MobSFAppInfo } from "@/utils/toolParsers";
+
+// Severity priority map (higher value = more severe)
+const SEVERITY_ORDER: Record<string, number> = {
+    critical: 5,
+    high: 4,
+    medium: 3,
+    low: 2,
+    info: 1,
+};
+
+type SortOrder = "desc" | "asc";
 
 interface MobSFResultsViewProps {
     mobsfVulnerabilities: ScanVulnerability[];
@@ -19,6 +30,7 @@ export function MobSFResultsView({
 }: MobSFResultsViewProps) {
     const [activeSection, setActiveSection] = useState<"mobsf" | "frida">("mobsf");
     const [expandedVuln, setExpandedVuln] = useState<string | null>(null);
+    const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
     const getSeverityStyle = (severity: string) => {
         switch (severity.toLowerCase()) {
@@ -64,6 +76,15 @@ export function MobSFResultsView({
 
     const currentVulns = activeSection === "mobsf" ? mobsfVulnerabilities : fridaVulnerabilities;
 
+    // Sort vulnerabilities by severity
+    const sortedVulns = useMemo(() => {
+        return [...currentVulns].sort((a, b) => {
+            const severityA = SEVERITY_ORDER[a.severity.toLowerCase()] || 0;
+            const severityB = SEVERITY_ORDER[b.severity.toLowerCase()] || 0;
+            return sortOrder === "desc" ? severityB - severityA : severityA - severityB;
+        });
+    }, [currentVulns, sortOrder]);
+
     return (
         <div className="space-y-6">
             {/* App Info Card */}
@@ -92,8 +113,8 @@ export function MobSFResultsView({
                         {/* Security Score */}
                         <div className="text-center shrink-0">
                             <div className={`w-16 h-16 rounded-full flex flex-col items-center justify-center ${parseInt(appInfo.securityScore) >= 70 ? 'bg-green-500/20 border-2 border-green-500' :
-                                    parseInt(appInfo.securityScore) >= 50 ? 'bg-amber-500/20 border-2 border-amber-500' :
-                                        'bg-red-500/20 border-2 border-red-500'
+                                parseInt(appInfo.securityScore) >= 50 ? 'bg-amber-500/20 border-2 border-amber-500' :
+                                    'bg-red-500/20 border-2 border-red-500'
                                 }`}>
                                 <span className="text-xl font-bold text-white">{appInfo.securityScore}</span>
                                 <span className="text-[10px] text-slate-400">SCORE</span>
@@ -128,8 +149,8 @@ export function MobSFResultsView({
                 <button
                     onClick={() => setActiveSection("mobsf")}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all ${activeSection === "mobsf"
-                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                         }`}
                 >
                     <span className="material-symbols-outlined text-lg">security</span>
@@ -143,8 +164,8 @@ export function MobSFResultsView({
                     <button
                         onClick={() => setActiveSection("frida")}
                         className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all ${activeSection === "frida"
-                                ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                             }`}
                     >
                         <span className="material-symbols-outlined text-lg">bug_report</span>
@@ -205,8 +226,30 @@ export function MobSFResultsView({
 
             {/* Vulnerability List */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                {/* Header with Sort Button */}
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+                    <h4 className="font-semibold text-slate-900 dark:text-white">
+                        {activeSection === "mobsf" ? "Static Analysis Findings" : "Dynamic Analysis Findings"}
+                    </h4>
+                    <div className="flex items-center gap-3">
+                        {/* Sort Button */}
+                        <button
+                            onClick={() => setSortOrder(sortOrder === "desc" ? "asc" : "desc")}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                            title={sortOrder === "desc" ? "Showing: Highest severity first" : "Showing: Lowest severity first"}
+                        >
+                            <span className="material-symbols-outlined text-sm">
+                                {sortOrder === "desc" ? "arrow_downward" : "arrow_upward"}
+                            </span>
+                            <span>Severity {sortOrder === "desc" ? "↓" : "↑"}</span>
+                        </button>
+                        <span className="bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-400 text-xs font-bold px-2 py-0.5 rounded-full">
+                            {currentVulns.length} Issues
+                        </span>
+                    </div>
+                </div>
                 <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                    {currentVulns.length === 0 ? (
+                    {sortedVulns.length === 0 ? (
                         <div className="p-12 text-center">
                             <span className="material-symbols-outlined text-5xl text-slate-300 dark:text-slate-600 mb-4">
                                 check_circle
@@ -216,7 +259,7 @@ export function MobSFResultsView({
                             </p>
                         </div>
                     ) : (
-                        currentVulns.map((vuln, idx) => (
+                        sortedVulns.map((vuln, idx) => (
                             <div
                                 key={vuln.id || idx}
                                 className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
