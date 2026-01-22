@@ -1,64 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { request } from "@/services/api";
+import { request, batchApi, BatchItem } from "@/services/api";
 import { Sidebar, Header } from "@/components/layout";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [batches, setBatches] = useState<BatchItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const targets = [
-    {
-      id: 1,
-      name: "api.company-prod.com",
-      description: "Production API Gateway",
-      icon: "language",
-      status: "Scanning (45%)",
-      statusType: "scanning",
-      riskScore: "Analyzing...",
-      riskLevel: null,
-      vulnCount: null,
-      lastScanned: "Just now",
-    },
-    {
-      id: 2,
-      name: "192.168.10.55",
-      description: "Internal Database",
-      icon: "dns",
-      status: "Completed",
-      statusType: "completed",
-      riskScore: "8.5",
-      riskLevel: "High",
-      vulnCount: "3 Critical, 5 High",
-      lastScanned: "2 hours ago",
-    },
-    {
-      id: 3,
-      name: "staging.web.app",
-      description: "Staging Environment",
-      icon: "language",
-      status: "Idle",
-      statusType: "idle",
-      riskScore: "2.1",
-      riskLevel: "Low",
-      vulnCount: "0 Critical, 0 High",
-      lastScanned: "Oct 24, 2023",
-    },
-    {
-      id: 4,
-      name: "aws-s3-backup-bucket",
-      description: "Cloud Storage",
-      icon: "cloud_queue",
-      status: "Scheduled",
-      statusType: "scheduled",
-      riskScore: "Pending scan...",
-      riskLevel: null,
-      vulnCount: null,
-      lastScanned: "Never",
-    },
-  ];
+  useEffect(() => {
+    const fetchBatches = async () => {
+      try {
+        const response = await batchApi.list();
+        if (response.ok && response.data) {
+          setBatches(response.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch batch list:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBatches();
+    const interval = setInterval(fetchBatches, 10000); // Poll every 10s
+    return () => clearInterval(interval);
+  }, []);
 
   const stats = [
     {
@@ -103,33 +73,35 @@ export default function Home() {
     },
   ];
 
-  const navItems = [
-    { label: "Dashboard", icon: "dashboard", active: true, href: "/" },
-    { label: "Scans", icon: "radar", active: false, href: "/scans" },
-    { label: "Reports", icon: "description", active: false, href: "/reports" },
-    { label: "Settings", icon: "settings", active: false, href: "/settings" },
-  ];
-
-  const getStatusBadgeColor = (statusType: string) => {
-    switch (statusType) {
+  const getStatusBadgeColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "processing":
+      case "running":
       case "scanning":
         return "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30";
       case "completed":
+      case "finished":
         return "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30";
       case "idle":
         return "bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30";
       case "scheduled":
         return "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30";
+      case "failed":
+        return "bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-500/30";
       default:
-        return "";
+        return "bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30";
     }
   };
 
   const getRiskColor = (riskLevel: string | null) => {
-    switch (riskLevel) {
-      case "High":
+    if (!riskLevel) return "text-slate-600 dark:text-slate-400";
+    switch (riskLevel.toLowerCase()) {
+      case "high":
+      case "critical":
         return "text-rose-600 dark:text-rose-400";
-      case "Low":
+      case "medium":
+        return "text-amber-600 dark:text-amber-400";
+      case "low":
         return "text-emerald-600 dark:text-emerald-400";
       default:
         return "text-slate-600 dark:text-slate-400";
@@ -213,10 +185,9 @@ export default function Home() {
                       onChange={(e) => setStatusFilter(e.target.value)}
                       className="h-10 pl-10 pr-9 bg-white dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:focus:border-blue-400 outline-none cursor-pointer appearance-none font-medium transition-all hover:border-slate-400 dark:hover:border-slate-600">
                       <option>All Statuses</option>
-                      <option>Scanning</option>
+                      <option>Processing</option>
                       <option>Completed</option>
-                      <option>Idle</option>
-                      <option>Scheduled</option>
+                      <option>Failed</option>
                     </select>
                     <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
                       <span className="material-symbols-outlined text-sm">
@@ -240,7 +211,7 @@ export default function Home() {
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-700/30 border-b border-slate-200 dark:border-slate-700">
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                          Target
+                          Target / Batch ID
                         </th>
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                           Status
@@ -249,7 +220,7 @@ export default function Home() {
                           Risk Score
                         </th>
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                          Last Scanned
+                          Date Initiated
                         </th>
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 text-right">
                           Actions
@@ -257,122 +228,86 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                      {targets.map((target) => (
-                        <tr
-                          key={target.id}
-                          className="group hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors duration-150">
-                          <td className="py-4 px-6">
-                            <div className="flex items-center gap-3">
-                              <div className="bg-gradient-to-br from-blue-100 dark:from-blue-500/20 to-cyan-100 dark:to-cyan-500/20 p-2.5 rounded-lg text-blue-600 dark:text-blue-400">
-                                <span className="material-symbols-outlined text-[20px]">
-                                  {target.icon}
-                                </span>
-                              </div>
-                              <div>
-                                <p className="text-sm font-bold text-slate-900 dark:text-white">
-                                  {target.name}
-                                </p>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                                  {target.description}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-4 px-6">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border ${getStatusBadgeColor(
-                                target.statusType
-                              )}`}>
-                              {target.statusType === "scanning" && (
-                                <span className="relative flex h-2 w-2">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                                </span>
-                              )}
-                              {target.statusType === "completed" && (
-                                <span className="material-symbols-outlined text-[16px]">
-                                  check_circle
-                                </span>
-                              )}
-                              {target.statusType === "idle" && (
-                                <span className="material-symbols-outlined text-[16px]">
-                                  pause_circle
-                                </span>
-                              )}
-                              {target.statusType === "scheduled" && (
-                                <span className="material-symbols-outlined text-[16px]">
-                                  schedule
-                                </span>
-                              )}
-                              {target.status}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6">
-                            {target.statusType === "scanning" ? (
-                              <div className="flex items-center gap-2">
-                                <div className="w-24 h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                                  <div className="h-full bg-gradient-to-r from-blue-400 to-cyan-400 animate-pulse w-1/2"></div>
-                                </div>
-                                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                                  Analyzing...
-                                </span>
-                              </div>
-                            ) : target.statusType === "scheduled" ? (
-                              <span className="text-sm text-slate-400 dark:text-slate-500 italic">
-                                Pending scan...
-                              </span>
-                            ) : (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`text-sm font-bold ${getRiskColor(
-                                      target.riskLevel
-                                    )}`}>
-                                    {target.riskLevel}
-                                  </span>
-                                  <span
-                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${target.riskLevel === "High"
-                                      ? "bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400"
-                                      : "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                                      }`}>
-                                    {target.riskScore}
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                                  {target.vulnCount}
-                                </p>
-                              </div>
-                            )}
-                          </td>
-                          <td className="py-4 px-6">
-                            <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
-                              {target.lastScanned}
-                            </p>
-                          </td>
-                          <td className="py-4 px-6 text-right">
-                            {target.statusType === "scanning" ? (
-                              <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-red-500 dark:hover:bg-red-600/80 p-2 rounded-lg transition-all transform hover:scale-110">
-                                <span className="material-symbols-outlined text-[22px]">
-                                  stop_circle
-                                </span>
-                              </button>
-                            ) : (
-                              <>
-                                <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-blue-600 p-2 rounded-lg transition-all transform hover:scale-110 mr-2">
-                                  <span className="material-symbols-outlined text-[22px]">
-                                    play_arrow
-                                  </span>
-                                </button>
-                                <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-slate-700 dark:hover:bg-slate-600 p-2 rounded-lg transition-all transform hover:scale-110">
-                                  <span className="material-symbols-outlined text-[22px]">
-                                    more_vert
-                                  </span>
-                                </button>
-                              </>
-                            )}
+                      {loading ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                            Loading batches...
                           </td>
                         </tr>
-                      ))}
+                      ) : batches.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                            No scans found.
+                          </td>
+                        </tr>
+                      ) : (
+                        batches.map((batch) => (
+                          <tr
+                            key={batch.batch_id}
+                            className="group hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors duration-150">
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-gradient-to-br from-blue-100 dark:from-blue-500/20 to-cyan-100 dark:to-cyan-500/20 p-2.5 rounded-lg text-blue-600 dark:text-blue-400">
+                                  <span className="material-symbols-outlined text-[20px]">
+                                    dns
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-900 dark:text-white">
+                                    {batch.target || "Unknown Target"}
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                                    {batch.batch_id.substring(0, 8)}...
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border ${getStatusBadgeColor(
+                                  batch.status
+                                )}`}>
+                                {batch.status === "processing" && (
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                  </span>
+                                )}
+                                <span className="capitalize">{batch.status}</span>
+                              </span>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`text-sm font-bold ${getRiskColor(
+                                    batch.risk_level
+                                  )}`}>
+                                  {batch.risk_level || "N/A"}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300`}>
+                                  {batch.risk_score}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
+                                {new Date(batch.timestamp).toLocaleDateString()}
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {new Date(batch.timestamp).toLocaleTimeString()}
+                              </p>
+                            </td>
+                            <td className="py-4 px-6 text-right">
+                              <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-blue-600 p-2 rounded-lg transition-all transform hover:scale-110 mr-2">
+                                <span className="material-symbols-outlined text-[22px]">
+                                  visibility
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -380,7 +315,7 @@ export default function Home() {
                 {/* Pagination */}
                 <div className="bg-slate-100 dark:bg-slate-700/30 border-t border-slate-200 dark:border-slate-700 px-6 py-4 flex items-center justify-between">
                   <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
-                    Showing 1 to 4 of 124 entries
+                    Showing {batches.length} entries
                   </p>
                   <div className="flex items-center gap-2.5">
                     <button

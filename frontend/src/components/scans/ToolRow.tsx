@@ -341,12 +341,14 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                     {/* Show appropriate vulnerabilities */}
                                     {tool === "mobsf" && hasFridaResults && mobsfFridaView === "frida" ? (
                                         <VulnerabilityList
+                                            key={`${tool}-frida-vulns`}
                                             vulnerabilities={fridaVulnerabilities}
                                             status={data.status}
                                             error={data.error}
                                         />
                                     ) : (
                                         <VulnerabilityList
+                                            key={`${tool}-vulns`}
                                             vulnerabilities={toolVulns}
                                             status={data.status}
                                             error={data.error}

@@ -83,16 +83,77 @@ interface ScanContextType {
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
+// --- LocalStorage Helper ---
+const SCANS_STORAGE_KEY = 'napscan_scans';
+const PENDING_DECISIONS_KEY = 'napscan_pending_decisions';
+
+const isBrowser = typeof window !== 'undefined';
+
+const saveScansToStorage = (scans: ScanJob[]) => {
+    if (!isBrowser) return;
+    try {
+        localStorage.setItem(SCANS_STORAGE_KEY, JSON.stringify(scans));
+    } catch (e) {
+        console.error('[ScanContext] Failed to save scans to localStorage:', e);
+    }
+};
+
+const loadScansFromStorage = (): ScanJob[] => {
+    if (!isBrowser) return [];
+    try {
+        const data = localStorage.getItem(SCANS_STORAGE_KEY);
+        if (data) {
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.error('[ScanContext] Failed to load scans from localStorage:', e);
+    }
+    return [];
+};
+
+const savePendingDecisionsToStorage = (decisions: MobSFPendingDecision[]) => {
+    if (!isBrowser) return;
+    try {
+        localStorage.setItem(PENDING_DECISIONS_KEY, JSON.stringify(decisions));
+    } catch (e) {
+        console.error('[ScanContext] Failed to save pending decisions to localStorage:', e);
+    }
+};
+
+const loadPendingDecisionsFromStorage = (): MobSFPendingDecision[] => {
+    if (!isBrowser) return [];
+    try {
+        const data = localStorage.getItem(PENDING_DECISIONS_KEY);
+        if (data) {
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.error('[ScanContext] Failed to load pending decisions from localStorage:', e);
+    }
+    return [];
+};
+
 // --- Context ---
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined);
 
 export function ScanProvider({ children }: { children: React.ReactNode }) {
-    const [scans, setScans] = useState<ScanJob[]>([]);
-    // No more loading state since we don't load from localStorage
-    const [isLoading] = useState(false);
+    const [scans, setScans] = useState<ScanJob[]>(() => loadScansFromStorage());
+    const [isLoading, setIsLoading] = useState(true);
     // MobSF pending decisions - scans waiting for user to decide STOP/CONTINUE
-    const [pendingDecisions, setPendingDecisions] = useState<MobSFPendingDecision[]>([]);
+    const [pendingDecisions, setPendingDecisions] = useState<MobSFPendingDecision[]>(() => loadPendingDecisionsFromStorage());
+    // Track which tools are already being polled to prevent duplicate polling
+    const [pollingTools, setPollingTools] = useState<Set<string>>(new Set());
+
+    // --- Save scans to localStorage whenever they change ---
+    useEffect(() => {
+        saveScansToStorage(scans);
+    }, [scans]);
+
+    // --- Save pending decisions to localStorage whenever they change ---
+    useEffect(() => {
+        savePendingDecisionsToStorage(pendingDecisions);
+    }, [pendingDecisions]);
 
     const getScan = useCallback((id: string) => {
         return scans.find((s) => s.id === id);
@@ -1276,6 +1337,179 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         // After decision is processed, check if overall scan should be completed
         checkAndUpdateScanStatus(scanId);
     };
+
+    // --- Resume polling for running scans on page load ---
+    const resumeToolPolling = useCallback(async (scanId: string, tool: ToolKey, taskId: string) => {
+        const pollingKey = `${scanId}-${tool}`;
+
+        // Prevent duplicate polling
+        if (pollingTools.has(pollingKey)) {
+            console.log(`[Resume] Already polling ${tool} for scan ${scanId}`);
+            return;
+        }
+
+        setPollingTools(prev => new Set(prev).add(pollingKey));
+        console.log(`[Resume] Resuming polling for ${tool} (taskId: ${taskId}) in scan ${scanId}`);
+
+        const POLL_INTERVALS: Record<string, number> = {
+            nmap: 5000,
+            ffuf: 5000,
+            sslyze: 5000,
+            zap: 10000,
+            nuclei: 10000,
+            openvas: 15000,
+        };
+
+        const POLL_INTERVAL = POLL_INTERVALS[tool] || 5000;
+
+        try {
+            while (true) {
+                let statusRes: any;
+
+                // Call appropriate status API based on tool
+                switch (tool) {
+                    case 'nmap':
+                        statusRes = await scannersApi.nmap.taskStatus(taskId);
+                        break;
+                    case 'ffuf':
+                        statusRes = await scannersApi.ffuf.taskStatus(taskId);
+                        break;
+                    case 'sslyze':
+                        statusRes = await scannersApi.sslyze.taskStatus(taskId);
+                        break;
+                    case 'zap':
+                        statusRes = await scannersApi.zap.taskStatus(taskId);
+                        break;
+                    case 'nuclei':
+                        statusRes = await scannersApi.nuclei.taskStatus(taskId);
+                        break;
+                    case 'openvas':
+                        statusRes = await scannersApi.openvas.taskStatus(taskId);
+                        break;
+                    default:
+                        console.warn(`[Resume] Unsupported tool for resume: ${tool}`);
+                        return;
+                }
+
+                if (!statusRes.ok) {
+                    console.error(`[Resume] ${tool} status check failed:`, statusRes);
+                    throw new Error((statusRes as any).message || `Failed to get ${tool} status`);
+                }
+
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                const progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+
+                console.log(`[Resume] ${tool} Progress: ${progress}%, Status: ${status}`);
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[Resume] ${tool} completed!`);
+
+                    // Get result based on tool type
+                    let result = statusData?.result || [];
+
+                    // For Nuclei, we need to fetch the result separately
+                    if (tool === 'nuclei') {
+                        const resultRes = await scannersApi.nuclei.result(taskId);
+                        if (resultRes.ok) {
+                            result = resultRes.data?.data || resultRes.data;
+                        }
+                    }
+
+                    // For OpenVAS, fetch the report
+                    if (tool === 'openvas') {
+                        const reportId = statusData?.reportID || statusData?.reportId;
+                        if (reportId) {
+                            const reportRes = await scannersApi.openvas.report(reportId);
+                            if (reportRes.ok) {
+                                result = reportRes.data;
+                            }
+                        }
+                    }
+
+                    // Format result based on tool
+                    const formattedResult = tool === 'nmap'
+                        ? { tcp: result, udp: [] }
+                        : result;
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: formattedResult,
+                    });
+
+                    // Parse vulnerabilities
+                    try {
+                        const toolVulns = parseToolResults(tool, formattedResult);
+                        console.log(`[Resume] ${tool} parsed ${toolVulns.length} vulnerabilities`);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[Resume] ${tool} failed to parse results:`, parseError);
+                    }
+
+                    checkAndUpdateScanStatus(scanId);
+                    break;
+                }
+
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `${tool} task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error(`[Resume] ${tool} failed:`, err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+            checkAndUpdateScanStatus(scanId);
+        } finally {
+            setPollingTools(prev => {
+                const next = new Set(prev);
+                next.delete(pollingKey);
+                return next;
+            });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pollingTools]);
+
+    // --- Effect to resume polling on mount ---
+    useEffect(() => {
+        const resumeRunningScans = async () => {
+            console.log('[ScanContext] Checking for running scans to resume...');
+
+            for (const scan of scans) {
+                if (scan.status === 'running') {
+                    const tools = Object.entries(scan.tools) as [ToolKey, ToolExecution][];
+
+                    for (const [toolKey, toolExec] of tools) {
+                        // Resume polling for tools that are running and have a taskId
+                        if (toolExec.status === 'running' && toolExec.taskId) {
+                            console.log(`[ScanContext] Resuming ${toolKey} for scan ${scan.id} (taskId: ${toolExec.taskId})`);
+                            resumeToolPolling(scan.id, toolKey, toolExec.taskId);
+                        }
+                    }
+                }
+            }
+
+            setIsLoading(false);
+        };
+
+        resumeRunningScans();
+        // Only run on mount
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return (
         <ScanContext.Provider

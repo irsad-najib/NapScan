@@ -229,6 +229,17 @@ export type BatchCreateResponse = {
   batch_id: string;
 };
 
+export type BatchItem = {
+  batch_id: string;
+  target: string;
+  risk_score: number;
+  risk_level: string;
+  status: string;
+  timestamp: string;
+};
+
+export type BatchListResponse = BatchItem[];
+
 // Batch API
 export const batchApi = {
   create: async (): Promise<ApiResult<BatchCreateResponse>> =>
@@ -236,6 +247,12 @@ export const batchApi = {
       method: "POST",
       url: "/api/batch/create",
       // No body required
+    }),
+
+  list: async (): Promise<ApiResult<BatchListResponse>> =>
+    request<BatchListResponse>({
+      method: "GET",
+      url: "/api/batch/list",
     }),
 };
 
