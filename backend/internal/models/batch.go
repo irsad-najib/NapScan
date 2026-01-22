@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
@@ -23,6 +24,8 @@ type Batch struct {
 	ReceivedCount     int                    `json:"received_count"`
 	ResultsRaw        []byte                 `json:"-" gorm:"column:results"`
 	Results           map[string]interface{} `json:"results" gorm:"-"`
+	ScanResults       []ScanResult           `json:"-" gorm:"foreignKey:BatchID;references:BatchID"`   // Relation for getting target (Nmap/etc)
+	UploadedFiles     []UploadedFile         `json:"-" gorm:"foreignKey:BatchID;references:BatchID"`   // Relation for getting target (APK)
 	Status            BatchStatus            `json:"status" gorm:"type:varchar(32)"`
 	AnalysisResultRaw []byte                 `json:"-" gorm:"column:analysis_result"`
 	AnalysisResult    interface{}            `json:"analysis_result,omitempty" gorm:"-"`
@@ -44,13 +47,17 @@ func (b *Batch) BeforeSave(tx *gorm.DB) (err error) {
 
 func (b *Batch) AfterFind(tx *gorm.DB) (err error) {
 	if b.ResultsRaw != nil {
-		err = json.Unmarshal(b.ResultsRaw, &b.Results)
+		decoder := json.NewDecoder(bytes.NewReader(b.ResultsRaw))
+		decoder.UseNumber()
+		err = decoder.Decode(&b.Results)
 		if err != nil {
 			return err
 		}
 	}
 	if b.AnalysisResultRaw != nil {
-		err = json.Unmarshal(b.AnalysisResultRaw, &b.AnalysisResult)
+		decoder := json.NewDecoder(bytes.NewReader(b.AnalysisResultRaw))
+		decoder.UseNumber()
+		err = decoder.Decode(&b.AnalysisResult)
 	}
 	return
 }
@@ -139,4 +146,14 @@ type Recommendation struct {
 	Description     string   `json:"description"`
 	AffectedItems   []string `json:"affected_items"`
 	Remediation     string   `json:"remediation"`
+}
+
+// BatchSummaryResponse represents a summarized view of a batch for lists
+type BatchSummaryResponse struct {
+	BatchID     string      `json:"batch_id"`
+	Target      string      `json:"target"`
+	RiskScore   int         `json:"risk_score"`
+	RiskDetails interface{} `json:"risk_details,omitempty"`
+	Status      string      `json:"status"`
+	Timestamp   time.Time   `json:"timestamp"`
 }

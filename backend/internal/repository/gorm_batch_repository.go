@@ -36,6 +36,8 @@ func (r *GormBatchRepository) FindBatchesByUserID(ctx context.Context, userID st
 	var batches []*models.Batch
 	err := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
+		Preload("ScanResults").
+		Preload("UploadedFiles").
 		Order("created_at DESC").
 		Find(&batches).Error
 	return batches, err

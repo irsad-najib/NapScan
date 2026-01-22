@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"napscan-be/internal/models"
 )
 
 type ZapService struct{}
@@ -109,6 +111,209 @@ func (s *ZapService) zapPollStatus(ctx context.Context, baseURL string, apiKey s
 	}
 }
 
+// zapPollStatusWithProgress polls ZAP API and updates ScanManager progress
+func (s *ZapService) zapPollStatusWithProgress(ctx context.Context, baseURL string, apiKey string, component string, scanID string, taskID string, manager *ScanManager, baseProgress int, maxProgress int) error {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			q := url.Values{}
+			q.Set("scanId", scanID)
+			if apiKey != "" {
+				q.Set("apikey", apiKey)
+			}
+
+			res, err := s.zapGetJSON(ctx, baseURL, "/JSON/"+component+"/view/status/", q)
+			if err != nil {
+				return err
+			}
+
+			rawStatus, ok := res["status"]
+			if !ok {
+				for _, v := range res {
+					if m, ok := v.(map[string]interface{}); ok {
+						if stat, ok := m["status"]; ok {
+							rawStatus = stat
+							break
+						}
+					}
+				}
+			}
+
+			statusStr := fmt.Sprint(rawStatus)
+			statusInt, err := strconv.Atoi(statusStr)
+			if err != nil {
+				return fmt.Errorf("unexpected zap status value: %v", rawStatus)
+			}
+
+			// Map ZAP progress (0-100) to our range (baseProgress-maxProgress)
+			progress := baseProgress + (statusInt * (maxProgress - baseProgress) / 100)
+			if progress > maxProgress {
+				progress = maxProgress
+			}
+			
+			manager.UpdateProgress(taskID, progress, models.StatusRunning)
+			log.Printf("[ZAP_ASYNC] %s progress: %d%% (ZAP: %d%%)", component, progress, statusInt)
+
+			if statusInt >= 100 {
+				return nil
+			}
+		}
+	}
+}
+
+// RunZapAsync is the async scan function following the contract
+func RunZapAsync(ctx context.Context, taskID string, manager *ScanManager) error {
+	task, err := manager.Get(taskID)
+	if err != nil {
+		return err
+	}
+
+	target := task.Target
+	log.Printf("[ZAP_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+
+	// Get ZAP config
+	zapSvc := &ZapService{}
+	baseURL := zapSvc.zapBaseURL()
+	apiKey := zapSvc.zapAPIKey()
+
+	// Update to running
+	manager.UpdateProgress(taskID, 0, models.StatusRunning)
+
+	// Phase 0: Setup (avoid fuzzer detection)
+	log.Printf("[ZAP_ASYNC] Setting Stealth User-Agent")
+	uaQ := url.Values{}
+	uaQ.Set("String", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	if apiKey != "" {
+		uaQ.Set("apikey", apiKey)
+	}
+	// Core variable for default user agent might be 'options.prop.userAgent' or similar, 
+	// but standard API is /JSON/network/action/setOptionHttpStateEnabled ??
+	// Actually: /JSON/network/action/setUserAgent/ is simpler if available, OR /JSON/core/action/setOptionDefaultUserAgent/
+	// Let's try setOptionDefaultUserAgent
+	_, _ = zapSvc.zapGetJSON(ctx, baseURL, "/JSON/core/action/setOptionDefaultUserAgent/", uaQ)
+
+	// Phase 1: Spider scan (0-40%)
+	log.Printf("[ZAP_ASYNC] Initiating spider scan")
+	manager.UpdateProgress(taskID, 5, models.StatusRunning)
+
+	spiderQ := url.Values{}
+	spiderQ.Set("url", target)
+	spiderQ.Set("recurse", "true")
+	if apiKey != "" {
+		spiderQ.Set("apikey", apiKey)
+	}
+
+	spiderRes, err := zapSvc.zapGetJSON(ctx, baseURL, "/JSON/spider/action/scan/", spiderQ)
+	if err != nil {
+		log.Printf("[ZAP_ASYNC] Failed to start spider: %v", err)
+		manager.Fail(taskID, fmt.Errorf("failed to start spider: %w", err))
+		return err
+	}
+
+	spiderID := fmt.Sprint(spiderRes["scan"])
+	if spiderID == "" || spiderID == "<nil>" {
+		err := fmt.Errorf("spider scan failed, no ID: %v", spiderRes)
+		manager.Fail(taskID, err)
+		return err
+	}
+	log.Printf("[ZAP_ASYNC] Spider scan started with ID=%s", spiderID)
+
+	// Poll spider with progress (5-40%)
+	if err := zapSvc.zapPollStatusWithProgress(ctx, baseURL, apiKey, "spider", spiderID, taskID, manager, 5, 40); err != nil {
+		if ctx.Err() != nil {
+			log.Printf("[ZAP_ASYNC] Spider scan cancelled")
+			manager.UpdateProgress(taskID, 40, models.StatusStopped)
+			return ctx.Err()
+		}
+		log.Printf("[ZAP_ASYNC] Spider scan polling failed: %v", err)
+		manager.Fail(taskID, fmt.Errorf("spider scan polling failed: %w", err))
+		return err
+	}
+	log.Printf("[ZAP_ASYNC] Spider scan completed")
+
+	// Phase 2: Active scan (40-80%)
+	log.Printf("[ZAP_ASYNC] Initiating active scan")
+	manager.UpdateProgress(taskID, 45, models.StatusRunning)
+
+	ascanQ := url.Values{}
+	ascanQ.Set("url", target)
+	ascanQ.Set("recurse", "true")
+	if apiKey != "" {
+		ascanQ.Set("apikey", apiKey)
+	}
+
+	ascanRes, err := zapSvc.zapGetJSON(ctx, baseURL, "/JSON/ascan/action/scan/", ascanQ)
+	if err != nil {
+		log.Printf("[ZAP_ASYNC] Failed to start active scan: %v", err)
+		manager.Fail(taskID, fmt.Errorf("failed to start active scan: %w", err))
+		return err
+	}
+
+	ascanID := fmt.Sprint(ascanRes["scan"])
+	if ascanID == "" || ascanID == "<nil>" {
+		err := fmt.Errorf("active scan failed, no ID: %v", ascanRes)
+		manager.Fail(taskID, err)
+		return err
+	}
+	log.Printf("[ZAP_ASYNC] Active scan started with ID=%s", ascanID)
+
+	// Poll active scan with progress (45-80%)
+	if err := zapSvc.zapPollStatusWithProgress(ctx, baseURL, apiKey, "ascan", ascanID, taskID, manager, 45, 80); err != nil {
+		if ctx.Err() != nil {
+			log.Printf("[ZAP_ASYNC] Active scan cancelled")
+			manager.UpdateProgress(taskID, 80, models.StatusStopped)
+			return ctx.Err()
+		}
+		log.Printf("[ZAP_ASYNC] Active scan polling failed: %v", err)
+		manager.Fail(taskID, fmt.Errorf("active scan polling failed: %w", err))
+		return err
+	}
+	log.Printf("[ZAP_ASYNC] Active scan completed")
+
+	// Phase 3: Fetch alerts (80-90%)
+	log.Printf("[ZAP_ASYNC] Fetching alerts")
+	manager.UpdateProgress(taskID, 85, models.StatusRunning)
+
+	alertsQ := url.Values{}
+	alertsQ.Set("baseurl", target)
+	alertsQ.Set("start", "0")
+	alertsQ.Set("count", "9999")
+	if apiKey != "" {
+		alertsQ.Set("apikey", apiKey)
+	}
+
+	alertsRes, err := zapSvc.zapGetJSON(ctx, baseURL, "/JSON/core/view/alerts/", alertsQ)
+	if err != nil {
+		log.Printf("[ZAP_ASYNC] Failed to fetch alerts: %v", err)
+		manager.Fail(taskID, fmt.Errorf("failed to fetch alerts: %w", err))
+		return err
+	}
+	log.Printf("[ZAP_ASYNC] Alerts fetched successfully")
+
+	// Phase 4: Prepare result (90-100%)
+	manager.UpdateProgress(taskID, 90, models.StatusRunning)
+
+	result := map[string]interface{}{
+		"target":    target,
+		"zapBase":   baseURL,
+		"spider":    map[string]interface{}{"scanId": spiderID},
+		"active":    map[string]interface{}{"scanId": ascanID},
+		"alertsRaw": alertsRes,
+	}
+
+	// Complete
+	manager.Complete(taskID, result)
+	log.Printf("[ZAP_ASYNC] Scan completed successfully for task=%s", taskID)
+
+	return nil
+}
+
+// Legacy ExecuteFullScan for backward compatibility
 func (s *ZapService) ExecuteFullScan(ctx context.Context, target string) (map[string]interface{}, error) {
 	baseURL := s.zapBaseURL()
 	apiKey := s.zapAPIKey()
@@ -187,10 +392,10 @@ func (s *ZapService) ExecuteFullScan(ctx context.Context, target string) (map[st
 	log.Printf("[ZAP_SERVICE] Alerts fetched successfully")
 
 	return map[string]interface{}{
-		"target":   target,
-		"zapBase":  baseURL,
-		"spider":   map[string]interface{}{"scanId": spiderID},
-		"active":   map[string]interface{}{"scanId": ascanID},
+		"target":    target,
+		"zapBase":   baseURL,
+		"spider":    map[string]interface{}{"scanId": spiderID},
+		"active":    map[string]interface{}{"scanId": ascanID},
 		"alertsRaw": alertsRes,
 	}, nil
 }

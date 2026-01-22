@@ -11,19 +11,26 @@ import (
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type SslyzeHandler struct {
 	service      *service.SslyzeService
 	scanRepo     repository.ScanResultRepository
 	batchService *service.BatchService
+	scanManager  *service.ScanManager
 }
 
-func NewSslyzeHandler(s *service.SslyzeService, scanRepo repository.ScanResultRepository, batchService *service.BatchService) *SslyzeHandler {
-	return &SslyzeHandler{service: s, scanRepo: scanRepo, batchService: batchService}
+func NewSslyzeHandler(s *service.SslyzeService, scanRepo repository.ScanResultRepository, batchService *service.BatchService, scanManager *service.ScanManager) *SslyzeHandler {
+	return &SslyzeHandler{
+		service:      s,
+		scanRepo:     scanRepo,
+		batchService: batchService,
+		scanManager:  scanManager,
+	}
 }
 
-// StartScan initiates an SSLyze scan
+// StartScan initiates an SSLyze scan (LEGACY SYNC)
 // @Summary Start SSLyze Scan
 // @Description Run SSL/TLS configuration analysis
 // @Tags SSLyze
@@ -96,4 +103,107 @@ func (h *SslyzeHandler) StartScan(c *fiber.Ctx) error {
 
 	log.Printf("[SSLYZE] Request completed successfully")
 	return response.Success(c, "Scan completed", result)
+}
+
+// StartScanAsync initiates an async SSLyze scan
+// @Summary Start SSLyze Scan (Async)
+// @Description Start a SSLyze scan asynchronously. Returns task_id immediately.
+// @Tags SSLyze
+// @Accept json
+// @Security BearerAuth
+// @Produce json
+// @Param request body object{target=string,batch_id=string} true "Scan Request"
+// @Success 200 {object} models.ScanTaskResponse
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /sslyze/scan/async [post]
+func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
+	log.Printf("[SSLYZE_ASYNC] Received async scan request")
+
+	var req struct {
+		Target  string `json:"target"`
+		BatchID string `json:"batch_id"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		log.Printf("[SSLYZE_ASYNC] Failed to parse request body: %v", err)
+		return response.BadRequest(c, "Invalid request payload", err)
+	}
+
+	if req.BatchID == "" {
+		return response.BadRequest(c, "batch_id is required", nil)
+	}
+
+	if req.Target == "" {
+		return response.BadRequest(c, "target is required", nil)
+	}
+
+	// Validate batch ownership
+	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
+		log.Printf("[SSLYZE_ASYNC] Batch ownership validation failed: %v", err)
+		return err
+	}
+
+	// Get user ID from context (safe type assertion)
+	userID := "unknown"
+	if uid, ok := c.Locals("userID").(string); ok && uid != "" {
+		userID = uid
+	}
+
+	// Create task
+	taskID := uuid.New().String()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	task := &models.ScanTask{
+		BatchID:   req.BatchID,
+		TaskID:    taskID,
+		UserID:    userID,
+		Target:    req.Target,
+		Status:    models.StatusPending,
+		Progress:  0,
+		Error:     nil,
+		Result:    []map[string]interface{}{},
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Cancel:    cancel,
+	}
+
+	// Register task with manager
+	h.scanManager.Register(task)
+
+	// Start scan in background
+	go func() {
+		err := service.RunSslyzeAsync(ctx, taskID, h.scanManager)
+		if err != nil {
+			log.Printf("[SSLYZE_ASYNC] Scan goroutine error: %v", err)
+		}
+
+		// Save to database if completed successfully
+		if task, _ := h.scanManager.Get(taskID); task != nil && task.Status == models.StatusCompleted {
+			if h.scanRepo != nil {
+				dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer dbCancel()
+				_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
+					BatchID:   task.BatchID,
+					Tool:      "sslyze",
+					Target:    task.Target,
+					Result:    task.Result,
+					CreatedAt: time.Now().UTC(),
+				})
+				if dbErr != nil {
+					log.Printf("[SSLYZE_ASYNC] Failed to save to database: %v", dbErr)
+				} else {
+					log.Printf("[SSLYZE_ASYNC] Database insert success for task=%s", taskID)
+				}
+			}
+		}
+	}()
+
+	log.Printf("[SSLYZE_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
+
+	return response.Success(c, "scan started", fiber.Map{
+		"task_id":  taskID,
+		"status":   models.StatusRunning,
+		"progress": 0,
+	})
 }

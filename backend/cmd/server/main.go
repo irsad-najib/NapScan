@@ -133,25 +133,29 @@ func main() {
 	ffufService := service.NewFfufService()
 	openvasService := service.NewOpenVASService()
 	sslyzeService := service.NewSslyzeService()
-	batchService := service.NewBatchService(batchRepo) // <-- UPDATE THIS
+	batchService := service.NewBatchService(batchRepo)
 	lifecycleService := service.NewLifecycleService(db)
+	
+	// Initialize global ScanManager for async scan orchestration
+	scanManager := service.NewScanManager()
 	
 	// Start cleanup worker (TTL 24h, check every 1h)
 	lifecycleService.StartCleanupWorker(context.Background(), 24*time.Hour, 1*time.Hour)
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler()
-	nmapHandler := handler.NewNmapHandler(nmapService, scanResultRepo, batchService) // <-- UPDATE THIS
+	scanHandler := handler.NewScanHandler(scanManager) // Unified scan control handler
+	nmapHandler := handler.NewNmapHandler(nmapService, scanResultRepo, batchService, scanManager)
 	nucleiHandler := handler.NewNucleiHandler(nucleiService, scanResultRepo, batchService)
-	zapHandler := handler.NewZapHandler(zapService, scanResultRepo, batchService)
-	ffufHandler := handler.NewFfufHandler(ffufService, scanResultRepo, batchService)
+	zapHandler := handler.NewZapHandler(zapService, scanResultRepo, batchService, scanManager)
+	ffufHandler := handler.NewFfufHandler(ffufService, scanResultRepo, batchService, scanManager)
 	openvasHandler := handler.NewOpenVASHandler(openvasService, scanResultRepo, batchService)
-	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService, scanResultRepo, batchService)
+	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService, scanResultRepo, batchService, scanManager)
 	lifecycleHandler := handler.NewLifecycleHandler(lifecycleService, batchService)
 	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService, lifecycleService)
 
 	// Auth & Batch Handlers
-	batchHandler := handler.NewBatchHandler(batchService) // <-- UPDATE THIS
+	batchHandler := handler.NewBatchHandler(batchService)
 
 	// Health Check Route (public, so defined on `app`, not `api`)
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -174,12 +178,12 @@ func main() {
 
 	// Routes (now protected by middleware)
 	routes.MobSFRoutes(api, mobsfHandler)
-	routes.NmapRoutes(api, nmapHandler)
+	routes.NmapRoutes(api, nmapHandler, scanHandler)
 	routes.NucleiRoutes(api, nucleiHandler)
-	routes.ZapRoutes(api, zapHandler)
-	routes.FfufRoutes(api, ffufHandler)
+	routes.ZapRoutes(api, zapHandler, scanHandler)
+	routes.FfufRoutes(api, ffufHandler, scanHandler)
 	routes.OpenVASRoutes(api, openvasHandler)
-	routes.SslyzeRoutes(api, sslyzeHandler)
+	routes.SslyzeRoutes(api, sslyzeHandler, scanHandler)
 	routes.BatchRoutes(api, batchHandler) // <-- Batch routes are now protected
 	routes.LifecycleRoutes(api, lifecycleHandler)
 

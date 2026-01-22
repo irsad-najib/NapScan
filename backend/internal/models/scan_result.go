@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
@@ -28,7 +29,9 @@ func (sr *ScanResult) BeforeSave(tx *gorm.DB) (err error) {
 
 func (sr *ScanResult) AfterFind(tx *gorm.DB) (err error) {
 	if sr.ResultRaw != nil {
-		err = json.Unmarshal(sr.ResultRaw, &sr.Result)
+		decoder := json.NewDecoder(bytes.NewReader(sr.ResultRaw))
+		decoder.UseNumber()
+		err = decoder.Decode(&sr.Result)
 	}
 	return
 }
