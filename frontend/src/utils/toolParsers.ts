@@ -152,9 +152,15 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             console.log("[Nuclei Parser] Found compact summary format with", rawResult.summary.findings.length, "findings");
             results = rawResult.summary.findings;
         }
-        // Format 2: Direct array of results
+        // Format 2: Direct array of results or Array of objects with findings
         else if (Array.isArray(rawResult)) {
-            results = rawResult;
+            // Check for new format: Array of objects with findings
+            if (rawResult.length > 0 && rawResult[0]?.findings && Array.isArray(rawResult[0].findings)) {
+                console.log("[Nuclei Parser] Found array of objects with findings");
+                results = rawResult.flatMap((item: any) => item.findings || []);
+            } else {
+                results = rawResult;
+            }
         }
         // Format 3: data wrapper { data: { results: [...] } } or { data: { summary: { findings: [...] } } }
         else if (rawResult?.data) {
@@ -202,10 +208,12 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             else if (severity === "medium") vulnSeverity = "Medium";
             else if (severity === "low") vulnSeverity = "Low";
 
-            // Handle compact format fields
+            // Handle compact format fields & new format fields
             const name = result.name || result.info?.name || result["template-id"] || result.templateID || result.template || "Nuclei Finding";
-            const matchedAt = result.matched_at || result["matched-at"] || result.host || result.url || "";
-            const templateId = result.template_id || result["template-id"] || result.templateID || "";
+            // Check evidence.matched_at for new format
+            const matchedAt = result.matched_at || result.evidence?.matched_at || result["matched-at"] || result.host || result.url || "";
+            // Check evidence.template_id for new format
+            const templateId = result.template_id || result.evidence?.template_id || result["template-id"] || result.templateID || "";
             const tags = result.tags || result.info?.tags || [];
 
             // Create unique key for deduplication
@@ -216,12 +224,13 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
             seenFindings.add(uniqueKey);
 
             // For compact format, description is not available
-            const description = result.info?.description ||
+            // New format has top-level description
+            const description = result.description || result.info?.description ||
                 (tags.length > 0 ? `Tags: ${tags.join(", ")}` : `Template: ${templateId}`);
 
             const matcherName = result["matcher-name"] || result.matcher_name || "";
-            const references = result.info?.reference || [];
-            const remediation = result.info?.remediation || "";
+            const references = result.info?.reference || result.evidence?.references || [];
+            const remediation = result.remediation || result.info?.remediation || "";
             const cweId = result.info?.classification?.["cwe-id"] || [];
             const cveId = result.info?.classification?.["cve-id"] || null;
 

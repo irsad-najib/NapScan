@@ -209,7 +209,14 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                             <span className="ml-1 font-bold text-slate-600 dark:text-slate-300">{toolVulns.length}</span>
                         </>
                     ) : (
-                        <span className="opacity-50">-</span>
+                        data.status === 'completed' ? (
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 rounded border border-emerald-100 dark:border-emerald-500/20">
+                                <span className="material-symbols-outlined text-[14px] text-emerald-500">check_circle</span>
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Clean</span>
+                            </div>
+                        ) : (
+                            <span className="opacity-50">-</span>
+                        )
                     )}
                 </div>
 
@@ -317,7 +324,7 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                                     }`}
                                             >
                                                 <span className="material-symbols-outlined text-base">security</span>
-                                                Static Analysis
+                                                Static Analysis (MobSF)
                                                 <span className="bg-slate-200 dark:bg-slate-600 text-xs px-1.5 py-0.5 rounded">
                                                     {toolVulns.length}
                                                 </span>
@@ -330,7 +337,7 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                                                     }`}
                                             >
                                                 <span className="material-symbols-outlined text-base">bug_report</span>
-                                                Dynamic Analysis
+                                                Dynamic Analysis (Frida)
                                                 <span className="bg-purple-200 dark:bg-purple-600 text-xs px-1.5 py-0.5 rounded">
                                                     {fridaVulnerabilities.length}
                                                 </span>

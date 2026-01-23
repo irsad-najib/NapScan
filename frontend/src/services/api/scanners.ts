@@ -240,6 +240,35 @@ export type BatchItem = {
 
 export type BatchListResponse = BatchItem[];
 
+// Batch Detail Types
+export type BatchRiskDetail = {
+  scanner: string;
+  normalized_severity: string;
+  score: number;
+  description: string;
+  findings: any[];
+};
+
+export type BatchScanResult = {
+  id: number;
+  tool: string;
+  target: string;
+  summary: any;
+  created_at: string;
+};
+
+export type BatchDetailResponse = {
+  batch_id: string;
+  user_id: string;
+  status: string;
+  created_at: string;
+  target: string;
+  risk_score: number;
+  risk_level: string;
+  risk_detail: BatchRiskDetail[];
+  scan_results: BatchScanResult[];
+};
+
 // Batch API
 export const batchApi = {
   create: async (): Promise<ApiResult<BatchCreateResponse>> =>
@@ -253,6 +282,12 @@ export const batchApi = {
     request<BatchListResponse>({
       method: "GET",
       url: "/api/batch/list",
+    }),
+
+  get: async (batchId: string): Promise<ApiResult<BatchDetailResponse>> =>
+    request<BatchDetailResponse>({
+      method: "GET",
+      url: `/api/batch/${batchId}`,
     }),
 };
 

@@ -119,8 +119,43 @@ function extractAlerts(rawResult: any): ZapAlert[] {
 
     // Format 0: New async format - Array at top level containing objects with alertsRaw
     // [{ active: {...}, alertsRaw: { alerts: [...] } }]
+    // OR Format 0b: New findings format
+    // [{ created_at: "...", findings: [...] }]
     if (Array.isArray(rawResult) && rawResult.length > 0) {
-        // Check if first item has alertsRaw.alerts (new format)
+        // Check for findings format (Format 0b)
+        if (rawResult[0]?.findings && Array.isArray(rawResult[0].findings)) {
+            console.log("[ZapParser] Detected new findings array format");
+            const allAlerts: ZapAlert[] = [];
+
+            rawResult.forEach(item => {
+                if (item.findings && Array.isArray(item.findings)) {
+                    // Map findings to ZapAlert structure
+                    const mappedFindings = item.findings.map((finding: any) => ({
+                        alert: finding.name,
+                        alertRef: finding.id,
+                        name: finding.name,
+                        description: finding.description,
+                        risk: finding.severity, // "info", "medium", etc.
+                        confidence: finding.confidence,
+                        solution: finding.remediation,
+                        url: finding.evidence?.url || "",
+                        cweid: finding.evidence?.cwe_id || "-1",
+                        pluginId: finding.evidence?.plugin_id || "",
+                        method: finding.evidence?.method || "GET",
+                        param: finding.evidence?.param || "",
+                        evidence: finding.evidence?.evidence || "",
+                        // specific fields
+                        id: finding.id,
+                        wascid: "-1", // default
+                        tags: {}
+                    }));
+                    allAlerts.push(...mappedFindings);
+                }
+            });
+            return allAlerts;
+        }
+
+        // Check if first item has alertsRaw.alerts (Format 0)
         if (rawResult[0]?.alertsRaw?.alerts) {
             console.log("[ZapParser] Detected new array format with alertsRaw.alerts");
             // Flatten all alerts from all items in the array

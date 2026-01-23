@@ -37,6 +37,7 @@ export function ToolList({ tools, target, vulnerabilities, scanId }: ToolListPro
                     target={target}
                     vulnerabilities={vulnerabilities}
                     scanId={scanId}
+                    fullScanResult={tools[key].result}
                 />
             ))}
         </div>

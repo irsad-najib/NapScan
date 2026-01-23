@@ -4,12 +4,14 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { request, batchApi, BatchItem } from "@/services/api";
 import { Sidebar, Header } from "@/components/layout";
+import { BatchDetailModal } from "@/components/scans/BatchDetailModal";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [batches, setBatches] = useState<BatchItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -211,7 +213,7 @@ export default function Home() {
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-700/30 border-b border-slate-200 dark:border-slate-700">
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                          Target / Batch ID
+                          Target
                         </th>
                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                           Status
@@ -256,9 +258,9 @@ export default function Home() {
                                   <p className="text-sm font-bold text-slate-900 dark:text-white">
                                     {batch.target || "Unknown Target"}
                                   </p>
-                                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                                    {batch.batch_id.substring(0, 8)}...
-                                  </p>
+                                  {/* <p className="text-xs text-slate-500 dark:text-slate-400 font-mono"> */}
+                                  {/* {batch.batch_id.substring(0, 8)}... */}
+                                  {/* </p> */}
                                 </div>
                               </div>
                             </td>
@@ -299,7 +301,9 @@ export default function Home() {
                               </p>
                             </td>
                             <td className="py-4 px-6 text-right">
-                              <button className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-blue-600 p-2 rounded-lg transition-all transform hover:scale-110 mr-2">
+                              <button
+                                onClick={() => setSelectedBatchId(batch.batch_id)}
+                                className="text-slate-400 dark:text-slate-500 hover:text-white dark:hover:text-white hover:bg-blue-600 p-2 rounded-lg transition-all transform hover:scale-110 mr-2">
                                 <span className="material-symbols-outlined text-[22px]">
                                   visibility
                                 </span>
@@ -333,6 +337,13 @@ export default function Home() {
           </div>
         </main>
       </div>
+
+      {selectedBatchId && (
+        <BatchDetailModal
+          batchId={selectedBatchId}
+          onClose={() => setSelectedBatchId(null)}
+        />
+      )}
     </div>
   );
 }
