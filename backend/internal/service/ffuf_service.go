@@ -44,6 +44,11 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// Phase 1: Init (0-5%)
 	manager.UpdateProgress(taskID, 5, models.StatusRunning)
 
+	// Initialize stealth configuration
+	stealthConfig := NewStealthConfig()
+	randomUA := stealthConfig.GetRandomUserAgent()
+	log.Printf("[FFUF_ASYNC] Using stealth User-Agent: %s", randomUA)
+
 	// Create temporary file for JSON output
 	tmpFile := filepath.Join(os.TempDir(), "ffuf_"+time.Now().Format("20060102150405")+".json")
 	defer os.Remove(tmpFile)
@@ -55,7 +60,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	}
 	log.Printf("[FFUF_ASYNC] Using wordlist: %s", wordlistPath)
 
-	// Build ffuf command with context
+	// Build ffuf command with stealth parameters
 	cmd := exec.CommandContext(ctx,
 		"ffuf",
 		"-u", target+"/FUZZ",
@@ -63,7 +68,19 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-fc", "404,307,301,302,308",
 		"-of", "json",
 		"-o", tmpFile,
+		"-rate", "10",              // Rate limit: 10 requests per second
+		"-p", "0.1-0.5",            // Random delay: 100-500ms between requests
+		"-t", "5",                  // Max 5 concurrent threads
+		"-timeout", "10",           // Connection timeout: 10 seconds
+		"-H", "User-Agent: "+randomUA,
+		"-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		"-H", "Accept-Language: en-US,en;q=0.9",
+		"-H", "Accept-Encoding: gzip, deflate",
+		"-H", "DNT: 1",
+		"-H", "Connection: keep-alive",
 	)
+	
+	log.Printf("[FFUF_ASYNC] Stealth mode enabled: rate=10req/s, delay=100-500ms, threads=5")
 
 	// Capture stdout/stderr for progress tracking
 	stdout, err := cmd.StdoutPipe()

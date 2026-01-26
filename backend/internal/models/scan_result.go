@@ -20,6 +20,16 @@ type ScanResult struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// ScanResultSummary represents a cleansed version of the scan result
+// This is used for API responses to avoid sending massive raw JSON
+type ScanResultSummary struct {
+	ID        uint        `json:"id"`
+	Tool      string      `json:"tool"`
+	Target    string      `json:"target"`
+	Summary   interface{} `json:"summary"` // Dynamic summary based on tool
+	CreatedAt time.Time   `json:"created_at"`
+}
+
 func (sr *ScanResult) BeforeSave(tx *gorm.DB) (err error) {
 	if sr.Result != nil {
 		sr.ResultRaw, err = json.Marshal(sr.Result)

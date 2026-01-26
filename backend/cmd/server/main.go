@@ -133,7 +133,7 @@ func main() {
 	ffufService := service.NewFfufService()
 	openvasService := service.NewOpenVASService()
 	sslyzeService := service.NewSslyzeService()
-	batchService := service.NewBatchService(batchRepo)
+	batchService := service.NewBatchService(batchRepo, scanResultRepo)
 	lifecycleService := service.NewLifecycleService(db)
 	
 	// Initialize global ScanManager for async scan orchestration
