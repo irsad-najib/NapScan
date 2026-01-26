@@ -1367,3 +1367,297 @@ export function extractMobsfAppInfo(rawResult: any): MobSFAppInfo | null {
         return null;
     }
 }
+
+/**
+ * Extract tabular data for the ParsedResultTable component
+ */
+export function getToolTableData(tool: ToolKey | string, result: any): any[] {
+    if (!result) return [];
+
+    try {
+        switch (tool) {
+            case 'nmap':
+                return getNmapTableData(result);
+            case 'ffuf':
+                return getFfufTableData(result);
+            case 'zap':
+                return getZapTableData(result);
+            case 'nuclei':
+                return getNucleiTableData(result);
+            case 'sslyze':
+                return getSslyzeTableData(result);
+            case 'mobsf':
+                // MobSF usually returns complex object, we might want to show specific parts
+                return getMobsfTableData(result);
+            default:
+                return [];
+        }
+    } catch (error) {
+        console.error(`Error getting table data for ${tool}:`, error);
+        return [];
+    }
+}
+
+function getNmapTableData(result: any): any[] {
+    // Reuse the normalization logic from parseNmapAuto/normalizeNmapResult
+    // But we need to handle the customized format that likely comes from the API result.risks OR the raw scan
+    // Ideally we want to show Ports if available
+
+    // Check if we have raw structure availability (preferred for table view)
+    let rawData = result;
+
+    // Handle "risks" format (API processed) - this doesn't have all ports usually, only risks
+    // But we might have the full map in result directly if it was passed raw
+
+    // Try to normalize using the internal logic if possible, or just parse manully
+    const hosts: any[] = [];
+
+    const parsePorts = (hostPorts: any[], protocol: string) => {
+        return hostPorts.map(p => ({
+            port: p.port,
+            protocol: protocol,
+            state: p.State?.state || 'unknown',
+            service: p.Service?.name || 'unknown',
+            version: p.Service?.product ? `${p.Service.product} ${p.Service.version || ''}` : ''
+        }));
+    };
+
+    // Helper to traverse the raw nmap structure
+    const processHosts = (hostList: any[], protocol: string) => {
+        if (!Array.isArray(hostList)) return [];
+        return hostList.flatMap(host => {
+            if (host.ports?.ports) {
+                return parsePorts(host.ports.ports, protocol);
+            }
+            return [];
+        });
+    };
+
+    // Check for new nested format { tcp: [{ tcp: {...}, udp: {...} }] }
+    if (Array.isArray(rawData?.tcp) && rawData.tcp.length > 0 && (rawData.tcp[0]?.tcp || rawData.tcp[0]?.udp)) {
+        const items = rawData.tcp;
+        let findings: any[] = [];
+        items.forEach((item: any) => {
+            if (item.tcp?.hosts) findings = [...findings, ...processHosts(item.tcp.hosts, 'tcp')];
+            if (item.udp?.hosts) findings = [...findings, ...processHosts(item.udp.hosts, 'udp')];
+        });
+        return findings;
+    }
+
+    // Standard raw format
+    let findings: any[] = [];
+    if (rawData?.tcp?.hosts) findings = [...findings, ...processHosts(rawData.tcp.hosts, 'tcp')];
+    if (rawData?.udp?.hosts) findings = [...findings, ...processHosts(rawData.udp.hosts, 'udp')];
+
+    if (findings.length > 0) return findings;
+
+    // Fallback: if we only have risks (processed data)
+    if (result?.risks) {
+        const risks = [...(result.risks.new_open || []), ...(result.risks.still_open || [])];
+        const riskFindings: any[] = [];
+
+        risks.forEach((r: any) => {
+            // Check if risk has nested findings (common in aggregated reports)
+            if (r.findings && Array.isArray(r.findings)) {
+                r.findings.forEach((f: any) => {
+                    // Try to extract port from finding name/description/location
+                    const portMatch = (f.name || f.description || f.location || '').match(/(?:port|:)\s*(\d+)/i);
+                    riskFindings.push({
+                        port: portMatch ? portMatch[1] : '-',
+                        protocol: (f.name || '').toLowerCase().includes('udp') ? 'udp' : 'tcp',
+                        state: 'open', // Assumed if it's a finding
+                        service: f.service || 'unknown',
+                        version: f.description || f.name,
+                        severity: f.severity || r.threat_level
+                    });
+                });
+            } else {
+                // Single risk item
+                riskFindings.push({
+                    port: r.title.match(/Port:\s*(\d+)/)?.[1] || '-',
+                    protocol: r.title.toLowerCase().includes('udp') ? 'udp' : 'tcp',
+                    state: 'open',
+                    service: 'unknown',
+                    version: r.title,
+                    severity: r.threat_level
+                });
+            }
+        });
+
+        return riskFindings;
+    }
+
+    return [];
+}
+
+function getFfufTableData(result: any): any[] {
+    let results: any[] = [];
+
+    // Handle new format where result is array of objects with .results
+    if (Array.isArray(result)) {
+        if (result.length > 0 && result[0]?.results) {
+            result.forEach(item => {
+                if (Array.isArray(item.results)) results.push(...item.results);
+            });
+        } else {
+            results = result;
+        }
+    } else if (result?.results) {
+        results = result.results;
+    } else if (result?.data?.results) {
+        results = result.data.results;
+    }
+
+    return results.map((r: any) => ({
+        path: r.input?.FUZZ || r.url,
+        status: r.status || r.statuscode,
+        size: r.length,
+        words: r.words,
+        lines: r.lines,
+        type: 'file' // Ffuf usually finds files/directories
+    }));
+}
+
+function getZapTableData(result: any): any[] {
+    // ZAP result structure: { site: [{ alerts: [...] }] } or direct alerts array
+    let alerts: any[] = [];
+
+    if (result?.site && Array.isArray(result.site)) {
+        result.site.forEach((s: any) => {
+            if (s.alerts) alerts.push(...s.alerts);
+        });
+    } else if (result?.alerts) {
+        alerts = result.alerts;
+    }
+
+    return alerts.map((a: any) => ({
+        alert: a.alert || a.name,
+        risk: a.risk || a.riskdesc?.split(' ')[0],
+        confidence: a.confidence,
+        method: a.method,
+        url: a.url
+    }));
+}
+
+function getNucleiTableData(result: any): any[] {
+    // Re-use logic from parseNucleiResults roughly but keep it simple for table
+    let findings: any[] = [];
+
+    // Check for different Nuclei formats
+    if (Array.isArray(result)) {
+        if (result.length > 0 && result[0]?.findings) {
+            findings = result.flatMap((r: any) => r.findings || []);
+        } else {
+            findings = result;
+        }
+    } else if (result?.summary?.findings) {
+        findings = result.summary.findings;
+    } else if (result?.data?.results) {
+        findings = result.data.results;
+    } else if (typeof result?.output === 'string') {
+        try {
+            findings = result.output.split('\n').filter((l: string) => l.trim()).map(JSON.parse);
+        } catch (e) { /* ignore */ }
+    }
+
+    return findings.map((f: any) => ({
+        template: f['template-id'] || f.templateID || f.info?.name,
+        severity: f.info?.severity || f.severity,
+        name: f.info?.name || f.name,
+        matched_at: f['matched-at'] || f.matched_at || f.host,
+        timestamp: f.timestamp
+    }));
+}
+
+function getSslyzeTableData(result: any): any[] {
+    // Flatten SSLyze structure
+    // We typically want to show: Check Name | Value/Status
+    const rows: any[] = [];
+
+    // Handle array format (likely from our backend wrapper or direct JSON output)
+    let scanResult = result;
+    if (Array.isArray(result) && result.length > 0) scanResult = result[0];
+
+    // Navigate to server_scan_results
+    const serverResults = scanResult?.server_scan_results || (scanResult?.connectivity_result ? [scanResult] : []);
+
+    if (Array.isArray(serverResults)) {
+        serverResults.forEach((server: any) => {
+            const scanData = server.scan_result;
+            if (!scanData) return;
+
+            // Certificate Info
+            const certDeployments = scanData.certificate_info?.result?.certificate_deployments;
+            if (certDeployments) {
+                certDeployments.forEach((dep: any, idx: number) => {
+                    const leaf = dep.verified_certificate_chain?.[0] || dep.received_certificate_chain?.[0];
+                    if (leaf) {
+                        rows.push({
+                            property: `Certificate Subject (${idx + 1})`,
+                            value: leaf.subject?.rfc4514_string || 'Unknown',
+                            status: 'Info'
+                        });
+                        rows.push({
+                            property: `Certificate Not After (${idx + 1})`,
+                            value: leaf.not_valid_after,
+                            status: 'Info'
+                        });
+                    }
+                });
+            }
+
+            // Cipher Suites (Simplified)
+            // Accessing different scan commands
+            if (scanData.ssl_2_0_cipher_suites?.result?.is_vulnerable_to_client_renegotiation_dos) { // Just example check
+                rows.push({ property: 'SSL 2.0', value: 'Supported', status: 'Critical' });
+            }
+            // ... Add more parsers as needed, but SSLyze JSON is huge. 
+            // Only adding basic connectivity info for now + what we parsed before
+        });
+    }
+
+    // Fallback: if we just have a subset or different format, try to extract basic info
+    if (rows.length === 0 && result) {
+        // Could parse the text execution if it failed...
+    }
+
+    return rows;
+}
+
+function getMobsfTableData(result: any): any[] {
+    const rows: any[] = [];
+    const data = result?.data || result;
+
+    // Flatten findings
+    const mobsfFindings = data?.findings?.mobsf || data?.summary;
+
+    if (mobsfFindings) {
+        // High/Warning/Secure
+        ['high', 'warning', 'hotspot'].forEach(sev => {
+            if (Array.isArray(mobsfFindings[sev])) {
+                mobsfFindings[sev].forEach((f: any) => {
+                    rows.push({
+                        title: f.title,
+                        severity: sev.charAt(0).toUpperCase() + sev.slice(1),
+                        component: f.section || f.file_path,
+                        description: f.description
+                    });
+                });
+            }
+        });
+
+        // Manifest
+        if (mobsfFindings.manifest?.findings) {
+            mobsfFindings.manifest.findings.forEach((f: any) => {
+                rows.push({
+                    title: f.title,
+                    severity: f.severity,
+                    component: 'AndroidManifest.xml',
+                    description: f.description
+                });
+            });
+        }
+    }
+
+    return rows;
+}

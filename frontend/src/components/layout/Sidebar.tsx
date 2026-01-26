@@ -11,11 +11,6 @@ const navItems = [
     { label: "Settings", icon: "settings", href: "/settings" },
 ];
 
-const helpItems = [
-    { label: "Support", icon: "mail", href: "#", external: true },
-    { label: "API Docs", icon: "code", href: "#", external: true },
-    { label: "Help Center", icon: "menu_book", href: "#", external: true },
-];
 
 export default function Sidebar() {
     const pathname = usePathname();
@@ -82,32 +77,6 @@ export default function Sidebar() {
 
                 {/* Bottom Section: Help & User Profile */}
                 <div className="flex flex-col gap-2">
-                    {/* Help & Resources */}
-                    <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
-                        {helpItems.map((item) => (
-                            <a
-                                key={item.label}
-                                href={item.href}
-                                target={item.external ? "_blank" : undefined}
-                                rel={item.external ? "noopener noreferrer" : undefined}
-                                className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 transition-colors group"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <span className="material-symbols-outlined text-lg">
-                                        {item.icon}
-                                    </span>
-                                    <span className="text-sm font-medium">
-                                        {item.label}
-                                    </span>
-                                </div>
-                                {item.external && (
-                                    <span className="material-symbols-outlined text-sm opacity-40 group-hover:opacity-70">
-                                        open_in_new
-                                    </span>
-                                )}
-                            </a>
-                        ))}
-                    </div>
 
                     {/* Upgrade Plan Button */}
                     <button className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-500/20 transition-all duration-200 hover:shadow-blue-500/30 mt-2">

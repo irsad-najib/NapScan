@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { batchApi, BatchDetailResponse, ToolKey } from "@/services/api";
-import { ToolList } from "@/components/scans/ToolList";
+import { ToolGrid } from "@/components/scans/ToolGrid";
 import { ToolExecution, ScanVulnerability } from "@/context/ScanContext";
 
 interface BatchDetailModalProps {
@@ -207,8 +207,8 @@ export function BatchDetailModal({ batchId, onClose }: BatchDetailModalProps) {
                         </div>
                     </div>
 
-                    {/* Master List of Tools */}
-                    <ToolList
+                    {/* Master List of Tools - GRID VIEW */}
+                    <ToolGrid
                         tools={tools as any}
                         target={batch.target}
                         vulnerabilities={vulnerabilities}

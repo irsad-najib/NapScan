@@ -418,12 +418,12 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                         status: "completed",
                         progress: 100,
                         endTime: new Date().toISOString(),
-                        result: { tcp: result, udp: [] }, // Format as expected by parser
+                        result: result, // Format as expected by parser
                     });
 
                     // Parse vulnerabilities from result
                     try {
-                        const toolVulns = parseToolResults(tool, { tcp: result, udp: [] });
+                        const toolVulns = parseToolResults(tool, result);
                         console.log(`[Nmap] Parsed ${toolVulns.length} vulnerabilities`);
                         if (toolVulns.length > 0) {
                             const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({

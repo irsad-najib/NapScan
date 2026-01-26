@@ -4,13 +4,17 @@ import Link from "next/link";
 import { useState } from "react";
 import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
+import { useAuth } from "@/context/AuthContext";
 import { ToolList } from "@/components/scans/ToolList";
 import { Sidebar, Header } from "@/components/layout";
 import { MobSFDecisionDialog } from "@/components/scans/MobSFDecisionDialog";
+import { AuthRequiredDialog } from "@/components/common/AuthRequiredDialog";
 
 export default function ScansPage() {
   const { scans, startScan, deleteScan, pendingDecisions, submitMobSFDecision } = useScan();
+  const { isAuthenticated } = useAuth();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
 
@@ -119,6 +123,11 @@ export default function ScansPage() {
   ];
 
   const handleStartScan = async () => {
+    if (!isAuthenticated) {
+      setShowAuthDialog(true);
+      return;
+    }
+
     // For APK scans, validate file is uploaded
     if (scanType === "apk") {
       if (!uploadedFile) {
@@ -237,7 +246,13 @@ export default function ScansPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => setShowNewScanForm(!showNewScanForm)}
+                  onClick={() => {
+                    if (!isAuthenticated) {
+                      setShowAuthDialog(true);
+                      return;
+                    }
+                    setShowNewScanForm(!showNewScanForm);
+                  }}
                   className="flex items-center justify-center gap-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-blue-600/30 transition-all transform hover:scale-105 active:scale-95 shrink-0 h-12 whitespace-nowrap">
                   <span className="material-symbols-outlined text-lg">add</span>
                   <span>New Scan</span>
@@ -828,6 +843,12 @@ export default function ScansPage() {
           isSubmitting={isSubmittingDecision}
         />
       )}
+      {/* Auth Dialog */}
+      <AuthRequiredDialog
+        isOpen={showAuthDialog}
+        onClose={() => setShowAuthDialog(false)}
+      />
     </div >
   );
 }
+

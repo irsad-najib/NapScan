@@ -5,8 +5,8 @@ import { ToolKey } from "@/services/api";
 import { ToolExecution, ScanVulnerability, useScan } from "@/context/ScanContext";
 import { ToolRiskOverview } from "./ToolRiskOverview";
 import { ToolMetadata } from "./ToolMetadata";
-import { VulnerabilityList } from "./VulnerabilityList";
-import { parseFridaResults, extractMobsfAppInfo } from "@/utils/toolParsers";
+import { parseFridaResults, extractMobsfAppInfo, getToolTableData } from "@/utils/toolParsers";
+import { ParsedResultTable } from "./ParsedResultTable";
 
 interface ToolRowProps {
     tool: ToolKey;
@@ -20,28 +20,12 @@ interface ToolRowProps {
 
 export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanResult }: ToolRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [activeTab, setActiveTab] = useState<"vulns" | "metadata">("vulns");
     const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
     const [mobsfFridaView, setMobsfFridaView] = useState<"mobsf" | "frida">("mobsf");
-
-    // Parse Frida results if this is MobSF and we have full result with frida data
-    const fridaVulnerabilities = useMemo(() => {
-        if (tool !== "mobsf" || !fullScanResult) return [];
-        return parseFridaResults(fullScanResult);
-    }, [tool, fullScanResult]);
-
-    // Extract app info for MobSF
-    const appInfo = useMemo(() => {
-        if (tool !== "mobsf" || !fullScanResult) return null;
-        return extractMobsfAppInfo(fullScanResult);
-    }, [tool, fullScanResult]);
-
-    const hasFridaResults = fridaVulnerabilities.length > 0;
 
     const { pendingDecisions, submitMobSFDecision, stopTool } = useScan();
 
     // Check if this tool has a pending decision
-    const pendingDecision = scanId ? pendingDecisions.find(p => p.scanId === scanId) : null;
     const showDecisionUI = data.status === "awaiting_decision" && tool === "mobsf";
 
     // Check if this tool supports stop functionality
@@ -133,9 +117,6 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                         <span className="font-bold text-slate-900 dark:text-white text-sm">
                             {getToolName(tool)}
                         </span>
-                        {/* <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded w-fit">
-                            Lite
-                        </span> */}
                     </div>
                 </div>
 
@@ -154,7 +135,6 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                             {getStatusIcon(data.status)}
                         </span>
                         <span className="capitalize">
-                            {/* Show progress percentage for tools with async polling */}
                             {data.status === 'running' && ['openvas', 'nmap', 'nuclei', 'ffuf', 'sslyze', 'zap'].includes(data.tool) && data.progress !== undefined
                                 ? `${data.progress}%`
                                 : data.status}
@@ -275,99 +255,14 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
 
             {/* Expanded Details */}
             {isExpanded && (
-                <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-6 animate-fade-in">
-                    {/* Visual Overview */}
-                    <div className="mb-6">
+                <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-6 animate-fade-in space-y-6">
+                    {/* Visual Overview - Only show if there are risks */}
+                    {toolVulns.length > 0 && (
                         <ToolRiskOverview vulnerabilities={toolVulns} />
-                    </div>
+                    )}
 
-                    {/* Tabs for Details */}
-                    <div>
-                        <div className="flex items-center gap-6 border-b border-slate-200 dark:border-slate-800 mb-6">
-                            <button
-                                onClick={() => setActiveTab('vulns')}
-                                className={`pb-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'vulns'
-                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                                    }`}
-                            >
-                                Vulnerabilities
-                                {vulnCount > 0 && (
-                                    <span className="ml-2 bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded-full text-xs">
-                                        {vulnCount}
-                                    </span>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('metadata')}
-                                className={`pb-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'metadata'
-                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                                    }`}
-                            >
-                                Metadata & Raw Data
-                            </button>
-                        </div>
-
-                        {/* Tab Content */}
-                        <div>
-                            {activeTab === 'vulns' && (
-                                <>
-                                    {/* MobSF/Frida Toggle for MobSF tool with Frida results */}
-                                    {tool === "mobsf" && hasFridaResults && (
-                                        <div className="flex items-center gap-2 mb-4 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg w-fit">
-                                            <button
-                                                onClick={() => setMobsfFridaView("mobsf")}
-                                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "mobsf"
-                                                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                                                    }`}
-                                            >
-                                                <span className="material-symbols-outlined text-base">security</span>
-                                                Static Analysis (MobSF)
-                                                <span className="bg-slate-200 dark:bg-slate-600 text-xs px-1.5 py-0.5 rounded">
-                                                    {toolVulns.length}
-                                                </span>
-                                            </button>
-                                            <button
-                                                onClick={() => setMobsfFridaView("frida")}
-                                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${mobsfFridaView === "frida"
-                                                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                                                    }`}
-                                            >
-                                                <span className="material-symbols-outlined text-base">bug_report</span>
-                                                Dynamic Analysis (Frida)
-                                                <span className="bg-purple-200 dark:bg-purple-600 text-xs px-1.5 py-0.5 rounded">
-                                                    {fridaVulnerabilities.length}
-                                                </span>
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    {/* Show appropriate vulnerabilities */}
-                                    {tool === "mobsf" && hasFridaResults && mobsfFridaView === "frida" ? (
-                                        <VulnerabilityList
-                                            key={`${tool}-frida-vulns`}
-                                            vulnerabilities={fridaVulnerabilities}
-                                            status={data.status}
-                                            error={data.error}
-                                        />
-                                    ) : (
-                                        <VulnerabilityList
-                                            key={`${tool}-vulns`}
-                                            vulnerabilities={toolVulns}
-                                            status={data.status}
-                                            error={data.error}
-                                        />
-                                    )}
-                                </>
-                            )}
-                            {activeTab === 'metadata' && (
-                                <ToolMetadata toolData={data} target={target} />
-                            )}
-                        </div>
-                    </div>
+                    {/* Simplified View: Table */}
+                    <ToolMetadata toolData={data} target={target} />
                 </div>
             )}
         </div>

@@ -13,7 +13,6 @@ interface ToolListProps {
 }
 
 export function ToolList({ tools, target, vulnerabilities, scanId }: ToolListProps) {
-    // Sort tools (optional, keep order consistent)
     const sortedKeys = Object.keys(tools) as ToolKey[];
 
     return (
