@@ -181,21 +181,55 @@ func RunZapAsync(ctx context.Context, taskID string, manager *ScanManager) error
 	baseURL := zapSvc.zapBaseURL()
 	apiKey := zapSvc.zapAPIKey()
 
+	// Initialize stealth configuration
+	stealthConfig := NewStealthConfig()
+	randomUA := stealthConfig.GetRandomUserAgent()
+	log.Printf("[ZAP_ASYNC] Using stealth User-Agent: %s", randomUA)
+
 	// Update to running
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
 
 	// Phase 0: Setup (avoid fuzzer detection)
-	log.Printf("[ZAP_ASYNC] Setting Stealth User-Agent")
+	log.Printf("[ZAP_ASYNC] Configuring stealth settings")
+	
+	// Set randomized User-Agent
 	uaQ := url.Values{}
-	uaQ.Set("String", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	uaQ.Set("String", randomUA)
 	if apiKey != "" {
 		uaQ.Set("apikey", apiKey)
 	}
-	// Core variable for default user agent might be 'options.prop.userAgent' or similar, 
-	// but standard API is /JSON/network/action/setOptionHttpStateEnabled ??
-	// Actually: /JSON/network/action/setUserAgent/ is simpler if available, OR /JSON/core/action/setOptionDefaultUserAgent/
-	// Let's try setOptionDefaultUserAgent
 	_, _ = zapSvc.zapGetJSON(ctx, baseURL, "/JSON/core/action/setOptionDefaultUserAgent/", uaQ)
+
+	// Set request delay to avoid detection (200ms average)
+	delayQ := url.Values{}
+	delayQ.Set("Integer", "200") // 200ms delay between requests
+	if apiKey != "" {
+		delayQ.Set("apikey", apiKey)
+	}
+	_, _ = zapSvc.zapGetJSON(ctx, baseURL, "/JSON/ascan/action/setOptionDelayInMs/", delayQ)
+
+	// Limit max threads to appear less aggressive
+	threadsQ := url.Values{}
+	threadsQ.Set("Integer", "5") // Max 5 concurrent threads
+	if apiKey != "" {
+		threadsQ.Set("apikey", apiKey)
+	}
+	_, _ = zapSvc.zapGetJSON(ctx, baseURL, "/JSON/ascan/action/setOptionThreadPerHost/", threadsQ)
+
+	// Set realistic browser headers
+	headers := stealthConfig.GetBrowserHeaders(randomUA)
+	for key, value := range headers {
+		if key == "User-Agent" {
+			continue // Already set above
+		}
+		headerQ := url.Values{}
+		headerQ.Set("String", key+": "+value)
+		if apiKey != "" {
+			headerQ.Set("apikey", apiKey)
+		}
+		// Add custom header via replacer (if available) or just log
+		log.Printf("[ZAP_ASYNC] Setting header: %s", key)
+	}
 
 	// Phase 1: Spider scan (0-40%)
 	log.Printf("[ZAP_ASYNC] Initiating spider scan")

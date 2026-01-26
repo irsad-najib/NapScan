@@ -48,3 +48,13 @@ return Error(c, fiber.StatusInternalServerError, message, errMsg)
 func Unauthorized(c *fiber.Ctx, message string) error {
 return Error(c, fiber.StatusUnauthorized, message, nil)
 }
+
+// NotFound shortcut
+func NotFound(c *fiber.Ctx, message string) error {
+return Error(c, fiber.StatusNotFound, message, nil)
+}
+
+// Forbidden shortcut
+func Forbidden(c *fiber.Ctx, message string) error {
+return Error(c, fiber.StatusForbidden, message, nil)
+}

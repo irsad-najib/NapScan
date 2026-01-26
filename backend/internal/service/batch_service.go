@@ -8,20 +8,25 @@ import (
 	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
-	"napscan-be/internal/risk"
 	"strconv"
 	"strings"
+
+	"napscan-be/pkg/risk"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
 type BatchService struct {
-	repo repository.BatchRepository
+	repo     repository.BatchRepository
+	scanRepo repository.ScanResultRepository
 }
 
-func NewBatchService(repo repository.BatchRepository) *BatchService {
-	return &BatchService{repo: repo}
+func NewBatchService(repo repository.BatchRepository, scanRepo repository.ScanResultRepository) *BatchService {
+	return &BatchService{
+		repo:     repo,
+		scanRepo: scanRepo,
+	}
 }
 
 func (s *BatchService) CreateBatch(ctx context.Context, userID string) (string, error) {
@@ -76,43 +81,43 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 	var scanSummaries []string
 
 	// Default Context (in future, this should come from Batch/Project settings)
-	ctxFactors := risk.ContextFactors{
-		AssetCriticality: "high",    // default to high safety
-		Exposure:         "public",  // default to internet facing
-		Environment:      "prod",    // default to production
-	}
+	// ctxFactors := risk.ContextFactors{
+	// 	AssetCriticality: "high",    // default to high safety
+	// 	Exposure:         "public",  // default to internet facing
+	// 	Environment:      "prod",    // default to production
+	// }
 
 	checkRisk := func(severity string, sourceTool string, detail string) {
 		log.Printf("[RISK_CALC] Checking severity: %s from %s", severity, sourceTool)
 		scanSummaries = append(scanSummaries, fmt.Sprintf("%s: %s (%s)", sourceTool, detail, severity))
 		// Map severity to representative CVSS vector
-		var vector string
-		switch severity {
-		case "critical":
-			vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H" // Base ~10.0
-		case "high":
-			vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // Base ~8.8
-		case "medium", "warning":
-			vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L" // Base ~5.3
-		case "low":
-			vector = "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N" // Base ~3.1
-		default:
-			log.Printf("[RISK_CALC] Unknown or safe severity: %s", severity)
-			return
-		}
+		// var vector string
+		// switch severity {
+		// case "critical":
+		// 	vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H" // Base ~10.0
+		// case "high":
+		// 	vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // Base ~8.8
+		// case "medium", "warning":
+		// 	vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L" // Base ~5.3
+		// case "low":
+		// 	vector = "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N" // Base ~3.1
+		// default:
+		// 	log.Printf("[RISK_CALC] Unknown or safe severity: %s", severity)
+		// 	return
+		// }
 
-		res, err := risk.CalculateRisk(risk.RiskInput{VectorString: vector}, ctxFactors)
-		if err == nil {
-			// Convert 0-10 scale to 0-100 for our API
-			score100 := res.FinalScore * 10
-			log.Printf("[RISK_CALC] Calculated score for %s: %.2f (Final: %.0f)", severity, res.FinalScore, score100)
-			if score100 > maxRiskScore {
-				maxRiskScore = score100
-				maxRiskResult = res
-			}
-		} else {
-			log.Printf("[RISK_CALC] Error calculating risk: %v", err)
-		}
+		// res, err := risk.CalculateRisk(risk.RiskInput{VectorString: vector}, ctxFactors)
+		// if err == nil {
+		// 	// Convert 0-10 scale to 0-100 for our API
+		// 	score100 := res.FinalScore * 10
+		// 	log.Printf("[RISK_CALC] Calculated score for %s: %.2f (Final: %.0f)", severity, res.FinalScore, score100)
+		// 	if score100 > maxRiskScore {
+		// 		maxRiskScore = score100
+		// 		maxRiskResult = res
+		// 	}
+		// } else {
+		// 	log.Printf("[RISK_CALC] Error calculating risk: %v", err)
+		// }
 	}
 
 	// 1. Check Uploaded Files
@@ -394,7 +399,21 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 		// Calculate dynamically using Risk Engine if not set
 		var riskDetails interface{}
 		if riskScore == 0 {
-			riskScore, riskDetails = s.calculateBatchRisk(batch)
+			// Use the new Normalized Risk Engine (Internal Helper avoiding DB calls if possible)
+			// effectively using the preloaded results
+			riskResp, err := s.calculateNormalizedRiskInternal(batch.BatchID, batch.ScanResults)
+			if err == nil {
+				riskScore = int(riskResp.RiskScore)
+				// We can optionally attach details, but for summary, maybe just score is enough? 
+				// The original code passed 'riskDetails'.
+				riskDetails = riskResp.RiskDetail
+			} else {
+				// Fallback to old method or just 0?
+				// User explicitly asked for "correct calculation by batch id"
+				// old method: score, details := s.calculateBatchRisk(batch)
+				// Let's rely on the new one.
+				log.Printf("[BATCH_SERVICE] Failed to calculate normalized risk for batch %s: %v", batch.BatchID, err)
+			}
 		}
 
 		// Get target: Check UploadedFiles first (APKs), then ScanResults (Network scans)
@@ -442,10 +461,418 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 			RiskScore:   riskScore,
 			RiskDetails: riskDetails,
 			Status:      status,
-			Timestamp:   batch.CreatedAt,
+			Timestamp:   batch.CreatedAt, // ensure CreatedAt is available on batch model
 		}
 	}
 	
 	log.Printf("[BATCH_SERVICE] Found %d batches", len(batches))
 	return summaries, nil
+}
+// CalculateBatchRiskNormalized calculates risk using the new normalized risk engine
+func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID string) (*models.BatchRiskResponse, error) {
+	log.Printf("[BATCH_SERVICE] Calculating normalized risk for batch_id=%s", batchID)
+
+	// 1. Fetch all scan results for this batch
+	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
+	if err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
+		return nil, err
+	}
+
+	return s.calculateNormalizedRiskInternal(batchID, scanResults)
+}
+
+// calculateNormalizedRiskInternal contains the core logic for risk calculation given a set of scan results
+func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResults []models.ScanResult) (*models.BatchRiskResponse, error) {
+	log.Printf("[BATCH_SERVICE] Found %d scan results for batch", len(scanResults))
+
+	// 2. Group scan results by scanner type
+	scannerGroups := make(map[string][]models.ScanResult)
+	for _, result := range scanResults {
+		scannerGroups[result.Tool] = append(scannerGroups[result.Tool], result)
+	}
+
+	log.Printf("[BATCH_SERVICE] Grouped into %d scanner types", len(scannerGroups))
+
+	// 3. Parse and normalize each scanner group
+	var scannerDetails []models.ScannerRiskDetail
+	for scannerType, results := range scannerGroups {
+		log.Printf("[BATCH_SERVICE] Processing scanner: %s with %d results", scannerType, len(results))
+
+		parser := risk.GetParser(scannerType)
+		if parser == nil {
+			log.Printf("[BATCH_SERVICE] No parser found for scanner: %s", scannerType)
+			continue
+		}
+
+		detail, err := parser.ParseAndNormalize(results)
+		if err != nil {
+			log.Printf("[BATCH_SERVICE] Failed to parse %s results: %v", scannerType, err)
+			continue
+		}
+
+		scannerDetails = append(scannerDetails, *detail)
+	}
+
+	// 4. Calculate batch risk
+	riskResponse := risk.CalculateBatchRisk(batchID, scannerDetails)
+
+	log.Printf("[BATCH_SERVICE] Calculated risk: score=%.2f, level=%s, scanners=%d", 
+		riskResponse.RiskScore, riskResponse.RiskLevel, len(riskResponse.RiskDetail))
+
+	return riskResponse, nil
+}
+
+// GetBatchDetail retrieves complete batch information including normalized risk
+func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userID string) (*models.BatchDetailResponse, error) {
+log.Printf("[BATCH_SERVICE] Fetching batch detail for batch_id=%s, user_id=%s", batchID, userID)
+
+// 1. Fetch batch
+batch, err := s.repo.FindByID(ctx, batchID)
+if err != nil {
+log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
+return nil, err
+}
+
+if batch == nil {
+log.Printf("[BATCH_SERVICE] Batch not found: %s", batchID)
+return nil, fmt.Errorf("batch not found")
+}
+
+// 2. Verify ownership
+if batch.UserID != userID {
+log.Printf("[BATCH_SERVICE] Access denied: user=%s tried to access batch owned by %s", userID, batch.UserID)
+return nil, fmt.Errorf("access denied")
+}
+
+// 3. Fetch scan results
+scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
+if err != nil {
+log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
+return nil, err
+}
+
+// 4. Calculate normalized risk
+riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
+if err != nil {
+log.Printf("[BATCH_SERVICE] Failed to calculate risk: %v", err)
+// Continue with zero risk if calculation fails
+riskResponse = &models.BatchRiskResponse{
+BatchID:    batchID,
+RiskScore:  0,
+RiskLevel:  models.SeverityInfo,
+RiskDetail: []models.ScannerRiskDetail{},
+}
+}
+
+// 5. Determine target
+target := "Unknown"
+if len(batch.UploadedFiles) > 0 {
+target = batch.UploadedFiles[0].FileName
+} else if len(scanResults) > 0 {
+target = scanResults[0].Target
+}
+
+// 6. Determine status
+status := string(batch.Status)
+if len(batch.UploadedFiles) > 0 {
+allDone := true
+for _, f := range batch.UploadedFiles {
+if f.Status != models.FileStatusCompleted && 
+   f.Status != models.FileStatusFailed && 
+   f.Status != models.FileStatusCleaned {
+allDone = false
+break
+}
+}
+if allDone {
+status = "complete"
+} else {
+status = "processing"
+}
+} else if len(scanResults) > 0 {
+if status == "processing" {
+status = "complete"
+}
+}
+
+// 7. Build response
+	var scanSummaries []models.ScanResultSummary
+	for _, res := range scanResults {
+		scanSummaries = append(scanSummaries, s.summarizeScanResult(res))
+	}
+
+	response := &models.BatchDetailResponse{
+BatchID:     batch.BatchID,
+UserID:      batch.UserID,
+Status:      status,
+CreatedAt:   batch.CreatedAt,
+Target:      target,
+RiskScore:   riskResponse.RiskScore,
+RiskLevel:   riskResponse.RiskLevel,
+RiskDetail:  riskResponse.RiskDetail,
+ScanResults: scanSummaries,
+}
+
+log.Printf("[BATCH_SERVICE] Batch detail prepared: status=%s, risk_score=%.2f", status, riskResponse.RiskScore)
+
+return response, nil
+}
+
+// summarizeScanResult transforms raw scan results into a simplified summary
+func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanResultSummary {
+	summary := models.ScanResultSummary{
+		ID:        scan.ID,
+		Tool:      scan.Tool,
+		Target:    scan.Target,
+		CreatedAt: scan.CreatedAt,
+	}
+
+	// Canonicalize tool name (handle aliases)
+	toolName := strings.ToLower(scan.Tool)
+	if toolName == "zap" {
+		toolName = "owasp-zap"
+	}
+
+	summary.Tool = toolName // Normalize in output too
+
+	switch toolName {
+	case "nmap":
+		// Nmap: Open Ports, Service Names
+		var openPorts []int
+		var services []string
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			if hosts, ok := resMap["hosts"].([]interface{}); ok {
+				for _, h := range hosts {
+					if hostMap, ok := h.(map[string]interface{}); ok {
+						if ports, ok := hostMap["ports"].([]interface{}); ok {
+							for _, p := range ports {
+								if portMap, ok := p.(map[string]interface{}); ok {
+									// Extract Port ID
+									if portID, ok := portMap["portid"].(json.Number); ok {
+										pid, _ := portID.Int64()
+										openPorts = append(openPorts, int(pid))
+									} else if portID, ok := portMap["portid"].(float64); ok {
+										openPorts = append(openPorts, int(portID))
+									}
+									// Extract Service Name
+									if service, ok := portMap["service"].(map[string]interface{}); ok {
+										if name, ok := service["name"].(string); ok {
+											services = append(services, name)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"open_ports": openPorts,
+			"services":   services,
+			"total_open": len(openPorts),
+		}
+
+	case "owasp-zap":
+		// ZAP: Alert Counts by Risk
+		alertsByRisk := make(map[string]int)
+		totalAlerts := 0
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			if alertsRaw, ok := resMap["alertsRaw"].(map[string]interface{}); ok {
+				if alerts, ok := alertsRaw["alerts"].([]interface{}); ok {
+					totalAlerts = len(alerts)
+					for _, a := range alerts {
+						if alertMap, ok := a.(map[string]interface{}); ok {
+							if riskStr, ok := alertMap["risk"].(string); ok {
+								alertsByRisk[riskStr]++
+							}
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"alerts_by_risk": alertsByRisk,
+			"total_alerts":   totalAlerts,
+		}
+
+	case "openvas":
+		// OpenVAS: Findings count, Severities, Max CVSS
+		findingsCount := 0
+		highSevCount := 0
+		maxCVSS := 0.0
+		var topProblems []string
+
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			if resultsContainer, ok := resMap["results"].(map[string]interface{}); ok {
+				if findings, ok := resultsContainer["result"].([]interface{}); ok {
+					findingsCount = len(findings)
+					for _, finding := range findings {
+						if fMap, ok := finding.(map[string]interface{}); ok {
+							// Extract Severity & CVSS
+							if sevStr, ok := fMap["severity"].(string); ok {
+								if sevVal, err := strconv.ParseFloat(sevStr, 64); err == nil {
+									if sevVal > maxCVSS {
+										maxCVSS = sevVal
+									}
+									if sevVal >= 7.0 {
+										highSevCount++
+										// Add to top problems (limit to 5)
+										if len(topProblems) < 5 {
+											if name, ok := fMap["name"].(string); ok {
+												topProblems = append(topProblems, fmt.Sprintf("%s (CVSS: %.1f)", name, sevVal))
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"total_findings":      findingsCount,
+			"high_critical_count": highSevCount,
+			"max_cvss":            maxCVSS,
+			"top_problems":        topProblems,
+		}
+	
+	case "ffuf":
+		// FFUF: Found URLs count & Top Matches
+		foundCount := 0
+		statusCodes := make(map[string]int)
+		var topMatches []string
+
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			if results, ok := resMap["results"].([]interface{}); ok {
+				foundCount = len(results)
+				for _, r := range results {
+					if resObj, ok := r.(map[string]interface{}); ok {
+						if status, ok := resObj["status"].(float64); ok {
+							statusCodes[fmt.Sprintf("%.0f", status)]++
+						}
+						// Collect first few URLs
+						if len(topMatches) < 5 {
+							if url, ok := resObj["url"].(string); ok {
+								topMatches = append(topMatches, url)
+							}
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"found_urls":          foundCount,
+			"status_distribution": statusCodes,
+			"top_matches":         topMatches,
+		}
+
+	case "nuclei":
+		// Nuclei: Findings count by severity
+		count := 0
+		severityMap := make(map[string]int)
+		var criticalFindings []string
+
+		parseList := func(list []interface{}) {
+			count = len(list)
+			for _, item := range list {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if info, ok := itemMap["info"].(map[string]interface{}); ok {
+						if severity, ok := info["severity"].(string); ok {
+							severityMap[severity]++
+							// Collect Critical/High names
+							if strings.ToLower(severity) == "critical" || strings.ToLower(severity) == "high" {
+								if len(criticalFindings) < 5 {
+									if name, ok := info["name"].(string); ok {
+										criticalFindings = append(criticalFindings, name)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if resList, ok := scan.Result.([]interface{}); ok {
+			parseList(resList)
+		} else if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			// sometime mapped differently
+			_ = resMap
+		}
+		summary.Summary = map[string]interface{}{
+			"findings_count":    count,
+			"severity_counts":   severityMap,
+			"critical_findings": criticalFindings,
+		}
+
+	case "mobsf":
+		// MobSF: Parse Score and High/Critical issues if available in logic
+		// Usually MobSF returns a massive JSON. We look for specific high-level keys.
+		var score float64
+		var permissionsCount int
+		highIssues := 0
+
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			// Attempt to find average_cvss or security_score
+			if s, ok := resMap["average_cvss"].(float64); ok {
+				score = s * 10 // Convert 10-scale to 100-scale approx? Or just use as is.
+			}
+			if s, ok := resMap["security_score"].(float64); ok {
+				score = s
+			}
+			// Permissions
+			if perms, ok := resMap["permissions"].(map[string]interface{}); ok {
+				permissionsCount = len(perms)
+			}
+			// Code Analysis (finding high severity)
+			if codeAnalysis, ok := resMap["code_analysis"].(map[string]interface{}); ok {
+				if findings, ok := codeAnalysis["findings"].(map[string]interface{}); ok {
+					for _, f := range findings {
+						if fMap, ok := f.(map[string]interface{}); ok {
+							if sev, ok := fMap["severity"].(string); ok && (sev == "high" || sev == "critical") {
+								highIssues++
+							}
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"security_score": score,
+			"high_issues":    highIssues,
+			"permissions":    permissionsCount,
+		}
+
+	case "frida":
+		// Frida: Check status and specific hook matches
+		status := "unknown"
+		logs := []string{}
+		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+			if s, ok := resMap["status"].(string); ok {
+				status = s
+			}
+			if l, ok := resMap["logs"].([]interface{}); ok {
+				for i, log := range l {
+					if i < 5 { // limit logs
+						if logStr, ok := log.(string); ok {
+							logs = append(logs, logStr)
+						}
+					}
+				}
+			}
+		}
+		summary.Summary = map[string]interface{}{
+			"status": status,
+			"recent_logs": logs,
+		}
+
+	default:
+		// Default: pass thorough generic info or limited raw
+		summary.Summary = map[string]string{"info": "See detailed report for more info"}
+	}
+
+	return summary
 }
