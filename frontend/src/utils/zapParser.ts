@@ -114,7 +114,7 @@ function mapRiskToSeverity(risk: string): "Critical" | "High" | "Medium" | "Low"
 /**
  * Extract alerts array from various response formats
  */
-function extractAlerts(rawResult: any): ZapAlert[] {
+export function extractAlerts(rawResult: any): ZapAlert[] {
     console.log("[ZapParser] extractAlerts input type:", typeof rawResult, Array.isArray(rawResult) ? "isArray" : "");
 
     // Format 0: New async format - Array at top level containing objects with alertsRaw

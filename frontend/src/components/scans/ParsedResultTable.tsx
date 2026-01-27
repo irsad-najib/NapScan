@@ -76,12 +76,20 @@ export function ParsedResultTable({ tool, data, type }: ParsedResultTableProps) 
 
     if (!data || data.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
-                <div className="size-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
-                    <span className="material-symbols-outlined text-emerald-500 text-2xl">check_circle</span>
+            <div className="flex flex-col items-center justify-center py-16 text-center bg-gradient-to-b from-white to-slate-50 dark:from-slate-900 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="relative mb-6 group">
+                    <div className="absolute inset-0 bg-emerald-500/20 dark:bg-emerald-500/10 rounded-full blur-xl group-hover:blur-2xl transition-all duration-500"></div>
+                    <div className="relative size-20 rounded-full bg-white dark:bg-slate-800 border-4 border-emerald-50 dark:border-emerald-500/10 shadow-sm flex items-center justify-center">
+                        <span className="material-symbols-outlined text-emerald-500 text-4xl transform group-hover:scale-110 transition-transform duration-300">verified_user</span>
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white p-1.5 rounded-full border-4 border-white dark:border-slate-800 flex items-center justify-center shadow-sm">
+                        <span className="material-symbols-outlined text-sm font-bold">check</span>
+                    </div>
                 </div>
-                <p className="text-sm font-medium text-slate-900 dark:text-white">No findings detected</p>
-                <p className="text-xs text-slate-500">The scan tool execution reported no specific issues.</p>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Excellent! No Findings Detected</h3>
+                <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                    The scan completed successfully and found no security issues or vulnerabilities for this tool.
+                </p>
             </div>
         );
     }

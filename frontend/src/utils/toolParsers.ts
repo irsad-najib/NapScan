@@ -6,12 +6,13 @@
 import { ScanVulnerability } from "@/context/ScanContext";
 import { ToolKey } from "@/services/api";
 
+import { extractAlerts } from "./zapParser";
 // Re-export Nmap parser
 export { parseNmapResults, parseNmapAuto, parseRawNmapScan } from "./nmapParser";
 export type { ParsedNmapScanSummary, ParsedNmapHost, ParsedNmapPort } from "./nmapParser";
 
 // Re-export ZAP parser
-export { parseZapResults, parseZapAuto, parseZapResultsDetailed, analyzeZapRisk } from "./zapParser";
+export { parseZapResults, parseZapAuto, parseZapResultsDetailed, analyzeZapRisk, extractAlerts } from "./zapParser";
 export type { ParsedZapVulnerability, ZapRiskSummary, ZapAlert } from "./zapParser";
 
 // Note: parseZapResults is now exported from ./zapParser
@@ -1519,16 +1520,8 @@ function getFfufTableData(result: any): any[] {
 }
 
 function getZapTableData(result: any): any[] {
-    // ZAP result structure: { site: [{ alerts: [...] }] } or direct alerts array
-    let alerts: any[] = [];
-
-    if (result?.site && Array.isArray(result.site)) {
-        result.site.forEach((s: any) => {
-            if (s.alerts) alerts.push(...s.alerts);
-        });
-    } else if (result?.alerts) {
-        alerts = result.alerts;
-    }
+    // Use the centralized extractAlerts function to handle all ZAP formats
+    const alerts = extractAlerts(result);
 
     return alerts.map((a: any) => ({
         alert: a.alert || a.name,
