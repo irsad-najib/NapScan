@@ -1390,6 +1390,8 @@ export function getToolTableData(tool: ToolKey | string, result: any): any[] {
             case 'mobsf':
                 // MobSF usually returns complex object, we might want to show specific parts
                 return getMobsfTableData(result);
+            case 'openvas':
+                return getOpenVasTableData(result);
             default:
                 return [];
         }
@@ -1653,4 +1655,30 @@ function getMobsfTableData(result: any): any[] {
     }
 
     return rows;
+}
+
+function getOpenVasTableData(result: any): any[] {
+    // Helper to traverse OpenVAS structure
+    let findings: any[] = [];
+
+    // Check for standard XML-converted format
+    // result.report?.results?.result
+    if (result?.report?.results?.result) {
+        const res = result.report.results.result;
+        if (Array.isArray(res)) {
+            findings = res;
+        } else {
+            findings = [res];
+        }
+    } else if (Array.isArray(result)) {
+        findings = result;
+    }
+
+    return findings.map((f: any) => ({
+        name: f.name || f.nvt?.name,
+        severity: f.threat || f.severity,
+        host: f.host?.['#text'] || f.host,
+        port: f.port?.['#text'] || f.port,
+        description: f.description
+    }));
 }

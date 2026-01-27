@@ -227,6 +227,122 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // --- OpenVAS Dedicated Handler (3-step async flow) ---
+    const monitorOpenVAS = async (scanId: string, taskId: string) => {
+        const tool: ToolKey = "openvas";
+        const pollKey = `${scanId}-${tool}`;
+
+        if (pollingTools.has(pollKey)) {
+            console.log(`[OpenVAS] Already monitoring ${pollKey}`);
+            return;
+        }
+
+        setPollingTools((prev) => new Set(prev).add(pollKey));
+        console.log(`[OpenVAS] Monitor started for task: ${taskId}`);
+
+        try {
+            // Step 2: Poll for status
+            let reportId: string | undefined;
+            let progress = 0;
+            const POLL_INTERVAL = 15000; // 15 seconds
+            let pollCount = 0;
+            let failureCount = 0;
+            const MAX_FAILURES = 5;
+
+            console.log(`[OpenVAS] Monitoring status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                pollCount++;
+
+                let statusRes;
+                try {
+                    statusRes = await scannersApi.openvas.taskStatus(taskId);
+                } catch (netErr) {
+                    console.error(`[OpenVAS] Network error polling status:`, netErr);
+                    statusRes = { ok: false, error: netErr };
+                }
+
+                if (!statusRes || !statusRes.ok) {
+                    failureCount++;
+                    console.warn(`[OpenVAS] Status check failed (Attempt ${failureCount}/${MAX_FAILURES})`);
+
+                    if (failureCount >= MAX_FAILURES) {
+                        throw new Error((statusRes as any)?.message || (statusRes as any)?.error || "Failed to get OpenVAS status after multiple attempts");
+                    }
+
+                    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+                    continue;
+                }
+
+                failureCount = 0;
+
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+
+                // Only log every few polls to reduce noise
+                if (pollCount % 4 === 1) console.log(`[OpenVAS] Progress: ${progress}%, Status: ${status}`);
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    reportId = statusData?.reportID || statusData?.reportId;
+                    console.log(`[OpenVAS] Scan completed! reportID: ${reportId}`);
+                    break;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(`OpenVAS task ${status}`);
+                }
+            }
+
+            if (!reportId) {
+                throw new Error("No report ID returned from OpenVAS");
+            }
+
+            // Step 3: Fetch Report
+            console.log(`[OpenVAS] Step 3: Fetching report ${reportId}...`);
+            const reportRes = await scannersApi.openvas.report(reportId);
+
+            if (!reportRes.ok) {
+                throw new Error((reportRes as any).message || (reportRes as any).error || "Failed to fetch OpenVAS report");
+            }
+
+            console.log(`[OpenVAS] Scan completed successfully!`);
+            updateToolStatus(scanId, tool, {
+                status: "completed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                result: reportRes.data,
+            });
+
+            try {
+                const toolVulns = parseToolResults(tool, reportRes.data);
+                if (toolVulns.length > 0) {
+                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                        ...v,
+                        id: `${scanId}-${tool}-${idx}`,
+                    }));
+                    addVulnerabilities(scanId, scanVulns);
+                }
+            } catch (parseError) {
+                console.error(`[OpenVAS] Failed to parse results:`, parseError);
+            }
+        } catch (err: any) {
+            console.error("[OpenVAS] Monitor Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                progress: 100,
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        } finally {
+            setPollingTools((prev) => {
+                const next = new Set(prev);
+                next.delete(pollKey);
+                return next;
+            });
+        }
+    };
+
     const executeOpenVAS = async (scanId: string, target: string, batchId?: string) => {
         const tool: ToolKey = "openvas";
         console.log(`[OpenVAS] Starting scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
@@ -259,87 +375,14 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             console.log(`[OpenVAS] Scan started, taskID: ${taskId}`);
 
-            // Step 2: Poll for status (no timeout - wait until done)
-            let reportId: string | undefined;
-            let progress = 0;
-            const POLL_INTERVAL = 15000; // 15 seconds
-            let pollCount = 0;
+            // Save taskId and start monitoring
+            updateToolStatus(scanId, tool, { taskId });
+            monitorOpenVAS(scanId, taskId);
 
-            console.log(`[OpenVAS] Step 2: Polling for status (no timeout, interval ${POLL_INTERVAL}ms)...`);
-
-            while (true) {
-                pollCount++;
-                console.log(`[OpenVAS] Poll #${pollCount}...`);
-                const statusRes = await scannersApi.openvas.taskStatus(taskId);
-                console.log(`[OpenVAS] Status response:`, statusRes);
-
-                if (!statusRes.ok) {
-                    console.error(`[OpenVAS] Status check failed:`, statusRes);
-                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get OpenVAS status");
-                }
-
-                // Handle nested data structure
-                const statusData = (statusRes.data as any)?.data || statusRes.data;
-                progress = statusData?.progress ?? 0;
-                const status = statusData?.status?.toLowerCase();
-                console.log(`[OpenVAS] Progress: ${progress}%, Status: ${status}`);
-
-                updateToolStatus(scanId, tool, { progress });
-
-                if (status === "done" || status === "completed") {
-                    // Handle both reportID and reportId (backend may return either)
-                    reportId = statusData?.reportID || statusData?.reportId;
-                    console.log(`[OpenVAS] Scan completed! reportID: ${reportId}`);
-                    break;
-                }
-                if (status === "stopped" || status === "failed" || status === "error") {
-                    throw new Error(`OpenVAS task ${status}`);
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-            }
-
-            if (!reportId) {
-                throw new Error("No report ID returned from OpenVAS");
-            }
-
-            // Step 3: Fetch Report
-            console.log(`[OpenVAS] Step 3: Fetching report ${reportId}...`);
-            const reportRes = await scannersApi.openvas.report(reportId);
-            console.log(`[OpenVAS] Report response:`, reportRes);
-
-            if (!reportRes.ok) {
-                console.error(`[OpenVAS] Report fetch failed:`, reportRes);
-                throw new Error((reportRes as any).message || (reportRes as any).error || "Failed to fetch OpenVAS report");
-            }
-
-            console.log(`[OpenVAS] Scan completed successfully!`);
-            updateToolStatus(scanId, tool, {
-                status: "completed",
-                progress: 100,
-                endTime: new Date().toISOString(),
-                result: reportRes.data,
-            });
-
-            // Parse vulnerabilities from report
-            try {
-                const toolVulns = parseToolResults(tool, reportRes.data);
-                console.log(`[OpenVAS] Parsed ${toolVulns.length} vulnerabilities`);
-                if (toolVulns.length > 0) {
-                    const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
-                        ...v,
-                        id: `${scanId}-${tool}-${idx}`,
-                    }));
-                    addVulnerabilities(scanId, scanVulns);
-                }
-            } catch (parseError) {
-                console.error(`[OpenVAS] Failed to parse results:`, parseError);
-            }
         } catch (err: any) {
-            console.error("[OpenVAS] Failed:", err);
+            console.error("[OpenVAS] Start Failed:", err);
             updateToolStatus(scanId, tool, {
                 status: "failed",
-                progress: 100,
                 endTime: new Date().toISOString(),
                 error: err.message,
             });
@@ -347,6 +390,103 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // --- Nmap Dedicated Handler (async flow with progress) ---
+    const monitorNmap = async (scanId: string, taskId: string) => {
+        const tool: ToolKey = "nmap";
+        const pollKey = `${scanId}-${tool}`;
+
+        if (pollingTools.has(pollKey)) {
+            console.log(`[Nmap] Already monitoring ${pollKey}`);
+            return;
+        }
+        setPollingTools((prev) => new Set(prev).add(pollKey));
+
+        console.log(`[Nmap] Monitor started for task: ${taskId}`);
+
+        try {
+            let progress = 0;
+            const POLL_INTERVAL = 5000;
+            let failureCount = 0;
+            const MAX_FAILURES = 5;
+
+            console.log(`[Nmap] Monitoring status (interval ${POLL_INTERVAL}ms)...`);
+
+            while (true) {
+                let statusRes;
+                try {
+                    statusRes = await scannersApi.nmap.taskStatus(taskId);
+                } catch (netErr) {
+                    console.error(`[Nmap] Network error polling status:`, netErr);
+                    statusRes = { ok: false, error: netErr };
+                }
+
+                if (!statusRes || !statusRes.ok) {
+                    failureCount++;
+                    console.warn(`[Nmap] Status check failed (Attempt ${failureCount}/${MAX_FAILURES})`);
+                    if (failureCount >= MAX_FAILURES) {
+                        throw new Error((statusRes as any)?.message || (statusRes as any)?.error || "Failed to get Nmap status after multiple attempts");
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+                    continue;
+                }
+
+                failureCount = 0;
+                const statusData = (statusRes.data as any)?.data || statusRes.data;
+                progress = statusData?.progress ?? 0;
+                const status = statusData?.status?.toLowerCase();
+
+                // Only log every few polls to reduce noise
+                // if (pollCount % 4 === 1) console.log(`[Nmap] Progress: ${progress}%, Status: ${status}`);
+                console.log(`[Nmap] Progress: ${progress}%, Status: ${status}`); // Keep original Nmap logging for now
+
+                updateToolStatus(scanId, tool, { progress });
+
+                if (status === "done" || status === "completed") {
+                    console.log(`[Nmap] Scan completed!`);
+                    const result = statusData?.result || [];
+
+                    updateToolStatus(scanId, tool, {
+                        status: "completed",
+                        progress: 100,
+                        endTime: new Date().toISOString(),
+                        result: result,
+                    });
+
+                    try {
+                        const toolVulns = parseToolResults(tool, result);
+                        if (toolVulns.length > 0) {
+                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
+                                ...v,
+                                id: `${scanId}-${tool}-${idx}`,
+                            }));
+                            addVulnerabilities(scanId, scanVulns);
+                        }
+                    } catch (parseError) {
+                        console.error(`[Nmap] Failed to parse results:`, parseError);
+                    }
+                    break;
+                }
+                if (status === "stopped" || status === "failed" || status === "error") {
+                    throw new Error(statusData?.error || `Nmap task ${status}`);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+            }
+        } catch (err: any) {
+            console.error("[Nmap] Monitor Failed:", err);
+            updateToolStatus(scanId, tool, {
+                status: "failed",
+                endTime: new Date().toISOString(),
+                error: err.message,
+            });
+        } finally {
+            setPollingTools((prev) => {
+                const next = new Set(prev);
+                next.delete(pollKey);
+                return next;
+            });
+        }
+    };
+
     const executeNmap = async (scanId: string, target: string, batchId?: string) => {
         const tool: ToolKey = "nmap";
         console.log(`[Nmap] Starting async scan for target: ${target}${batchId ? `, batchId: ${batchId}` : ''}`);
@@ -379,75 +519,13 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             console.log(`[Nmap] Scan started, task_id: ${taskId}`);
 
-            // Save taskId for stop functionality
+            // Save taskId for stop functionality and start monitoring
             updateToolStatus(scanId, tool, { taskId });
-
-            // Step 2: Poll for status (until completed)
-            let progress = 0;
-            const POLL_INTERVAL = 5000; // 5 seconds
-            let pollCount = 0;
-
-            console.log(`[Nmap] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
-
-            while (true) {
-                pollCount++;
-                console.log(`[Nmap] Poll #${pollCount}...`);
-                const statusRes = await scannersApi.nmap.taskStatus(taskId);
-                console.log(`[Nmap] Status response:`, statusRes);
-
-                if (!statusRes.ok) {
-                    console.error(`[Nmap] Status check failed:`, statusRes);
-                    throw new Error((statusRes as any).message || (statusRes as any).error || "Failed to get Nmap status");
-                }
-
-                // Handle nested data structure
-                const statusData = (statusRes.data as any)?.data || statusRes.data;
-                progress = statusData?.progress ?? 0;
-                const status = statusData?.status?.toLowerCase();
-                console.log(`[Nmap] Progress: ${progress}%, Status: ${status}`);
-
-                updateToolStatus(scanId, tool, { progress });
-
-                if (status === "done" || status === "completed") {
-                    console.log(`[Nmap] Scan completed!`);
-
-                    // Extract result from status response
-                    const result = statusData?.result || [];
-
-                    updateToolStatus(scanId, tool, {
-                        status: "completed",
-                        progress: 100,
-                        endTime: new Date().toISOString(),
-                        result: result, // Format as expected by parser
-                    });
-
-                    // Parse vulnerabilities from result
-                    try {
-                        const toolVulns = parseToolResults(tool, result);
-                        console.log(`[Nmap] Parsed ${toolVulns.length} vulnerabilities`);
-                        if (toolVulns.length > 0) {
-                            const scanVulns: ScanVulnerability[] = toolVulns.map((v, idx) => ({
-                                ...v,
-                                id: `${scanId}-${tool}-${idx}`,
-                            }));
-                            addVulnerabilities(scanId, scanVulns);
-                        }
-                    } catch (parseError) {
-                        console.error(`[Nmap] Failed to parse results:`, parseError);
-                    }
-                    return;
-                }
-                if (status === "stopped" || status === "failed" || status === "error") {
-                    throw new Error(statusData?.error || `Nmap task ${status}`);
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-            }
+            monitorNmap(scanId, taskId);
         } catch (err: any) {
-            console.error("[Nmap] Failed:", err);
+            console.error("[Nmap] Start Failed:", err);
             updateToolStatus(scanId, tool, {
                 status: "failed",
-                progress: 100,
                 endTime: new Date().toISOString(),
                 error: err.message,
             });
@@ -1486,48 +1564,41 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
     // --- Effect to resume polling on mount ---
     useEffect(() => {
-        const resumeRunningScans = async () => {
-            console.log('[ScanContext] Checking for running scans to resume...');
-
-            for (const scan of scans) {
-                if (scan.status === 'running') {
-                    const tools = Object.entries(scan.tools) as [ToolKey, ToolExecution][];
-
-                    for (const [toolKey, toolExec] of tools) {
-                        // Resume polling for tools that are running and have a taskId
-                        if (toolExec.status === 'running' && toolExec.taskId) {
-                            console.log(`[ScanContext] Resuming ${toolKey} for scan ${scan.id} (taskId: ${toolExec.taskId})`);
-                            resumeToolPolling(scan.id, toolKey, toolExec.taskId);
+        if (scans.length > 0) {
+            console.log("[ScanContext] Checking for running scans to resume...");
+            scans.forEach((scan) => {
+                Object.entries(scan.tools).forEach(([toolKey, execution]) => {
+                    const tKey = toolKey as ToolKey;
+                    if (execution.status === "running" && execution.taskId) {
+                        console.log(`[ScanContext] Resuming monitor for ${tKey} in scan ${scan.id}`);
+                        switch (tKey) {
+                            case "openvas":
+                                monitorOpenVAS(scan.id, execution.taskId);
+                                break;
+                            case "nmap":
+                                monitorNmap(scan.id, execution.taskId);
+                                break;
+                            // Add other tools here when refactored
                         }
                     }
-                }
-            }
+                });
+            });
+        }
+    }, []); // Run once on mount
 
-            setIsLoading(false);
-        };
+    const value = {
+        scans,
+        currentScan: null, // derived if needed
+        getScan,
+        startScan,
+        deleteScan,
+        stopTool,
+        isLoading,
+        pendingDecisions,
+        submitMobSFDecision,
+    };
 
-        resumeRunningScans();
-        // Only run on mount
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    return (
-        <ScanContext.Provider
-            value={{
-                scans,
-                currentScan: null,
-                getScan,
-                startScan,
-                deleteScan,
-                stopTool,
-                isLoading,
-                pendingDecisions,
-                submitMobSFDecision,
-            }}
-        >
-            {children}
-        </ScanContext.Provider>
-    );
+    return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;
 }
 
 export function useScan() {

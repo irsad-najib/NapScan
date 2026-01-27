@@ -67,7 +67,7 @@ export function ToolMetadata({ toolData, target }: ToolMetadataProps) {
 
             {/* Metadata Grid */}
             <div className="p-6 border-b border-slate-200 dark:border-slate-800">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {metadata.map((item) => (
                         <div key={item.label}>
                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">{item.label}</p>

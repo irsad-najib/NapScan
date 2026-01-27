@@ -32,46 +32,59 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
+  // Calculate stats dynamically
+  const totalTargets = new Set(batches.map((b) => b.target)).size;
+  const activeScans = batches.filter((b) =>
+    ["processing", "running", "scanning", "pending"].includes(b.status.toLowerCase())
+  ).length;
+  const criticalRisks = batches.filter((b) =>
+    ["critical", "high"].includes((b.risk_level || "").toLowerCase())
+  ).length;
+  const completedScans = batches.filter((b) =>
+    ["completed", "finished"].includes(b.status.toLowerCase())
+  ).length;
+  const successRate = batches.length > 0 ? Math.round((completedScans / batches.length) * 100) : 0;
+
   const stats = [
     {
       label: "Total Targets",
-      value: "124",
-      trend: "+5%",
+      value: totalTargets.toString(),
+      trend: batches.length > 0 ? "Tracked" : "No Data", // Simplified trend
       trendUp: true,
       icon: "target",
       bgColor: "bg-gradient-to-br from-blue-600 to-blue-400",
       borderColor: "border-blue-500/30",
-      iconColor: "text-black-400",
+      iconColor: "text-blue-100",
     },
     {
       label: "Active Scans",
-      value: "3",
-      trend: "Running",
-      trendUp: true,
+      value: activeScans.toString(),
+      trend: activeScans > 0 ? "Running" : "Idle",
+      trendUp: activeScans > 0,
       icon: "radar",
       bgColor: "bg-gradient-to-br from-cyan-600 to-cyan-400",
       borderColor: "border-cyan-500/30",
-      iconColor: "text-black-400",
+      iconColor: "text-cyan-100",
     },
     {
-      label: "Critical Vulns",
-      value: "12",
-      trend: "+5%",
-      trendUp: true,
+      label: "Critical/High Risks",
+      value: criticalRisks.toString(),
+      trend: criticalRisks > 0 ? "Action Needed" : "Secure",
+      trendUp: criticalRisks === 0, // Green if 0
       icon: "warning",
       bgColor: "bg-gradient-to-br from-red-600 to-red-400",
       borderColor: "border-red-500/30",
-      iconColor: "text-black-400",
+      iconColor: "text-red-100",
     },
     {
-      label: "Remediation Rate",
-      value: "85%",
-      trend: "+12%",
-      trendUp: true,
+      label: "Success Rate",
+      value: `${successRate}%`,
+      trend: "Completion",
+      trendUp: successRate >= 80,
       icon: "check_circle",
       bgColor: "bg-gradient-to-br from-emerald-600 to-emerald-400",
       borderColor: "border-emerald-500/30",
-      iconColor: "text-black-400",
+      iconColor: "text-emerald-100",
     },
   ];
 
@@ -82,6 +95,8 @@ export default function Home() {
       case "scanning":
         return "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30";
       case "completed":
+      case "complete":
+      case "success":
       case "finished":
         return "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30";
       case "idle":
@@ -94,6 +109,26 @@ export default function Home() {
         return "bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30";
     }
   };
+
+  const filteredBatches = batches.filter(batch => {
+    if (statusFilter === "All Statuses") return true;
+
+    const status = batch.status.toLowerCase();
+
+    if (statusFilter === "Processing") {
+      return ["processing", "running", "scanning", "pending"].includes(status);
+    }
+
+    if (statusFilter === "Completed") {
+      return ["completed", "finished", "success", "complete"].includes(status);
+    }
+
+    if (statusFilter === "Failed") {
+      return status === "failed";
+    }
+
+    return true;
+  });
 
   const getRiskColor = (riskLevel: string | null) => {
     if (!riskLevel) return "text-slate-600 dark:text-slate-400";
@@ -236,14 +271,14 @@ export default function Home() {
                             Loading batches...
                           </td>
                         </tr>
-                      ) : batches.length === 0 ? (
+                      ) : filteredBatches.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                            No scans found.
+                            No scans found matching your filter.
                           </td>
                         </tr>
                       ) : (
-                        batches.map((batch) => (
+                        filteredBatches.map((batch) => (
                           <tr
                             key={batch.batch_id}
                             className="group hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors duration-150">
@@ -319,7 +354,7 @@ export default function Home() {
                 {/* Pagination */}
                 <div className="bg-slate-100 dark:bg-slate-700/30 border-t border-slate-200 dark:border-slate-700 px-6 py-4 flex items-center justify-between">
                   <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
-                    Showing {batches.length} entries
+                    Showing {filteredBatches.length} entries
                   </p>
                   <div className="flex items-center gap-2.5">
                     <button
