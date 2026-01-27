@@ -14,13 +14,61 @@ func NewNmapParser() *NmapParser {
 }
 
 // High-risk ports that should trigger HIGH severity
-var highRiskPorts = map[int]bool{
-	21:   true, // FTP
-	23:   true, // Telnet
-	445:  true, // SMB
-	3389: true, // RDP
-	1433: true, // MSSQL
-	3306: true, // MySQL
+var portRiskScore = map[int]int{
+	// Remote Access
+	21:   80,
+	22:   70,
+	23:   90,
+	3389: 95,
+	5900: 85,
+
+	// Web
+	80:   40,
+	443:  30,
+	8080: 60,
+	8000: 60,
+	8888: 65,
+	3000: 50,
+	5000: 50,
+	5173: 50,
+	4200: 50,
+
+	// Database
+	1433:  90,
+	3306:  85,
+	5432:  80,
+	27017: 90,
+	6379:  90,
+	9200:  85,
+	1521:  85,
+
+	// File Sharing
+	445:  95,
+	139:  80,
+	2049: 85,
+	69:   70,
+
+	// Mail
+	25:  60,
+	110: 60,
+	143: 60,
+	465: 60,
+	587: 60,
+	993: 60,
+	995: 60,
+
+	// Infra
+	2375:  95,
+	6443:  95,
+	10250: 90,
+	5601:  80,
+	9090:  70,
+
+	// Network
+	53:  50,
+	123: 50,
+	161: 70,
+	389: 70,
 }
 
 func (p *NmapParser) Parse(rawResult interface{}) (*ParsedResult, error) {
@@ -35,14 +83,36 @@ func (p *NmapParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		return nil, fmt.Errorf("nmap result is not a map")
 	}
 
-	// Extract hosts
-	hosts, ok := resultMap["hosts"].([]interface{})
-	if !ok {
+	// Collect hosts from multiple possible locations
+	var hosts []interface{}
+
+	// 1. Direct "hosts" array (flat structure)
+	if h, ok := resultMap["hosts"].([]interface{}); ok {
+		hosts = append(hosts, h...)
+	}
+
+	// 2. "tcp" -> "hosts" structure
+	if tcp, ok := resultMap["tcp"].(map[string]interface{}); ok {
+		if h, ok := tcp["hosts"].([]interface{}); ok {
+			hosts = append(hosts, h...)
+		}
+	}
+
+	// 3. "udp" -> "hosts" structure
+	if udp, ok := resultMap["udp"].(map[string]interface{}); ok {
+		if h, ok := udp["hosts"].([]interface{}); ok {
+			hosts = append(hosts, h...)
+		}
+	}
+
+	if len(hosts) == 0 {
 		return result, nil // No hosts found
 	}
 
 	var allPorts []string
 	var riskyPorts []string
+	var totalPortRisk int
+	var highestPortRisk int
 
 	for _, h := range hosts {
 		hostMap, ok := h.(map[string]interface{})
@@ -50,8 +120,23 @@ func (p *NmapParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 			continue
 		}
 
-		ports, ok := hostMap["ports"].([]interface{})
-		if !ok {
+
+		// Nmap JSON structure can be tricky due to XML-to-JSON conversion or Struct layout
+		// Check if "ports" is a map (Struct wrapper) or array
+		var ports []interface{}
+		
+
+		if portsMap, ok := hostMap["ports"].(map[string]interface{}); ok {
+			// Found struct wrapper, look for inner "ports" array
+			if p, ok := portsMap["ports"].([]interface{}); ok {
+				ports = p
+			}
+		} else if p, ok := hostMap["ports"].([]interface{}); ok {
+			// Direct array (unlikely with current model, but good fallback)
+			ports = p
+		}
+
+		if ports == nil {
 			continue
 		}
 
@@ -63,18 +148,33 @@ func (p *NmapParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 
 			// Get port ID
 			var portID int
-			if portNum, ok := portMap["portid"].(json.Number); ok {
+			if portNum, ok := portMap["port"].(json.Number); ok {
 				pid, _ := portNum.Int64()
 				portID = int(pid)
-			} else if portNum, ok := portMap["portid"].(float64); ok {
+			} else if portNum, ok := portMap["port"].(float64); ok {
 				portID = int(portNum)
+			} else if portStr, ok := portMap["port"].(string); ok {
+				var pid int
+				if _, err := fmt.Sscanf(portStr, "%d", &pid); err == nil {
+					portID = pid
+				} else {
+					continue
+				}
 			} else {
 				continue
 			}
 
 			// Get service name
 			serviceName := "unknown"
-			if service, ok := portMap["service"].(map[string]interface{}); ok {
+			var service map[string]interface{}
+			
+			if s, ok := portMap["service"].(map[string]interface{}); ok {
+				service = s
+			} else if s, ok := portMap["Service"].(map[string]interface{}); ok {
+				service = s
+			}
+
+			if service != nil {
 				if name, ok := service["name"].(string); ok {
 					serviceName = name
 				}
@@ -84,48 +184,40 @@ func (p *NmapParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 			allPorts = append(allPorts, portStr)
 
 			// Check if it's a high-risk port
-			if highRiskPorts[portID] {
+			if risk, ok := portRiskScore[portID]; ok {
 				riskyPorts = append(riskyPorts, portStr)
+				totalPortRisk += risk
+
+				if risk > highestPortRisk {
+					highestPortRisk = risk
+				}
 			}
 		}
 	}
 
 	// Create findings based on ports discovered
-	if len(riskyPorts) > 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "high",
-			Title:       "High-Risk Ports Open",
-			Description: fmt.Sprintf("Found %d high-risk ports open", len(riskyPorts)),
-			RawData:     riskyPorts,
-		})
-	} else if len(allPorts) >= 5 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "medium",
-			Title:       "Multiple Ports Open",
-			Description: fmt.Sprintf("Found %d open ports", len(allPorts)),
-			RawData:     allPorts,
-		})
+	severity := "info"
+
+	if highestPortRisk >= 90 {
+		severity = "high"
+	} else if highestPortRisk >= 70 {
+		severity = "medium"
 	} else if len(allPorts) > 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "low",
-			Title:       "Open Ports Detected",
-			Description: fmt.Sprintf("Found %d open ports", len(allPorts)),
-			RawData:     allPorts,
-		})
-	} else {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "info",
-			Title:       "No Open Ports",
-			Description: "No open ports detected",
-			RawData:     []string{},
-		})
+		severity = "low"
 	}
+	result.Findings = append(result.Findings, Finding{
+		Severity:    severity,
+		Title:       "Open Ports Detected",
+		Description: fmt.Sprintf("Found %d open ports (%d risky)", len(allPorts), len(riskyPorts)),
+		RawData:     allPorts,
+	})
 
 	result.Metadata["total_ports"] = len(allPorts)
 	result.Metadata["risky_ports"] = len(riskyPorts)
 
 	return result, nil
 }
+
 
 func (p *NmapParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, error) {
 	detail := &models.ScannerRiskDetail{
@@ -162,7 +254,7 @@ func (p *NmapParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail,
 	if findingCount == 0 {
 		findingCount = 1 // Avoid zero multiplication
 	}
-	detail.Score = baseScore * findingCount
+	detail.Score = baseScore*10 + findingCount*2
 
 	return detail, nil
 }

@@ -251,12 +251,128 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/models.Batch"
+                                "$ref": "#/definitions/models.BatchSummaryResponse"
                             }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/batch/{batch_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get detailed information about a specific batch including normalized risk calculation and scan results",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Batch"
+                ],
+                "summary": "Get Batch Detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Batch ID",
+                        "name": "batch_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.BatchDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/batch/{batch_id}/report": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Generate a PDF report for a specific batch and download it",
+                "produces": [
+                    "application/pdf"
+                ],
+                "tags": [
+                    "Batch"
+                ],
+                "summary": "Download Batch Report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Batch ID",
+                        "name": "batch_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF Content",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -2040,44 +2156,64 @@ const docTemplate = `{
                 }
             }
         },
-        "models.Batch": {
+        "models.BatchDetailResponse": {
             "type": "object",
             "properties": {
-                "analysis_result": {},
                 "batch_id": {
                     "type": "string"
                 },
                 "created_at": {
                     "type": "string"
                 },
-                "expected_count": {
-                    "type": "integer"
+                "risk_detail": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ScannerRiskDetail"
+                    }
                 },
-                "received_count": {
-                    "type": "integer"
+                "risk_level": {
+                    "$ref": "#/definitions/models.NormalizedSeverity"
                 },
-                "results": {
-                    "type": "object",
-                    "additionalProperties": true
+                "risk_score": {
+                    "type": "number"
+                },
+                "scan_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ScanResultSummary"
+                    }
                 },
                 "status": {
-                    "$ref": "#/definitions/models.BatchStatus"
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
                 },
                 "user_id": {
                     "type": "string"
                 }
             }
         },
-        "models.BatchStatus": {
-            "type": "string",
-            "enum": [
-                "processing",
-                "complete"
-            ],
-            "x-enum-varnames": [
-                "BatchStatusProcessing",
-                "BatchStatusComplete"
-            ]
+        "models.BatchSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "batch_id": {
+                    "type": "string"
+                },
+                "risk_details": {},
+                "risk_score": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
         },
         "models.GoogleAuthRequest": {
             "type": "object",
@@ -2133,6 +2269,23 @@ const docTemplate = `{
                 }
             }
         },
+        "models.NormalizedSeverity": {
+            "type": "string",
+            "enum": [
+                "INFO",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+            ],
+            "x-enum-varnames": [
+                "SeverityInfo",
+                "SeverityLow",
+                "SeverityMedium",
+                "SeverityHigh",
+                "SeverityCritical"
+            ]
+        },
         "models.Port": {
             "type": "object",
             "properties": {
@@ -2158,6 +2311,30 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.Port"
                     }
+                }
+            }
+        },
+        "models.ScanResultSummary": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "result": {
+                    "description": "Raw result",
+                    "type": "object"
+                },
+                "summary": {
+                    "description": "Dynamic summary based on tool"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "tool": {
+                    "type": "string"
                 }
             }
         },
@@ -2190,13 +2367,7 @@ const docTemplate = `{
                 "progress": {
                     "type": "integer"
                 },
-                "result": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": true
-                    }
-                },
+                "result": {},
                 "started_at": {
                     "description": "RFC3339 format",
                     "type": "string"
@@ -2216,6 +2387,29 @@ const docTemplate = `{
                 },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "models.ScannerRiskDetail": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "normalized_severity": {
+                    "$ref": "#/definitions/models.NormalizedSeverity"
+                },
+                "scanner": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
                 }
             }
         },

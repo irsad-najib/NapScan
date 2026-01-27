@@ -1,7 +1,6 @@
 package models
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 
@@ -14,10 +13,10 @@ type ScanResult struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	BatchID   string    `json:"batch_id" gorm:"type:varchar(191);index"`
 	Tool      string    `json:"tool" gorm:"type:varchar(64)"`
-	Target    string    `json:"target" gorm:"type:varchar(255)"`
-	ResultRaw []byte    `json:"-" gorm:"column:result"`
-	Result    interface{} `json:"result" gorm:"-"`
-	CreatedAt time.Time `json:"created_at"`
+	Target    string          `json:"target" gorm:"type:varchar(255)"`
+	ResultRaw json.RawMessage `json:"result" gorm:"column:result" swaggertype:"object"`
+	Result    interface{}     `json:"-" gorm:"-"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // ScanResultSummary represents a cleansed version of the scan result
@@ -25,23 +24,20 @@ type ScanResult struct {
 type ScanResultSummary struct {
 	ID        uint        `json:"id"`
 	Tool      string      `json:"tool"`
-	Target    string      `json:"target"`
-	Summary   interface{} `json:"summary"` // Dynamic summary based on tool
-	CreatedAt time.Time   `json:"created_at"`
+	Target    string          `json:"target"`
+	Summary   interface{}     `json:"summary"` // Dynamic summary based on tool
+	Result    json.RawMessage `json:"result,omitempty" swaggertype:"object"` // Raw result
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 func (sr *ScanResult) BeforeSave(tx *gorm.DB) (err error) {
-	if sr.Result != nil {
+	if sr.Result != nil && sr.ResultRaw == nil {
 		sr.ResultRaw, err = json.Marshal(sr.Result)
 	}
 	return
 }
 
 func (sr *ScanResult) AfterFind(tx *gorm.DB) (err error) {
-	if sr.ResultRaw != nil {
-		decoder := json.NewDecoder(bytes.NewReader(sr.ResultRaw))
-		decoder.UseNumber()
-		err = decoder.Decode(&sr.Result)
-	}
+	// Disable auto-decoding
 	return
 }

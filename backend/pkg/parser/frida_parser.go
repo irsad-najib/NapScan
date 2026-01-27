@@ -12,7 +12,21 @@ func NewFridaParser() *FridaParser {
 	return &FridaParser{}
 }
 
+var fridaRiskKeywords = map[string]int{
+	"ssl unpin": 90,
+	"unpinning": 90,
+	"bypass": 85,
+	"hooked": 80,
+	"hook success": 80,
+	"anti-debug": 85,
+	"root bypass": 85,
+	"jailbreak bypass": 85,
+	"detected": 50,
+	"found": 50,
+}
+
 func (p *FridaParser) Parse(rawResult interface{}) (*ParsedResult, error) {
+	highestRisk := 0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -34,75 +48,66 @@ func (p *FridaParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 				// Keyword matching for risk
 				lowerLog := strings.ToLower(logLine)
 				
-				if strings.Contains(lowerLog, "bypass") || strings.Contains(lowerLog, "unpinning") {
-					result.Findings = append(result.Findings, Finding{
-						Severity:    "high",
-						Title:       "Security Control Bypassed",
-						Description: logLine,
-						RawData:     logLine,
-					})
-				} else if strings.Contains(lowerLog, "detect") || strings.Contains(lowerLog, "found") {
-					// "Root detected" -> High risk mostly
-					result.Findings = append(result.Findings, Finding{
-						Severity:    "medium",
-						Title:       "Security Check Triggered",
-						Description: logLine,
-						RawData:     logLine,
-					})
-				} else if strings.Contains(lowerLog, "fail") || strings.Contains(lowerLog, "error") {
-					// Operational issue or maybe check failed?
-					// Usually implies app crashed or detection worked (good for blue, bad for red team perspective?)
-					// Assuming risk engine measures "Risk to the App". 
-					// If App Detects Frida -> It has defenses -> Lower Risk?
-					// OR Risk Engine measures "Vulnerabilities".
-					// If Frida Bypasses SSL -> Vulnerability -> High Risk.
-					// If Root Detected -> Defense working -> Low Risk (Good).
-					// BUT usually "Root Detected" in a report means "We found it has root detection". A pen test report usually lists defenses.
-					// Let's assume finding = vulnerability.
-					// So "Bypass" is the main finding.
+				for keyword, risk := range fridaRiskKeywords {
+					if strings.Contains(lowerLog, keyword) {
+
+						result.Findings = append(result.Findings, Finding{
+							Severity: "info", // placeholder
+							Title: "Frida Finding",
+							Description: logLine,
+							RawData: logLine,
+						})
+
+						if risk > highestRisk {
+							highestRisk = risk
+						}
+						break
+					}
 				}
 			}
 		}
 	}
 
-	result.Metadata["total_findings"] = len(result.Findings)
+	result.Metadata["highest_risk"] = highestRisk
 	return result, nil
 }
 
 func (p *FridaParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, error) {
 	detail := &models.ScannerRiskDetail{
-		Scanner:  "frida",
+		Scanner: "frida",
 		Findings: []string{},
 	}
 
-	highestSeverity := models.SeverityInfo
-	var allFindings []string
-
-	for _, finding := range parsed.Findings {
-		normalized := models.NormalizeSeverity(finding.Severity)
-		if models.GetSeverityScore(normalized) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized
-		}
-		allFindings = append(allFindings, finding.Description)
+	highestRisk := 0
+	if v, ok := parsed.Metadata["highest_risk"].(int); ok {
+		highestRisk = v
 	}
 
-	detail.NormalizedSeverity = highestSeverity
+	var allFindings []string
+	for _, f := range parsed.Findings {
+		allFindings = append(allFindings, f.Description)
+	}
+
+	finalSeverity := models.SeverityInfo
+	switch {
+	case highestRisk >= 90:
+		finalSeverity = models.SeverityCritical
+	case highestRisk >= 75:
+		finalSeverity = models.SeverityHigh
+	case highestRisk >= 50:
+		finalSeverity = models.SeverityMedium
+	case highestRisk >= 30:
+		finalSeverity = models.SeverityLow
+	}
+
+	detail.NormalizedSeverity = finalSeverity
 	detail.Description = "Dynamic analysis findings from Frida"
 	detail.Findings = allFindings
 
-	// Calculate Score: High if Bypasses found
-	baseScore := models.GetSeverityScore(highestSeverity)
 	findingCount := float64(len(allFindings))
 	if findingCount == 0 { findingCount = 1 }
-	
-	detail.Score = baseScore * findingCount
-	
-	// Check status
-	if parsed.Metadata["status"] == "failed" {
-		// If script failed, maybe risk is unknown? 
-		// Or assume info
-	}
 
+	detail.Score = float64(highestRisk)*10 + findingCount*2
 	return detail, nil
 }
 

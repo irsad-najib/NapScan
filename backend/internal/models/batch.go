@@ -1,7 +1,6 @@
 package models
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 
@@ -22,43 +21,34 @@ type Batch struct {
 	BatchID           string                 `json:"batch_id" gorm:"primaryKey;type:varchar(191)"`
 	ExpectedCount     int                    `json:"expected_count"`
 	ReceivedCount     int                    `json:"received_count"`
-	ResultsRaw        []byte                 `json:"-" gorm:"column:results"`
-	Results           map[string]interface{} `json:"results" gorm:"-"`
+	ResultsRaw        json.RawMessage        `json:"results" gorm:"column:results" swaggertype:"object"`
+	Results           map[string]interface{} `json:"-" gorm:"-"`
 	ScanResults       []ScanResult           `json:"-" gorm:"foreignKey:BatchID;references:BatchID"`   // Relation for getting target (Nmap/etc)
 	UploadedFiles     []UploadedFile         `json:"-" gorm:"foreignKey:BatchID;references:BatchID"`   // Relation for getting target (APK)
 	Status            BatchStatus            `json:"status" gorm:"type:varchar(32)"`
-	AnalysisResultRaw []byte                 `json:"-" gorm:"column:analysis_result"`
+	ReportPath        string                 `json:"report_path" gorm:"type:varchar(512)"`
+	AnalysisResultRaw json.RawMessage        `json:"analysis_result_raw,omitempty" gorm:"column:analysis_result" swaggertype:"object"`
 	AnalysisResult    interface{}            `json:"analysis_result,omitempty" gorm:"-"`
 	CreatedAt         time.Time              `json:"created_at"`
 }
 
 func (b *Batch) BeforeSave(tx *gorm.DB) (err error) {
-	if b.Results != nil {
+	// Manual hooks if needed, but we prefer writing directly to Raw fields
+	if b.Results != nil && b.ResultsRaw == nil {
 		b.ResultsRaw, err = json.Marshal(b.Results)
 		if err != nil {
 			return err
 		}
 	}
-	if b.AnalysisResult != nil {
+	if b.AnalysisResult != nil && b.AnalysisResultRaw == nil {
 		b.AnalysisResultRaw, err = json.Marshal(b.AnalysisResult)
 	}
 	return
 }
 
 func (b *Batch) AfterFind(tx *gorm.DB) (err error) {
-	if b.ResultsRaw != nil {
-		decoder := json.NewDecoder(bytes.NewReader(b.ResultsRaw))
-		decoder.UseNumber()
-		err = decoder.Decode(&b.Results)
-		if err != nil {
-			return err
-		}
-	}
-	if b.AnalysisResultRaw != nil {
-		decoder := json.NewDecoder(bytes.NewReader(b.AnalysisResultRaw))
-		decoder.UseNumber()
-		err = decoder.Decode(&b.AnalysisResult)
-	}
+	// Disable auto-decoding to save performance
+	// If specific logic needs Structs, it must decode manually
 	return
 }
 

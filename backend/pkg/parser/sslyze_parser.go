@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"napscan-be/internal/models"
 	"sort"
+	"strings"
 )
 
 type SSLyzeParser struct{}
@@ -12,7 +13,16 @@ func NewSSLyzeParser() *SSLyzeParser {
 	return &SSLyzeParser{}
 }
 
+var sslyzeRiskMap = map[string]int{
+	"ssl2": 95,
+	"ssl3": 95,
+	"tls1.0": 80,
+	"tls1.1": 60,
+	"weak_cipher": 65,
+}
+
 func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
+	highestRisk := 0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -43,11 +53,14 @@ func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		if ssl20, ok := scanCmds["ssl_2_0_cipher_suites"].(map[string]interface{}); ok {
 			if accepted, ok := ssl20["accepted_cipher_suites"].([]interface{}); ok && len(accepted) > 0 {
 				result.Findings = append(result.Findings, Finding{
-					Severity:    "critical",
+					Severity:    "info",
 					Title:       "SSL 2.0/3.0 Enabled",
 					Description: "SSL 2.0/3.0 accepted (deprecated and insecure)",
 					RawData:     accepted,
 				})
+				if sslyzeRiskMap["ssl2"] > highestRisk {
+					highestRisk = sslyzeRiskMap["ssl2"]
+				}
 			}
 		}
 
@@ -60,6 +73,9 @@ func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 					Description: "TLS 1.0 enabled (deprecated)",
 					RawData:     accepted,
 				})
+				if sslyzeRiskMap["tls1.0"] > highestRisk {
+					highestRisk = sslyzeRiskMap["tls1.0"]
+				}
 			}
 		}
 
@@ -72,6 +88,9 @@ func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 					Description: "TLS 1.1 enabled (should upgrade to TLS 1.2+)",
 					RawData:     accepted,
 				})
+				if sslyzeRiskMap["tls1.1"] > highestRisk {
+					highestRisk = sslyzeRiskMap["tls1.1"]
+				}
 			}
 		}
 
@@ -89,6 +108,9 @@ func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 										Description: fmt.Sprintf("Weak cipher suite: %s", name),
 										RawData:     cipherMap,
 									})
+									if sslyzeRiskMap["weak_cipher"] > highestRisk {
+										highestRisk = sslyzeRiskMap["weak_cipher"]
+									}
 								}
 							}
 						}
@@ -107,7 +129,7 @@ func (p *SSLyzeParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		})
 	}
 
-	result.Metadata["total_findings"] = len(result.Findings)
+	result.Metadata["highest_risk"] = highestRisk
 
 	return result, nil
 }
@@ -118,31 +140,40 @@ func (p *SSLyzeParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetai
 		Findings: []string{},
 	}
 
-	highestSeverity := models.SeverityInfo
+	highestRisk := 0
+	if v, ok := parsed.Metadata["highest_risk"].(int); ok {
+		highestRisk = v
+	}
+
 	var allFindings []string
-
 	for _, finding := range parsed.Findings {
-		normalized := models.NormalizeSeverity(finding.Severity)
-		if models.GetSeverityScore(normalized) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized
-		}
-
 		allFindings = append(allFindings, finding.Description)
 	}
 
-	detail.NormalizedSeverity = highestSeverity
+	finalSeverity := models.SeverityInfo
+	switch {
+	case highestRisk >= 90:
+		finalSeverity = models.SeverityCritical
+	case highestRisk >= 75:
+		finalSeverity = models.SeverityHigh
+	case highestRisk >= 50:
+		finalSeverity = models.SeverityMedium
+	case highestRisk >= 30:
+		finalSeverity = models.SeverityLow
+	}
+
+	detail.NormalizedSeverity = finalSeverity
 	detail.Description = "SSL/TLS configuration weaknesses identified"
-	
+
 	sort.Strings(allFindings)
 	detail.Findings = allFindings
 
-	baseScore := models.GetSeverityScore(highestSeverity)
 	findingCount := float64(len(allFindings))
 	if findingCount == 0 {
 		findingCount = 1
 	}
-	detail.Score = baseScore * findingCount
 
+	detail.Score = float64(highestRisk)*10 + findingCount*2
 	return detail, nil
 }
 
@@ -190,33 +221,12 @@ func (p *SSLyzeParser) ParseAndNormalize(rawResults []models.ScanResult) (*model
 
 // Helper function to identify weak ciphers
 func isWeakCipher(cipherName string) bool {
-	weakCiphers := []string{
-		"3DES",
-		"RC4",
-		"MD5",
-		"NULL",
-		"EXPORT",
-		"anon",
-	}
-
-	for _, weak := range weakCiphers {
-		if contains(cipherName, weak) {
+	weak := []string{"3DES", "RC4", "MD5", "NULL", "EXPORT", "anon"}
+	for _, w := range weak {
+		if strings.Contains(strings.ToUpper(cipherName), w) {
 			return true
 		}
 	}
 	return false
 }
 
-// Helper function for string contains check
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || indexOfSubstring(s, substr) >= 0))
-}
-
-func indexOfSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}

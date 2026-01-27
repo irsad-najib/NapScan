@@ -131,7 +131,7 @@ func (h *ScanHandler) GetReport(c *fiber.Ctx) error {
 			"report not available: scan is not completed (current status: " + string(task.Status) + ")", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Report retrieved: task_id=%s, results=%d", taskID, len(task.Result))
+	log.Printf("[SCAN_HANDLER] Report retrieved: task_id=%s", taskID)
 
 	return response.Success(c, "report retrieved successfully", fiber.Map{
 		"task_id": task.TaskID,

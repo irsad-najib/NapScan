@@ -189,7 +189,7 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 					BatchID:   task.BatchID,
 					Tool:      "ffuf",
 					Target:    task.Target,
-					Result:    task.Result,
+					ResultRaw: task.ResultRaw,
 					CreatedAt: time.Now().UTC(),
 				})
 				if dbErr != nil {

@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.User{}, &models.ScanResult{}, &models.Batch{}, &models.UploadedFile{})
+	err = db.AutoMigrate(&models.User{}, &models.Batch{}, &models.ScanResult{}, &models.UploadedFile{})
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate models: %v", err)
 	}
@@ -135,6 +135,7 @@ func main() {
 	sslyzeService := service.NewSslyzeService()
 	batchService := service.NewBatchService(batchRepo, scanResultRepo)
 	lifecycleService := service.NewLifecycleService(db)
+	reportService := service.NewReportService()
 	
 	// Initialize global ScanManager for async scan orchestration
 	scanManager := service.NewScanManager()
@@ -155,7 +156,7 @@ func main() {
 	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService, lifecycleService)
 
 	// Auth & Batch Handlers
-	batchHandler := handler.NewBatchHandler(batchService)
+	batchHandler := handler.NewBatchHandler(batchService, reportService)
 
 	// Health Check Route (public, so defined on `app`, not `api`)
 	app.Get("/health", func(c *fiber.Ctx) error {

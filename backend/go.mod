@@ -3,6 +3,7 @@ module napscan-be
 go 1.25.2
 
 require (
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/gofiber/swagger v1.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.0

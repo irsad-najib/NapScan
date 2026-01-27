@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -25,7 +26,8 @@ type ScanTask struct {
 	Status    ScanStatus               `json:"status"`
 	Progress  int                      `json:"progress"`
 	Error     *string                  `json:"error"`
-	Result    []map[string]interface{} `json:"result"`
+	ResultRaw json.RawMessage          `json:"result_raw" swaggertype:"object"`
+	Result    interface{}              `json:"result,omitempty"` // Flexible result type
 	StartedAt time.Time                `json:"started_at"`
 	UpdatedAt time.Time                `json:"updated_at"`
 
@@ -42,7 +44,7 @@ type ScanTaskResponse struct {
 	Status    ScanStatus               `json:"status"`
 	Progress  int                      `json:"progress"`
 	Error     *string                  `json:"error"`
-	Result    []map[string]interface{} `json:"result"`
+	Result    interface{}              `json:"result"`
 	StartedAt string                   `json:"started_at"` // RFC3339 format
 	UpdatedAt string                   `json:"updated_at"` // RFC3339 format
 }

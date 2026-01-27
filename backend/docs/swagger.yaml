@@ -58,33 +58,45 @@ definitions:
       user:
         $ref: '#/definitions/models.User'
     type: object
-  models.Batch:
+  models.BatchDetailResponse:
     properties:
-      analysis_result: {}
       batch_id:
         type: string
       created_at:
         type: string
-      expected_count:
-        type: integer
-      received_count:
-        type: integer
-      results:
-        additionalProperties: true
-        type: object
+      risk_detail:
+        items:
+          $ref: '#/definitions/models.ScannerRiskDetail'
+        type: array
+      risk_level:
+        $ref: '#/definitions/models.NormalizedSeverity'
+      risk_score:
+        type: number
+      scan_results:
+        items:
+          $ref: '#/definitions/models.ScanResultSummary'
+        type: array
       status:
-        $ref: '#/definitions/models.BatchStatus'
+        type: string
+      target:
+        type: string
       user_id:
         type: string
     type: object
-  models.BatchStatus:
-    enum:
-    - processing
-    - complete
-    type: string
-    x-enum-varnames:
-    - BatchStatusProcessing
-    - BatchStatusComplete
+  models.BatchSummaryResponse:
+    properties:
+      batch_id:
+        type: string
+      risk_details: {}
+      risk_score:
+        type: integer
+      status:
+        type: string
+      target:
+        type: string
+      timestamp:
+        type: string
+    type: object
   models.GoogleAuthRequest:
     properties:
       id_token:
@@ -121,6 +133,20 @@ definitions:
           $ref: '#/definitions/models.Host'
         type: array
     type: object
+  models.NormalizedSeverity:
+    enum:
+    - INFO
+    - LOW
+    - MEDIUM
+    - HIGH
+    - CRITICAL
+    type: string
+    x-enum-varnames:
+    - SeverityInfo
+    - SeverityLow
+    - SeverityMedium
+    - SeverityHigh
+    - SeverityCritical
   models.Port:
     properties:
       port:
@@ -138,6 +164,22 @@ definitions:
         items:
           $ref: '#/definitions/models.Port'
         type: array
+    type: object
+  models.ScanResultSummary:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      result:
+        description: Raw result
+        type: object
+      summary:
+        description: Dynamic summary based on tool
+      target:
+        type: string
+      tool:
+        type: string
     type: object
   models.ScanStatus:
     enum:
@@ -161,11 +203,7 @@ definitions:
         type: string
       progress:
         type: integer
-      result:
-        items:
-          additionalProperties: true
-          type: object
-        type: array
+      result: {}
       started_at:
         description: RFC3339 format
         type: string
@@ -180,6 +218,21 @@ definitions:
         type: string
       user_id:
         type: string
+    type: object
+  models.ScannerRiskDetail:
+    properties:
+      description:
+        type: string
+      findings:
+        items:
+          type: string
+        type: array
+      normalized_severity:
+        $ref: '#/definitions/models.NormalizedSeverity'
+      scanner:
+        type: string
+      score:
+        type: number
     type: object
   models.Service:
     properties:
@@ -347,6 +400,81 @@ paths:
       summary: Get Current User
       tags:
       - Auth
+  /batch/{batch_id}:
+    get:
+      description: Get detailed information about a specific batch including normalized
+        risk calculation and scan results
+      parameters:
+      - description: Batch ID
+        in: path
+        name: batch_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BatchDetailResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get Batch Detail
+      tags:
+      - Batch
+  /batch/{batch_id}/report:
+    get:
+      description: Generate a PDF report for a specific batch and download it
+      parameters:
+      - description: Batch ID
+        in: path
+        name: batch_id
+        required: true
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: PDF Content
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Download Batch Report
+      tags:
+      - Batch
   /batch/create:
     post:
       description: Generate a unique batch ID for the authenticated user
@@ -383,7 +511,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/models.Batch'
+              $ref: '#/definitions/models.BatchSummaryResponse'
             type: array
         "401":
           description: Unauthorized

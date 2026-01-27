@@ -14,18 +14,80 @@ func NewFFUFParser() *FFUFParser {
 }
 
 // Sensitive paths that should trigger HIGH severity when found with 200 status
-var sensitivePaths = map[string]bool{
-	"/admin":     true,
-	"/backup":    true,
-	"/.git":      true,
-	"/.env":      true,
-	"/.svn":      true,
-	"/config":    true,
-	"/database":  true,
-	"/.aws":      true,
-	"/api/keys":  true,
-	"/phpinfo":   true,
-	"/phpmyadmin": true,
+var sensitivePathRisk = map[string]int{
+
+	// ===== Source Control / Secrets =====
+	"/.git":        95,
+	"/.git/config": 95,
+	"/.svn":        90,
+	"/.hg":         90,
+	"/.env":        95,
+	"/.env.local":  95,
+	"/secrets":     95,
+	"/secret":      95,
+	"/credentials": 95,
+	"/id_rsa":      95,
+	"/.ssh":        95,
+
+	// ===== Config Files =====
+	"/config":        70,
+	"/config.php":    85,
+	"/settings.php":  85,
+	"/web.config":   85,
+	"/application.yml": 80,
+	"/application.properties": 80,
+
+	// ===== Backup / Dump =====
+	"/backup":     85,
+	"/backups":    85,
+	"/backup.zip": 90,
+	"/backup.sql": 95,
+	"/dump.sql":   95,
+	"/db.sql":     95,
+	"/database.sql": 95,
+	"/site.bak":   90,
+
+	// ===== Admin Panels =====
+	"/admin":          80,
+	"/administrator":  80,
+	"/adminpanel":     80,
+	"/manage":         75,
+	"/management":     75,
+	"/cpanel":         80,
+	"/dashboard":      70,
+
+	// ===== CMS Specific =====
+	"/wp-admin":     80,
+	"/wp-login":     80,
+	"/wp-config":    95,
+	"/joomla":       70,
+	"/administrator/index.php": 80,
+
+	// ===== Database Tools =====
+	"/phpmyadmin": 95,
+	"/pma":        95,
+	"/adminer":    90,
+
+	// ===== Debug / Info Leak =====
+	"/phpinfo":     90,
+	"/info.php":    90,
+	"/debug":       80,
+	"/debugbar":    80,
+	"/error.log":   85,
+	"/logs":        75,
+
+	// ===== Cloud / DevOps =====
+	"/.aws":            95,
+	"/.docker":         80,
+	"/docker-compose.yml": 90,
+	"/kubeconfig":      95,
+	"/.kube":           95,
+
+	// ===== API / Keys =====
+	"/api/keys": 95,
+	"/apikey":   95,
+	"/token":    90,
+	"/tokens":   90,
 }
 
 func (p *FFUFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
@@ -47,6 +109,9 @@ func (p *FFUFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 	var status200 []string
 	var status200Sensitive []string
 	var status403 []string
+
+	totalPathRisk := 0
+	highestPathRisk := 0
 
 	for _, r := range results {
 		resObj, ok := r.(map[string]interface{})
@@ -70,52 +135,40 @@ func (p *FFUFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 
 		switch status {
 		case 200:
-			if isSensitivePath(path) {
-				status200Sensitive = append(status200Sensitive, fmt.Sprintf("%s (200)", path))
+			if risk := getSensitivePathRisk(path); risk > 0 {
+				status200Sensitive = append(
+					status200Sensitive,
+					fmt.Sprintf("%s (200)", path),
+				)
+				totalPathRisk += risk
+				if risk > highestPathRisk {
+					highestPathRisk = risk
+				}
 			} else {
 				status200 = append(status200, fmt.Sprintf("%s (200)", path))
-			}
+}
 		case 403, 401:
 			status403 = append(status403, fmt.Sprintf("%s (%d)", path, status))
 		}
 	}
 
 	// Create findings based on discovered paths
-	if len(status200Sensitive) > 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "high",
-			Title:       "Sensitive Paths Accessible",
-			Description: fmt.Sprintf("Found %d sensitive paths with 200 status", len(status200Sensitive)),
-			RawData:     status200Sensitive,
-		})
-	}
+	severity := "info"
 
-	if len(status200) > 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "medium",
-			Title:       "Accessible Paths Discovered",
-			Description: fmt.Sprintf("Found %d accessible paths", len(status200)),
-			RawData:     status200,
-		})
-	}
+	if highestPathRisk >= 90 {
+		severity = "high"
+	} else if highestPathRisk >= 70 {
+		severity = "medium"
+	} else if len(status200) > 0 {
+		severity = "low"
+}
 
-	if len(status403) > 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "low",
-			Title:       "Protected Paths Discovered",
-			Description: fmt.Sprintf("Found %d protected paths (403/401)", len(status403)),
-			RawData:     status403,
-		})
-	}
-
-	if len(status200Sensitive) == 0 && len(status200) == 0 && len(status403) == 0 {
-		result.Findings = append(result.Findings, Finding{
-			Severity:    "info",
-			Title:       "No Paths Discovered",
-			Description: "No accessible paths found",
-			RawData:     []string{},
-		})
-	}
+	result.Findings = append(result.Findings, Finding{
+		Severity:    severity,
+		Title:       "Web Path Enumeration Result",
+		Description: fmt.Sprintf("Found %d paths (%d sensitive)", len(status200)+len(status200Sensitive), len(status200Sensitive)),
+		RawData:     append(status200Sensitive, status200...),
+	})
 
 	result.Metadata["total_results"] = len(results)
 	result.Metadata["sensitive_count"] = len(status200Sensitive)
@@ -154,7 +207,7 @@ func (p *FFUFParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail,
 	if findingCount == 0 {
 		findingCount = 1
 	}
-	detail.Score = baseScore * findingCount
+	detail.Score = baseScore*10 + findingCount*2
 
 	return detail, nil
 }
@@ -217,12 +270,12 @@ func extractPath(url string) string {
 }
 
 // Helper function to check if path is sensitive
-func isSensitivePath(path string) bool {
+func getSensitivePathRisk(path string) int {
 	pathLower := strings.ToLower(path)
-	for sensitive := range sensitivePaths {
-		if strings.Contains(pathLower, sensitive) {
-			return true
+	for pattern, risk := range sensitivePathRisk {
+		if strings.Contains(pathLower, pattern) {
+			return risk
 		}
 	}
-	return false
+	return 0
 }

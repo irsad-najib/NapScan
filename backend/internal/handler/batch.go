@@ -10,11 +10,12 @@ import (
 )
 
 type BatchHandler struct {
-	service *service.BatchService
+	service       *service.BatchService
+	reportService *service.ReportService
 }
 
-func NewBatchHandler(s *service.BatchService) *BatchHandler {
-	return &BatchHandler{service: s}
+func NewBatchHandler(s *service.BatchService, r *service.ReportService) *BatchHandler {
+	return &BatchHandler{service: s, reportService: r}
 }
 
 // CreateBatch generates a unique batch ID and associates it with the user
@@ -114,4 +115,50 @@ func (h *BatchHandler) GetBatchDetail(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(detail)
+}
+
+// GetBatchReport generates and downloads a PDF report for the batch
+// @Summary Download Batch Report
+// @Description Generate a PDF report for a specific batch and download it
+// @Tags Batch
+// @Security BearerAuth
+// @Produce application/pdf
+// @Param batch_id path string true "Batch ID"
+// @Success 200 {string} string "PDF Content"
+// @Failure 401 {object} response.Response
+// @Failure 403 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /batch/{batch_id}/report [get]
+func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
+	batchID := c.Params("batch_id")
+	log.Printf("[BATCH] Received get report request for batch_id=%s", batchID)
+
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		log.Printf("[BATCH] User not authenticated")
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	reportData, err := h.service.GetBatchReportData(c.Context(), batchID, userID)
+	if err != nil {
+		log.Printf("[BATCH] Failed to get report data: %v", err)
+		if err.Error() == "batch not found" {
+			return response.NotFound(c, "Batch not found")
+		}
+		if err.Error() == "access denied" {
+			return response.Forbidden(c, "You do not have permission to access this batch")
+		}
+		return response.InternalServerError(c, "Failed to get report data", err)
+	}
+
+	// Generate PDF
+	filePath, err := h.reportService.GeneratePDF(reportData)
+	if err != nil {
+		log.Printf("[BATCH] Failed to generate PDF: %v", err)
+		return response.InternalServerError(c, "Failed to generate report", err)
+	}
+
+	log.Printf("[BATCH] Report generated successfully: %s", filePath)
+	return c.Download(filePath)
 }

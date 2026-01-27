@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"log"
@@ -20,8 +21,8 @@ func NewNmapService() *NmapService {
 	return &NmapService{}
 }
 
-type ScanResult struct {
-	Result models.NmapRun
+type ServiceScanResult struct {
+	Result interface{} // models.NmapRun or any
 	Err    error
 }
 
@@ -157,8 +158,8 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
 
 	var wg sync.WaitGroup
-	tcpChan := make(chan ScanResult, 1)
-	udpChan := make(chan ScanResult, 1)
+	tcpChan := make(chan ServiceScanResult, 1)
+	udpChan := make(chan ServiceScanResult, 1)
 
 	wg.Add(2)
 
@@ -170,7 +171,7 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 		args := []string{"-sV", "-n", "-T4", "-oX", "-", target}
 		result, err := executeSingleNmapScan(ctx, args)
 		
-		tcpChan <- ScanResult{Result: result, Err: err}
+		tcpChan <- ServiceScanResult{Result: result, Err: err}
 		
 		if err != nil {
 			log.Printf("[NMAP_PARALLEL] TCP scan failed: %v", err)
@@ -187,7 +188,7 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 		args := []string{"-sU", "-n", "-T4", "-p", "53,67,68,69,123,161,500,1900,4500", "-oX", "-", target}
 		result, err := executeSingleNmapScan(ctx, args)
 		
-		udpChan <- ScanResult{Result: result, Err: err}
+		udpChan <- ServiceScanResult{Result: result, Err: err}
 		
 		if err != nil {
 			log.Printf("[NMAP_PARALLEL] UDP scan failed: %v", err)
@@ -246,10 +247,21 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 
 	manager.UpdateProgress(taskID, 90, models.StatusRunning)
 
-	// Combine results
+	log.Printf("[NMAP_DEBUG] TCP Result Type: %T, UDP Result Type: %T", tcpRes.Result, udpRes.Result)
+	
+	// Convert results to ensure they aren't nil/empty
+	tcpVal := tcpRes.Result
+	udpVal := udpRes.Result
+	
+	// Combine results using specific keys to debug nesting
 	combinedResult := map[string]interface{}{
-		"tcp": tcpRes.Result,
-		"udp": udpRes.Result,
+		"tcp": tcpVal,
+		"udp": udpVal,
+	}
+
+	// Logging debug info (marshal just to see it in logs)
+	if b, err := json.Marshal(combinedResult); err == nil {
+		log.Printf("[NMAP_DEBUG] Combined Result Preview: %s", string(b))
 	}
 
 	manager.Complete(taskID, combinedResult)
@@ -274,8 +286,11 @@ func executeSingleNmapScan(ctx context.Context, args []string) (models.NmapRun, 
 		return models.NmapRun{}, err
 	}
 
+	log.Printf("[NMAP_DEBUG] Raw XML Output (Length: %d): %s", len(stdout.Bytes()), stdout.String())
+	
 	var result models.NmapRun
 	if err := xml.Unmarshal(stdout.Bytes(), &result); err != nil {
+		log.Printf("[NMAP_DEBUG] Failed to unmarshal XML: %v", err)
 		return models.NmapRun{}, err
 	}
 
@@ -292,8 +307,8 @@ func (s *NmapService) ExecuteScan(target string, scanType string, args ...string
 func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, error) {
 	log.Printf("[NMAP_SERVICE] Starting parallel scan on target=%s", target)
 	var wg sync.WaitGroup
-	tcpChan := make(chan ScanResult, 1)
-	udpChan := make(chan ScanResult, 1)
+	tcpChan := make(chan ServiceScanResult, 1)
+	udpChan := make(chan ServiceScanResult, 1)
 
 	wg.Add(2)
 
@@ -306,7 +321,7 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 		} else {
 			log.Printf("[NMAP_SERVICE] TCP scan completed")
 		}
-		tcpChan <- ScanResult{Result: result, Err: err}
+		tcpChan <- ServiceScanResult{Result: result, Err: err}
 	}()
 
 	go func() {
@@ -318,7 +333,7 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 		} else {
 			log.Printf("[NMAP_SERVICE] UDP scan completed")
 		}
-		udpChan <- ScanResult{Result: result, Err: err}
+		udpChan <- ServiceScanResult{Result: result, Err: err}
 	}()
 
 	wg.Wait()
@@ -338,9 +353,19 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 		return nil, fmt.Errorf("UDP scan error: %w", udpRes.Err)
 	}
 
+	// Parse results back to NmapRun with strict type checks
+	var tcpResult, udpResult models.NmapRun
+	
+	if res, ok := tcpRes.Result.(models.NmapRun); ok {
+		tcpResult = res
+	}
+	if res, ok := udpRes.Result.(models.NmapRun); ok {
+		udpResult = res
+	}
+
 	log.Printf("[NMAP_SERVICE] Parallel scan completed successfully")
 	return &CombinedScanResponse{
-		TCP: &tcpRes.Result,
-		UDP: &udpRes.Result,
+		TCP: &tcpResult,
+		UDP: &udpResult,
 	}, nil
 }

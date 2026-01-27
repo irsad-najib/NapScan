@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -105,27 +106,22 @@ func (sm *ScanManager) Complete(taskID string, result interface{}) error {
 		return nil
 	}
 
-	// Convert result to []map[string]interface{}
-	var resultSlice []map[string]interface{}
-	switch v := result.(type) {
-	case []map[string]interface{}:
-		resultSlice = v
-	case map[string]interface{}:
-		resultSlice = []map[string]interface{}{v}
-	case []interface{}:
-		resultSlice = make([]map[string]interface{}, len(v))
-		for i, item := range v {
-			if m, ok := item.(map[string]interface{}); ok {
-				resultSlice[i] = m
-			} else {
-				resultSlice[i] = map[string]interface{}{"data": item}
-			}
+	// Handle json.RawMessage or []byte directly
+	if raw, ok := result.(json.RawMessage); ok {
+		task.ResultRaw = raw
+	} else if rawBytes, ok := result.([]byte); ok {
+		task.ResultRaw = json.RawMessage(rawBytes)
+	} else {
+		// Fallback for logic still passing maps/structs
+		// We marshal it to store as Raw
+		if b, err := json.Marshal(result); err == nil {
+			task.ResultRaw = json.RawMessage(b)
 		}
-	default:
-		resultSlice = []map[string]interface{}{{"data": result}}
+		
+		// ALSO populate Result so GetReport works!
+		task.Result = result
 	}
 
-	task.Result = resultSlice
 	task.Status = models.StatusCompleted
 	task.Progress = 100
 	task.UpdatedAt = time.Now()

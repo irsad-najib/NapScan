@@ -2,6 +2,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"napscan-be/internal/repository"
 	"strconv"
 	"strings"
+	"time"
 
 	"napscan-be/pkg/risk"
 
@@ -131,7 +133,17 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 	for _, result := range batch.ScanResults {
 		scanSummaries = append(scanSummaries, fmt.Sprintf("Scanned with %s: Target %s", result.Tool, result.Target))
 		
-		if resMap, ok := result.Result.(map[string]interface{}); ok {
+		var resMap map[string]interface{}
+		// Manually parse ResultRaw if Result is nil
+		if result.Result == nil && len(result.ResultRaw) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(result.ResultRaw))
+			decoder.UseNumber()
+			_ = decoder.Decode(&resMap) // Ignore error, best effort
+		} else if m, ok := result.Result.(map[string]interface{}); ok {
+			resMap = m
+		}
+
+		if resMap != nil {
 			
 			// If tool gives risk_score directly (0-100), take it but maybe apply modifiers? 
 			// For consistency, let's map it back to level if possible, or just use it raw.
@@ -270,9 +282,10 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 							// Check status
 							if status, ok := resObj["status"].(float64); ok { // JSON numbers are float64
 								url, _ := resObj["url"].(string)
-								if status == 200 {
+								switch status {
+								case 200:
 									checkRisk("medium", "ffuf_found_200", url)
-								} else if status == 403 {
+								case 403:
 									checkRisk("low", "ffuf_found_403", url)
 								}
 							}
@@ -339,9 +352,19 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 					}
 				}
 			}
-		} else if resList, ok := result.Result.([]interface{}); ok {
+		} else {
 			// Handle List-based results (e.g. Nuclei)
-			if result.Tool == "nuclei" {
+			// Check if we can parse as list
+			var resList []interface{}
+			if result.Result == nil && len(result.ResultRaw) > 0 {
+				decoder := json.NewDecoder(bytes.NewReader(result.ResultRaw))
+				decoder.UseNumber()
+				_ = decoder.Decode(&resList)
+			} else if list, ok := result.Result.([]interface{}); ok {
+				resList = list
+			}
+
+			if resList != nil && result.Tool == "nuclei" {
 				scanSummaries = append(scanSummaries, fmt.Sprintf("Nuclei: Found %d findings", len(resList)))
 				for _, item := range resList {
 					if itemMap, ok := item.(map[string]interface{}); ok {
@@ -357,8 +380,9 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 					}
 				}
 			}
-		} else {
-			log.Printf("[RISK_CALC] Result for tool %s is not a valid map or list", result.Tool)
+			if resList == nil {
+				log.Printf("[RISK_CALC] Result for tool %s is not a valid map or list", result.Tool)
+			}
 		}
 	}
 	
@@ -384,6 +408,12 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 	for i, batch := range batches {
 		var riskScore int
 		// Try to get risk score from AnalysisResult if available
+		if batch.AnalysisResult == nil && len(batch.AnalysisResultRaw) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(batch.AnalysisResultRaw))
+			decoder.UseNumber()
+			_ = decoder.Decode(&batch.AnalysisResult)
+		}
+
 		if batch.AnalysisResult != nil {
 			if arMap, ok := batch.AnalysisResult.(map[string]interface{}); ok {
 				if rs, ok := arMap["risk_score"]; ok {
@@ -489,6 +519,19 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 	// 2. Group scan results by scanner type
 	scannerGroups := make(map[string][]models.ScanResult)
 	for _, result := range scanResults {
+		// Populate Result from ResultRaw so parsers (which expect Result) work
+		if result.Result == nil && len(result.ResultRaw) > 0 {
+			// Used by parsers (mobsf, zap, etc). Most expect map[string]interface{} OR []interface{}
+			// We try to decode into interface{}
+			var temp interface{}
+			decoder := json.NewDecoder(bytes.NewReader(result.ResultRaw))
+			decoder.UseNumber()
+			if err := decoder.Decode(&temp); err == nil {
+				result.Result = temp
+			} else {
+				log.Printf("[BATCH_SERVICE] Failed to decode raw result for parser: %v", err)
+			}
+		}
 		scannerGroups[result.Tool] = append(scannerGroups[result.Tool], result)
 	}
 
@@ -626,6 +669,20 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 		Tool:      scan.Tool,
 		Target:    scan.Target,
 		CreatedAt: scan.CreatedAt,
+		Result:    scan.ResultRaw, // Pass through raw JSON directly
+	}
+
+	// Helper to get interface{} map/slice from raw
+	var resultInterface interface{}
+	if scan.Result != nil {
+		resultInterface = scan.Result
+	} else if len(scan.ResultRaw) > 0 {
+		var temp interface{}
+		decoder := json.NewDecoder(bytes.NewReader(scan.ResultRaw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&temp); err == nil {
+			resultInterface = temp
+		}
 	}
 
 	// Canonicalize tool name (handle aliases)
@@ -641,7 +698,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 		// Nmap: Open Ports, Service Names
 		var openPorts []int
 		var services []string
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
 			if hosts, ok := resMap["hosts"].([]interface{}); ok {
 				for _, h := range hosts {
 					if hostMap, ok := h.(map[string]interface{}); ok {
@@ -678,7 +735,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 		// ZAP: Alert Counts by Risk
 		alertsByRisk := make(map[string]int)
 		totalAlerts := 0
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
 			if alertsRaw, ok := resMap["alertsRaw"].(map[string]interface{}); ok {
 				if alerts, ok := alertsRaw["alerts"].([]interface{}); ok {
 					totalAlerts = len(alerts)
@@ -704,7 +761,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 		maxCVSS := 0.0
 		var topProblems []string
 
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
 			if resultsContainer, ok := resMap["results"].(map[string]interface{}); ok {
 				if findings, ok := resultsContainer["result"].([]interface{}); ok {
 					findingsCount = len(findings)
@@ -745,7 +802,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 		statusCodes := make(map[string]int)
 		var topMatches []string
 
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
 			if results, ok := resMap["results"].([]interface{}); ok {
 				foundCount = len(results)
 				for _, r := range results {
@@ -796,7 +853,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 			}
 		}
 
-		if resList, ok := scan.Result.([]interface{}); ok {
+		if resList, ok := resultInterface.([]interface{}); ok {
 			parseList(resList)
 		} else if resMap, ok := scan.Result.(map[string]interface{}); ok {
 			// sometime mapped differently
@@ -875,4 +932,204 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 	}
 
 	return summary
+}
+
+// GetBatchReportData aggregates all necessary data for the PDF report
+func (s *BatchService) GetBatchReportData(
+	ctx context.Context,
+	batchID string,
+	userID string,
+) (*models.ReportData, error) {
+
+	// 1. Fetch batch
+	batch, err := s.repo.FindByID(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	if batch == nil {
+		return nil, fmt.Errorf("batch not found")
+	}
+	if batch.UserID != userID {
+		return nil, fmt.Errorf("access denied")
+	}
+
+	// 2. Fetch scan results
+	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Calculate normalized risk
+	riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
+	if err != nil {
+		riskResponse = &models.BatchRiskResponse{
+			RiskScore: 0,
+			RiskLevel: models.SeverityInfo,
+			RiskDetail: []models.ScannerRiskDetail{},
+		}
+	}
+
+	//-----------------------------------------
+	// 4. BUILD VULNERABILITIES FROM NORMALIZED
+	//-----------------------------------------
+
+	var vulnerabilities []models.UnifiedVulnerability
+	scannersUsed := []string{}
+	seenScanner := map[string]bool{}
+
+	critical := 0
+	high := 0
+	medium := 0
+	low := 0
+
+	for _, res := range scanResults {
+
+		if !seenScanner[res.Tool] {
+			scannersUsed = append(scannersUsed, res.Tool)
+			seenScanner[res.Tool] = true
+		}
+
+		// Decode raw result
+		var resultInterface interface{}
+		if res.Result != nil {
+			resultInterface = res.Result
+		} else if len(res.ResultRaw) > 0 {
+			var temp interface{}
+			dec := json.NewDecoder(bytes.NewReader(res.ResultRaw))
+			dec.UseNumber()
+			if err := dec.Decode(&temp); err == nil {
+				resultInterface = temp
+			}
+		}
+
+		parser := risk.GetParser(res.Tool)
+		if parser == nil {
+			continue
+		}
+
+		parsed, err := parser.Parse(resultInterface)
+		if err != nil || parsed == nil {
+			continue
+		}
+
+		normalized, err := parser.Normalize(parsed)
+		if err != nil || normalized == nil {
+			continue
+		}
+
+		sev := strings.ToUpper(string(normalized.NormalizedSeverity))
+
+		for _, desc := range normalized.Findings {
+
+			switch sev {
+			case "CRITICAL":
+				critical++
+			case "HIGH":
+				high++
+			case "MEDIUM":
+				medium++
+			case "LOW":
+				low++
+			}
+
+			vulnerabilities = append(vulnerabilities, models.UnifiedVulnerability{
+				Title:            desc,
+				Description:      desc,
+				Severity:         sev,
+				AffectedEndpoint: res.Target,
+				Scanner:          res.Tool,
+				ToolRefID:        res.ID,
+			})
+		}
+	}
+
+	log.Printf("REPORT: collected %d vulnerabilities", len(vulnerabilities))
+
+	//-----------------------------------------
+	// 5. TARGET
+	//-----------------------------------------
+
+	target := "Unknown"
+	if len(batch.UploadedFiles) > 0 {
+		target = batch.UploadedFiles[0].FileName
+	} else if len(scanResults) > 0 {
+		target = scanResults[0].Target
+	}
+
+	//-----------------------------------------
+	// 6. RISK SUMMARY
+	//-----------------------------------------
+
+	riskSummary := models.RiskSummary{
+		TotalVulnerabilities: len(vulnerabilities),
+		CriticalCount:        critical,
+		HighCount:            high,
+		MediumCount:          medium,
+		LowCount:             low,
+		OverallRiskScore:     riskResponse.RiskScore,
+		RiskLevel:            string(riskResponse.RiskLevel),
+	}
+
+	//-----------------------------------------
+	// 7. EXECUTIVE SUMMARY
+	//-----------------------------------------
+
+	execSummary := fmt.Sprintf(
+		"Security assessment was performed against target '%s'.\n"+
+			"A total of %d vulnerabilities were identified using %d scanners.\n"+
+			"Overall risk level is %s (Score: %.1f/100).\n"+
+			"Critical: %d, High: %d, Medium: %d, Low: %d.",
+		target,
+		len(vulnerabilities),
+		len(scannersUsed),
+		riskResponse.RiskLevel,
+		riskResponse.RiskScore,
+		critical,
+		high,
+		medium,
+		low,
+	)
+
+	//-----------------------------------------
+	// 8. RETURN REPORT DATA
+	//-----------------------------------------
+
+	return &models.ReportData{
+		BatchID:          batch.BatchID,
+		GeneratedAt:      time.Now(),
+		TargetInfo:       target,
+		RiskSummary:      riskSummary,
+		Vulnerabilities:  vulnerabilities,
+		ScannersUsed:     scannersUsed,
+		ScanDuration:     time.Since(batch.CreatedAt).String(),
+		ExecutiveSummary: execSummary,
+	}, nil
+}
+
+func guessCVSSFromSeverity(sev string) float64 {
+	switch strings.ToUpper(sev) {
+	case "CRITICAL":
+		return 9.5
+	case "HIGH":
+		return 8.0
+	case "MEDIUM":
+		return 5.0
+	case "LOW":
+		return 3.0
+	default:
+		return 0
+	}
+}
+
+func defaultRecommendation(sev string) string {
+	switch strings.ToUpper(sev) {
+	case "CRITICAL", "HIGH":
+		return "Apply security patch immediately and restrict exposure."
+	case "MEDIUM":
+		return "Review configuration and apply recommended hardening."
+	case "LOW":
+		return "Monitor and fix during regular maintenance."
+	default:
+		return ""
+	}
 }

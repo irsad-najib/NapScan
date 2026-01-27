@@ -12,6 +12,7 @@ func NewMobSFParser() *MobSFParser {
 }
 
 func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
+	highestRisk := 0.0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -24,7 +25,8 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 
 	// 1. Extract Score
 	if score, ok := resultMap["security_score"].(float64); ok {
-		result.Metadata["security_score"] = score
+		// MobSF: 100 = aman, 0 = buruk
+		result.Metadata["mobsf_risk"] = 100.0 - score
 	}
 	if avgCVSS, ok := resultMap["average_cvss"].(float64); ok {
 		result.Metadata["average_cvss"] = avgCVSS
@@ -38,9 +40,10 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 					// MobSF severity: warning, high, info
 					severity := "info"
 					if sev, ok := fMap["severity"].(string); ok {
-						if sev == "high" || sev == "critical" {
+						switch sev {
+						case "high", "critical":
 							severity = "high"
-						} else if sev == "warning" {
+						case "warning":
 							severity = "medium"
 						}
 					}
@@ -60,6 +63,12 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 							Description: fmt.Sprintf("Found in file: %v", key), // key is often filename
 							RawData:     fMap,
 						})
+						switch severity {
+						case "high":
+							if 80 > highestRisk { highestRisk = 80 }
+						case "medium":
+							if 60 > highestRisk { highestRisk = 60 }
+						}
 					}
 				}
 			}
@@ -85,7 +94,7 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		}
 	}
 
-	result.Metadata["total_findings"] = len(result.Findings)
+	result.Metadata["highest_risk"] = highestRisk
 	return result, nil
 }
 
@@ -95,37 +104,39 @@ func (p *MobSFParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail
 		Findings: []string{},
 	}
 
-	highestSeverity := models.SeverityInfo
-	var allFindings []string
+	var highestRisk float64 = 0
 
-	for _, finding := range parsed.Findings {
-		normalized := models.NormalizeSeverity(finding.Severity)
-		if models.GetSeverityScore(normalized) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized
-		}
-		allFindings = append(allFindings, finding.Title)
+	if v, ok := parsed.Metadata["mobsf_risk"].(float64); ok {
+		highestRisk = v
+	} else if v, ok := parsed.Metadata["highest_risk"].(float64); ok {
+		highestRisk = v
 	}
 
-	detail.NormalizedSeverity = highestSeverity
+	var allFindings []string
+	for _, f := range parsed.Findings {
+		allFindings = append(allFindings, f.Title)
+	}
+
+	finalSeverity := models.SeverityInfo
+	switch {
+	case highestRisk >= 90:
+		finalSeverity = models.SeverityCritical
+	case highestRisk >= 75:
+		finalSeverity = models.SeverityHigh
+	case highestRisk >= 50:
+		finalSeverity = models.SeverityMedium
+	case highestRisk >= 30:
+		finalSeverity = models.SeverityLow
+	}
+
+	detail.NormalizedSeverity = finalSeverity
 	detail.Description = "Static analysis findings from MobSF"
 	detail.Findings = allFindings
 
-	// Calculate Score based on MobSF Security Score (0-100) or findings
-	// If MobSF gives a score, use 100 - score as risk? Or parsed metadata?
-	// MobSF 100 is secure, 0 is insecure (usually). So Risk = 100 - Score.
-	if score, ok := parsed.Metadata["security_score"].(float64); ok {
-		detail.Score = 100.0 - score
-		if detail.Score < 0 {
-			detail.Score = 0
-		}
-	} else {
-		// Fallback to finding-based
-		baseScore := models.GetSeverityScore(highestSeverity)
-		findingCount := float64(len(allFindings))
-		if findingCount == 0 { findingCount = 1 }
-		detail.Score = baseScore * findingCount
-	}
+	findingCount := float64(len(allFindings))
+	if findingCount == 0 { findingCount = 1 }
 
+	detail.Score = highestRisk*10 + findingCount*2
 	return detail, nil
 }
 
@@ -144,7 +155,6 @@ func (p *MobSFParser) ParseAndNormalize(rawResults []models.ScanResult) (*models
 	}
 	highestSeverity := models.SeverityInfo
 	var allFindings []string
-	var lowestScore float64 = 100.0 // Assume perfect score start
 
 	for _, res := range rawResults {
 		parsed, err := p.Parse(res.Result)
@@ -163,11 +173,6 @@ func (p *MobSFParser) ParseAndNormalize(rawResults []models.ScanResult) (*models
 		allFindings = append(allFindings, normalized.Findings...)
 		
 		// Track worst score
-		if normalized.Score > 0 && (100-normalized.Score) < lowestScore {
-			// Normalize logic: My Normalize returns Risk Score (0-100 badness).
-			// If normalized.Score is high, that's bad.
-			// So we just sum or take max risk.
-		}
 		if normalized.Score > detail.Score {
 			detail.Score = normalized.Score
 		}

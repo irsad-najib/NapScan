@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"log"
 	"math"
 	"napscan-be/internal/models"
 	"napscan-be/pkg/parser"
@@ -30,24 +31,34 @@ func GetScannerWeight(scanner string) float64 {
 
 // CalculateScannerScore calculates the risk score for a single scanner
 func CalculateScannerScore(detail *models.ScannerRiskDetail) float64 {
-	baseScore := models.GetSeverityScore(detail.NormalizedSeverity)
-	findingCount := float64(len(detail.Findings))
-	
-	if findingCount == 0 {
-		findingCount = 1 // Avoid zero multiplication
-	}
-
 	weight := GetScannerWeight(detail.Scanner)
-	
-	// Score = BaseScore × FindingCount × ScannerWeight
-	score := baseScore * findingCount * weight
-	
-	// Round to 2 decimal places
+
+	score := detail.Score
+
+
+	if score == 0 {
+		base := models.GetSeverityScore(detail.NormalizedSeverity)
+		count := float64(len(detail.Findings))
+		if count == 0 {
+			count = 1
+		}
+		score = base*10 + count*2
+	}
+	score = score * weight
+
 	return math.Round(score*100) / 100
 }
 
 // CalculateBatchRisk calculates the overall risk for a batch
 func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetail) *models.BatchRiskResponse {
+	if len(scannerDetails) == 0 {
+		return &models.BatchRiskResponse{
+			BatchID:    batchID,
+			RiskScore:  0,
+			RiskLevel:  models.SeverityInfo,
+			RiskDetail: scannerDetails,
+		}
+	}
 	totalScore := 0.0
 
 	// Sort scanners alphabetically for determinism
@@ -63,8 +74,13 @@ func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetai
 	}
 
 	// Cap at 100
-	if totalScore > 100.0 {
-		totalScore = 100.0
+	maxTotal := float64(len(scannerDetails)) * 100
+
+
+	if maxTotal <= 0 {
+		totalScore = 0
+	} else {
+		totalScore = (totalScore / maxTotal) * 100
 	}
 
 	// Round to 2 decimal places
@@ -73,6 +89,7 @@ func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetai
 	// Classify risk level
 	riskLevel := models.ClassifyRiskLevel(totalScore)
 
+	log.Printf("[RISK_ENGINE] scanners=%d rawTotal=%.2f", len(scannerDetails), totalScore)
 	return &models.BatchRiskResponse{
 		BatchID:    batchID,
 		RiskScore:  totalScore,
@@ -88,8 +105,6 @@ func GetParser(scannerType string) parser.ScannerParser {
 		return parser.NewNmapParser()
 	case "ffuf":
 		return parser.NewFFUFParser()
-	case "nikto":
-		return parser.NewNiktoParser()
 	case "nuclei":
 		return parser.NewNucleiParser()
 	case "openvas":

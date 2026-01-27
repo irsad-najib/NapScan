@@ -14,6 +14,7 @@ func NewOpenVASParser() *OpenVASParser {
 }
 
 func (p *OpenVASParser) Parse(rawResult interface{}) (*ParsedResult, error) {
+	highestCVSS := 0.0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -49,31 +50,21 @@ func (p *OpenVASParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 			continue
 		}
 
-		// Map CVSS score to severity level
-		var severity string
-		if sevVal >= 9.0 {
-			severity = "critical"
-		} else if sevVal >= 7.0 {
-			severity = "high"
-		} else if sevVal >= 4.0 {
-			severity = "medium"
-		} else if sevVal > 0.0 {
-			severity = "low"
-		} else {
-			severity = "info"
-		}
-
 		description := fmt.Sprintf("%s (CVSS: %.1f)", name, sevVal)
 
 		result.Findings = append(result.Findings, Finding{
-			Severity:    severity,
+			Severity:    "info", // placeholder
 			Title:       name,
 			Description: description,
 			RawData:     map[string]interface{}{"cvss": sevVal, "threat": threat},
 		})
+
+		if sevVal > highestCVSS {
+			highestCVSS = sevVal
+		}
 	}
 
-	result.Metadata["total_findings"] = len(result.Findings)
+	result.Metadata["highest_cvss"] = highestCVSS
 
 	return result, nil
 }
@@ -84,31 +75,40 @@ func (p *OpenVASParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDeta
 		Findings: []string{},
 	}
 
-	highestSeverity := models.SeverityInfo
+	highestCVSS := 0.0
+	if v, ok := parsed.Metadata["highest_cvss"].(float64); ok {
+		highestCVSS = v
+	}
+
 	var allFindings []string
-
 	for _, finding := range parsed.Findings {
-		normalized := models.NormalizeSeverity(finding.Severity)
-		if models.GetSeverityScore(normalized) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized
-		}
-
 		allFindings = append(allFindings, finding.Description)
 	}
 
-	detail.NormalizedSeverity = highestSeverity
+	finalSeverity := models.SeverityInfo
+	switch {
+	case highestCVSS >= 9.0:
+		finalSeverity = models.SeverityCritical
+	case highestCVSS >= 7.0:
+		finalSeverity = models.SeverityHigh
+	case highestCVSS >= 4.0:
+		finalSeverity = models.SeverityMedium
+	case highestCVSS > 0:
+		finalSeverity = models.SeverityLow
+	}
+
+	detail.NormalizedSeverity = finalSeverity
 	detail.Description = "Vulnerabilities identified through OpenVAS scanning"
-	
+
 	sort.Strings(allFindings)
 	detail.Findings = allFindings
 
-	baseScore := models.GetSeverityScore(highestSeverity)
 	findingCount := float64(len(allFindings))
 	if findingCount == 0 {
 		findingCount = 1
 	}
-	detail.Score = baseScore * findingCount
 
+	detail.Score = highestCVSS*10 + findingCount*2
 	return detail, nil
 }
 

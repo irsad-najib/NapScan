@@ -60,6 +60,21 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	}
 	log.Printf("[FFUF_ASYNC] Using wordlist: %s", wordlistPath)
 
+	// Count lines for progress estimation
+	var wordlistLines int
+	if f, err := os.Open(wordlistPath); err == nil {
+		s := bufio.NewScanner(f)
+		for s.Scan() {
+			wordlistLines++
+		}
+		f.Close()
+	}
+	// Estimate duration: lines / rate (100 req/s)
+	// Add 30s buffer for initialization and timeouts
+	estimatedSeconds := float64(wordlistLines)/100.0 + 30
+	log.Printf("[FFUF_ASYNC] Estimated duration: %.0fs (lines: %d)", estimatedSeconds, wordlistLines)
+	startTime := time.Now()
+
 	// Build ffuf command with stealth parameters
 	cmd := exec.CommandContext(ctx,
 		"ffuf",
@@ -68,9 +83,9 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-fc", "404,307,301,302,308",
 		"-of", "json",
 		"-o", tmpFile,
-		"-rate", "10",              // Rate limit: 10 requests per second
-		"-p", "0.1-0.5",            // Random delay: 100-500ms between requests
-		"-t", "5",                  // Max 5 concurrent threads
+		"-rate", "100",             // Rate limit: 100 requests per second
+		"-p", "0.05-0.1",           // Random delay: 50-100ms between requests
+		"-t", "25",                 // Max 25 concurrent threads
 		"-timeout", "10",           // Connection timeout: 10 seconds
 		"-H", "User-Agent: "+randomUA,
 		"-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -80,7 +95,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-H", "Connection: keep-alive",
 	)
 	
-	log.Printf("[FFUF_ASYNC] Stealth mode enabled: rate=10req/s, delay=100-500ms, threads=5")
+	log.Printf("[FFUF_ASYNC] Stealth mode enabled: rate=100req/s, delay=50-100ms, threads=25")
 
 	// Capture stdout/stderr for progress tracking
 	stdout, err := cmd.StdoutPipe()
@@ -155,26 +170,32 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 			scanFinished = true
 			scanErr = err
 
-		case _, ok := <-stderrLines:
-			if ok {
-				lineCount++
-				// FFUF typically outputs progress/info to stderr
-				// We'll increment progress based on line count (rough estimation)
-				if lineCount%5 == 0 && currentProgress < 90 {
-					currentProgress += 5
-					if currentProgress > 90 {
-						currentProgress = 90
-					}
-					manager.UpdateProgress(taskID, currentProgress, models.StatusRunning)
-					log.Printf("[FFUF_ASYNC] Progress update: %d%% (lines: %d)", currentProgress, lineCount)
-				}
+		case line, ok := <-stderrLines:
+			if !ok {
+				stderrLines = nil
+				continue
 			}
+			lineCount++
+			log.Printf("[FFUF] %s", line)
 
 		case <-progressTicker.C:
-			// Gradual progress increment even without output
-			if currentProgress < 85 {
-				currentProgress += 5
-				manager.UpdateProgress(taskID, currentProgress, models.StatusRunning)
+			// Smart progress updates based on estimated duration
+			if currentProgress < 90 {
+				elapsed := time.Since(startTime).Seconds()
+				// Calculate percentage of estimated time elapsed
+				// We map 0-100% of time to 10-90% of progress
+				timeProgress := (elapsed / estimatedSeconds) * 80.0
+				
+				targetProgress := 10 + int(timeProgress)
+				if targetProgress > 90 {
+					targetProgress = 90
+				}
+				
+				// Only update if we are moving forward
+				if targetProgress > currentProgress {
+					currentProgress = targetProgress
+					manager.UpdateProgress(taskID, currentProgress, models.StatusRunning)
+				}
 			}
 		}
 	}
@@ -203,18 +224,19 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		return err
 	}
 
-	var result interface{}
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		log.Printf("[FFUF_ASYNC] Failed to parse JSON output: %v", err)
-		manager.Fail(taskID, fmt.Errorf("failed to parse ffuf json: %w", err))
+	// Verify it is valid JSON but don't unmarshal into interface{}
+	if !json.Valid(jsonData) {
+		log.Printf("[FFUF_ASYNC] Invalid JSON output")
+		err := fmt.Errorf("ffuf returned invalid json")
+		manager.Fail(taskID, err)
 		return err
 	}
 
 	// Phase 5: Save report (95-100%)
 	manager.UpdateProgress(taskID, 95, models.StatusRunning)
 
-	// Complete the task
-	manager.Complete(taskID, result)
+	// Complete the task with RawMessage
+	manager.Complete(taskID, json.RawMessage(jsonData))
 	log.Printf("[FFUF_ASYNC] Scan completed successfully for task=%s", taskID)
 
 	return nil

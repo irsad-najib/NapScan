@@ -12,8 +12,15 @@ type ZAPParser struct{}
 func NewZAPParser() *ZAPParser {
 	return &ZAPParser{}
 }
+var zapRiskMap = map[string]int{
+	"informational": 10,
+	"low":           30,
+	"medium":        60,
+	"high":          80,
+}
 
 func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
+	highestRisk := 0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -46,17 +53,24 @@ func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 
 		description := fmt.Sprintf("%s on %s", alertName, url)
 
+		sev := strings.ToLower(riskStr)
+
 		result.Findings = append(result.Findings, Finding{
-			Severity:    strings.ToLower(riskStr),
+			Severity:    "info", // placeholder
 			Title:       alertName,
 			Description: description,
 			Target:      url,
 			RawData:     alertMap,
 		})
+
+		if risk, ok := zapRiskMap[sev]; ok {
+			if risk > highestRisk {
+				highestRisk = risk
+			}
+		}
 	}
 
-	result.Metadata["total_alerts"] = len(result.Findings)
-
+	result.Metadata["highest_risk"] = highestRisk
 	return result, nil
 }
 
@@ -66,31 +80,38 @@ func (p *ZAPParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, 
 		Findings: []string{},
 	}
 
-	highestSeverity := models.SeverityInfo
+	highestRisk := 0
+	if v, ok := parsed.Metadata["highest_risk"].(int); ok {
+		highestRisk = v
+	}
+
 	var allFindings []string
-
 	for _, finding := range parsed.Findings {
-		normalized := models.NormalizeSeverity(finding.Severity)
-		if models.GetSeverityScore(normalized) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized
-		}
-
 		allFindings = append(allFindings, finding.Description)
 	}
 
-	detail.NormalizedSeverity = highestSeverity
+	finalSeverity := models.SeverityInfo
+	switch {
+	case highestRisk >= 75:
+		finalSeverity = models.SeverityHigh
+	case highestRisk >= 50:
+		finalSeverity = models.SeverityMedium
+	case highestRisk >= 30:
+		finalSeverity = models.SeverityLow
+	}
+
+	detail.NormalizedSeverity = finalSeverity
 	detail.Description = "Web application security issues detected by OWASP ZAP"
-	
+
 	sort.Strings(allFindings)
 	detail.Findings = allFindings
 
-	baseScore := models.GetSeverityScore(highestSeverity)
 	findingCount := float64(len(allFindings))
 	if findingCount == 0 {
 		findingCount = 1
 	}
-	detail.Score = baseScore * findingCount
 
+	detail.Score = float64(highestRisk)*10 + findingCount*2
 	return detail, nil
 }
 
