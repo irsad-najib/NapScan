@@ -1005,6 +1005,23 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
         }
 
         console.log(`[MobSF Parser] Parsed ${vulnerabilities.length} findings`);
+
+        // --- Integrated Frida Parsing ---
+        // Check for Frida findings in the same result (combined scan)
+        if (data?.findings?.frida) {
+            console.log("[MobSF Parser] Found nested Frida findings, parsing...");
+            const fridaVulns = parseFridaResults({ findings: { frida: data.findings.frida } });
+
+            // Add Frida findings to the list, ensuring they are tagged properly
+            // We keep the tool as 'mobsf' so they appear in the ToolRow, but add a tag for filtering
+            fridaVulns.forEach(v => {
+                v.tool = "mobsf";
+                v.tags = (v.tags || []).concat(["frida"]);
+                vulnerabilities.push(v);
+            });
+            console.log(`[MobSF Parser] Added ${fridaVulns.length} Frida findings`);
+        }
+
         return vulnerabilities;
     } catch (error) {
         console.error("Error parsing MobSF results:", error);
@@ -1090,6 +1107,24 @@ export function parseFridaResults(rawResult: any): ScanVulnerability[] {
 
                 case "engine_ready":
                     engineReady = true;
+                    break;
+
+                case "module_decision":
+                    const category = eventData.category;
+                    const moduleDecision = eventData.module;
+                    const enabled = eventData.enabled;
+
+                    if (category === "detection" && enabled) {
+                        vulnerabilities.push({
+                            id: `frida-decision-${vulnIdx++}`,
+                            name: `Security Detection Active: ${moduleDecision}`,
+                            severity: "Info",
+                            description: `The application has active ${moduleDecision} detection mechanisms. Frida attempted to bypass these.`,
+                            tool: "frida",
+                            affectedAsset: packageName,
+                            tags: ["frida-bypass"]
+                        });
+                    }
                     break;
             }
         });
@@ -1523,7 +1558,25 @@ function getFfufTableData(result: any): any[] {
 
 function getZapTableData(result: any): any[] {
     // Use the centralized extractAlerts function to handle all ZAP formats
-    const alerts = extractAlerts(result);
+    let alerts = extractAlerts(result);
+
+    // Fallback: Check for nested alertsRaw.alerts structure explicitly if extractAlerts returned nothing
+    // This handles the case where the result structure might be slightly different than what extractAlerts expects
+    if ((!alerts || alerts.length === 0) && result?.alertsRaw?.alerts) {
+        console.log("[ToolParsers] Using direct alertsRaw.alerts fallback for ZAP");
+        alerts = result.alertsRaw.alerts;
+    }
+
+    // Fallback: Check for data.alertsRaw.alerts
+    if ((!alerts || alerts.length === 0) && result?.data?.alertsRaw?.alerts) {
+        console.log("[ToolParsers] Using direct data.alertsRaw.alerts fallback for ZAP");
+        alerts = result.data.alertsRaw.alerts;
+    }
+
+    // Ensure alerts is an array
+    if (!Array.isArray(alerts)) {
+        return [];
+    }
 
     return alerts.map((a: any) => ({
         alert: a.alert || a.name,

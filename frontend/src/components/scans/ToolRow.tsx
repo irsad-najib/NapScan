@@ -7,6 +7,7 @@ import { ToolRiskOverview } from "./ToolRiskOverview";
 import { ToolMetadata } from "./ToolMetadata";
 import { parseFridaResults, extractMobsfAppInfo, getToolTableData } from "@/utils/toolParsers";
 import { ParsedResultTable } from "./ParsedResultTable";
+import { MobSFResultsView } from "./MobSFResultsView";
 
 interface ToolRowProps {
     tool: ToolKey;
@@ -256,13 +257,24 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
             {/* Expanded Details */}
             {isExpanded && (
                 <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-6 animate-fade-in space-y-6">
-                    {/* Visual Overview - Only show if there are risks */}
-                    {toolVulns.length > 0 && (
+                    {/* Visual Overview - Only show if there are risks and NOT using a custom view like MobSF */}
+                    {toolVulns.length > 0 && tool !== 'mobsf' && (
                         <ToolRiskOverview vulnerabilities={toolVulns} />
                     )}
 
-                    {/* Simplified View: Table */}
-                    <ToolMetadata toolData={data} target={target} />
+                    {/* Tool Specific Views or Generic Metadata Table */}
+                    {tool === 'mobsf' ? (
+                        <MobSFResultsView
+                            toolData={data}
+                            target={target}
+                            mobsfVulnerabilities={toolVulns.filter(v => !v.tags?.includes('frida'))}
+                            fridaVulnerabilities={toolVulns.filter(v => v.tags?.includes('frida'))}
+                            appInfo={extractMobsfAppInfo(data.result)}
+                            showFrida={true}
+                        />
+                    ) : (
+                        <ToolMetadata toolData={data} target={target} />
+                    )}
                 </div>
             )}
         </div>

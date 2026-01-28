@@ -41,6 +41,7 @@ export interface ToolExecution {
 
 export interface ScanJob {
     id: string;
+    batchId?: string;
     name: string;
     target: string;
     status: ScanStatus;
@@ -1202,6 +1203,10 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
                 if (batchId) {
                     console.log(`[ScanContext] ✅ Batch created with ID: ${batchId}`);
+                    // Update scan with batchId
+                    setScans((prev) => prev.map(s =>
+                        s.id === newScanId ? { ...s, batchId } : s
+                    ));
                 } else {
                     console.error(`[ScanContext] ❌ batch_id not found in response:`, batchRes.data);
                 }

@@ -289,6 +289,13 @@ export const batchApi = {
       method: "GET",
       url: `/api/batch/${batchId}`,
     }),
+
+  report: async (batchId: string): Promise<ApiResult<Blob>> =>
+    request<Blob>({
+      method: "GET",
+      url: `/api/batch/${batchId}/report`,
+      responseType: "blob",
+    }),
 };
 
 export const scannersApi = {

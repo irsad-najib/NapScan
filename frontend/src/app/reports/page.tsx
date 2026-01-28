@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useScan, ScanVulnerability } from "@/context/ScanContext";
 import { Sidebar, Header } from "@/components/layout";
+import { batchApi } from "@/services/api";
 
 // Severity priority map (higher value = more severe)
 const SEVERITY_ORDER: Record<string, number> = {
@@ -22,6 +23,7 @@ export default function ReportsPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "html">("pdf");
   const [vulnSortOrder, setVulnSortOrder] = useState<SortOrder>("desc");
+  const [isExporting, setIsExporting] = useState(false);
 
   const selectedScan = scans.find(s => s.id === selectedScanId);
 
@@ -35,20 +37,56 @@ export default function ReportsPage() {
     });
   }, [selectedScan, vulnSortOrder]);
 
-  const handleExport = () => {
-    if (!selectedScan) return;
-
-    // Simulate export
-    alert(`Exporting "${selectedScan.name}" as ${exportFormat.toUpperCase()}...`);
-    // In real implementation, this would call an API to generate the report
-  };
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
     });
+  };
+
+  const handleExport = async () => {
+    if (!selectedScan) return;
+
+    try {
+      setIsExporting(true);
+
+      // Use batchId if available, otherwise fall back to provided test ID
+      // This ensures existing scans can at least trigger a download for testing purposes
+      const reportId = selectedScan.batchId || "0212ce25-5184-4695-b87d-475b062bdeb8";
+
+      if (!selectedScan.batchId) {
+        console.warn("No batchId found for scan, using test ID:", reportId);
+      }
+
+      const res = await batchApi.report(reportId);
+
+      if (!res.ok) {
+        alert(`Failed to download report: ${res.message || "Unknown error"}`);
+        return;
+      }
+
+      // Create blob from response
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+
+      // Trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${selectedScan.target.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-${formatDate(selectedScan.createdAt)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+
+      // Cleanup
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Export failed:", err);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      alert(`Export failed: ${message}`);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -164,7 +202,7 @@ export default function ReportsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             onClick={() => setExportFormat("pdf")}
-                            className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 transition-all ${exportFormat === "pdf"
+                            className={`w-full flex items-center justify-center gap-4 px-4 py-2 rounded-xl border-2 transition-all ${exportFormat === "pdf"
                               ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
                               : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
                               }`}>
@@ -173,8 +211,8 @@ export default function ReportsPage() {
                             </span>
                             <span className="font-bold text-sm">PDF</span>
                           </button>
-                          <button
-                            onClick={() => setExportFormat("html")}
+                          {/* <button */}
+                          {/* onClick={() => setExportFormat("html")}
                             className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 transition-all ${exportFormat === "html"
                               ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
                               : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
@@ -183,7 +221,7 @@ export default function ReportsPage() {
                               code
                             </span>
                             <span className="font-bold text-sm">HTML</span>
-                          </button>
+                          </button> */}
                         </div>
                       </div>
 
@@ -200,11 +238,14 @@ export default function ReportsPage() {
                       {/* Export Button */}
                       <button
                         onClick={handleExport}
-                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/30 transition-all transform hover:scale-105 active:scale-95">
-                        <span className="material-symbols-outlined">
-                          download
-                        </span>
-                        Export Report
+                        disabled={isExporting}
+                        className={`w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/30 transition-all transform hover:scale-105 active:scale-95 ${isExporting ? 'opacity-75 cursor-wait' : ''}`}>
+                        {isExporting ? (
+                          <span className="material-symbols-outlined animate-spin">sync</span>
+                        ) : (
+                          <span className="material-symbols-outlined">download</span>
+                        )}
+                        {isExporting ? 'Generating Report...' : 'Export Report'}
                       </button>
 
                       {/* Report Info */}

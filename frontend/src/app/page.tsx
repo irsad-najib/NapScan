@@ -41,7 +41,7 @@ export default function Home() {
     ["critical", "high"].includes((b.risk_level || "").toLowerCase())
   ).length;
   const completedScans = batches.filter((b) =>
-    ["completed", "finished"].includes(b.status.toLowerCase())
+    ["completed", "finished", "success", "complete"].includes(b.status.toLowerCase())
   ).length;
   const successRate = batches.length > 0 ? Math.round((completedScans / batches.length) * 100) : 0;
 
@@ -80,7 +80,7 @@ export default function Home() {
       label: "Success Rate",
       value: `${successRate}%`,
       trend: "Completion",
-      trendUp: successRate >= 80,
+      trendUp: successRate >= 50,
       icon: "check_circle",
       bgColor: "bg-gradient-to-br from-emerald-600 to-emerald-400",
       borderColor: "border-emerald-500/30",
