@@ -156,6 +156,25 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         savePendingDecisionsToStorage(pendingDecisions);
     }, [pendingDecisions]);
 
+    // --- Monitor for scan completion ---
+    useEffect(() => {
+        scans.forEach(scan => {
+            if (scan.status === 'running') {
+                const tools = Object.values(scan.tools);
+                if (tools.length > 0 && tools.every(t => t.status === 'completed' || t.status === 'failed')) {
+                    console.log(`[ScanContext] Auto-marking scan ${scan.id} as completed`);
+                    // Use a direct state update to avoid dependency cycles with updateScan helper
+                    setScans((prev) =>
+                        prev.map((s) => {
+                            if (s.id !== scan.id) return s;
+                            return { ...s, status: 'completed', updatedAt: new Date().toISOString() };
+                        })
+                    );
+                }
+            }
+        });
+    }, [scans]);
+
     const getScan = useCallback((id: string) => {
         return scans.find((s) => s.id === id);
     }, [scans]);

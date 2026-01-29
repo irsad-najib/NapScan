@@ -1405,6 +1405,18 @@ export function extractMobsfAppInfo(rawResult: any): MobSFAppInfo | null {
 }
 
 /**
+ * Normalize severity strings to standard format
+ */
+function normalizeSeverity(input: string): "Critical" | "High" | "Medium" | "Low" | "Info" {
+    const s = (input || "").toLowerCase();
+    if (s.includes("critical") || s.includes("danger")) return "Critical";
+    if (s.includes("high")) return "High";
+    if (s.includes("medium") || s.includes("war") || s.includes("warn")) return "Medium"; // Matches warning
+    if (s.includes("low") || s.includes("hotspot")) return "Low"; // Matches hotspot
+    return "Info";
+}
+
+/**
  * Extract tabular data for the ParsedResultTable component
  */
 export function getToolTableData(tool: ToolKey | string, result: any): any[] {
@@ -1444,6 +1456,39 @@ function getNmapTableData(result: any): any[] {
     // Check if we have raw structure availability (preferred for table view)
     let rawData = result;
 
+    // Helper to calculate severity
+    const getSeverity = (port: number, service: string, state: string): "Critical" | "High" | "Medium" | "Low" | "Info" => {
+        // Filtered ports are informational
+        if (state.includes("filtered") && !state.includes("open")) {
+            return "Info";
+        }
+
+        // Critical: Well-known vulnerable services
+        const criticalPorts = [23, 69, 161, 445, 512, 513, 514, 1433, 1434, 3389];
+        if (criticalPorts.includes(port)) return "Critical";
+
+        // High: Database and admin ports
+        const highPorts = [21, 3306, 5432, 27017, 6379, 9200, 5900, 5901, 8080, 8443];
+        if (highPorts.includes(port)) return "High";
+
+        // Services that are inherently risky
+        const riskyServices = ["telnet", "tftp", "snmp", "rdp", "vnc", "ftp"];
+        if (riskyServices.some(s => service.toLowerCase().includes(s))) return "High";
+
+        // Medium: Standard web and encrypted services
+        const mediumPorts = [80, 443, 8000, 8888, 9000];
+        if (mediumPorts.includes(port)) return "Medium";
+
+        // Low: Common safe services
+        const lowPorts = [22, 25, 53, 110, 143, 993, 995];
+        if (lowPorts.includes(port)) return "Low";
+
+        // Default for open|filtered UDP ports
+        if (state === "open|filtered") return "Low";
+
+        return "Info";
+    };
+
     // Handle "risks" format (API processed) - this doesn't have all ports usually, only risks
     // But we might have the full map in result directly if it was passed raw
 
@@ -1451,13 +1496,20 @@ function getNmapTableData(result: any): any[] {
     const hosts: any[] = [];
 
     const parsePorts = (hostPorts: any[], protocol: string) => {
-        return hostPorts.map(p => ({
-            port: p.port,
-            protocol: protocol,
-            state: p.State?.state || 'unknown',
-            service: p.Service?.name || 'unknown',
-            version: p.Service?.product ? `${p.Service.product} ${p.Service.version || ''}` : ''
-        }));
+        return hostPorts.map(p => {
+            const portNum = parseInt(p.port);
+            const service = p.Service?.name || 'unknown';
+            const state = p.State?.state || 'unknown';
+
+            return {
+                port: p.port,
+                protocol: protocol,
+                state: state,
+                service: service,
+                version: p.Service?.product ? `${p.Service.product} ${p.Service.version || ''}` : '',
+                severity: getSeverity(portNum, service, state)
+            };
+        });
     };
 
     // Helper to traverse the raw nmap structure
@@ -1506,7 +1558,7 @@ function getNmapTableData(result: any): any[] {
                         state: 'open', // Assumed if it's a finding
                         service: f.service || 'unknown',
                         version: f.description || f.name,
-                        severity: f.severity || r.threat_level
+                        severity: normalizeSeverity(f.severity || r.threat_level)
                     });
                 });
             } else {
@@ -1517,7 +1569,7 @@ function getNmapTableData(result: any): any[] {
                     state: 'open',
                     service: 'unknown',
                     version: r.title,
-                    severity: r.threat_level
+                    severity: normalizeSeverity(r.threat_level)
                 });
             }
         });
@@ -1580,7 +1632,8 @@ function getZapTableData(result: any): any[] {
 
     return alerts.map((a: any) => ({
         alert: a.alert || a.name,
-        risk: a.risk || a.riskdesc?.split(' ')[0],
+        // Use normalized severity
+        risk: normalizeSeverity(a.risk || a.riskdesc?.split(' ')[0] || "Info"),
         confidence: a.confidence,
         method: a.method,
         url: a.url
@@ -1610,7 +1663,7 @@ function getNucleiTableData(result: any): any[] {
 
     return findings.map((f: any) => ({
         template: f['template-id'] || f.templateID || f.info?.name,
-        severity: f.info?.severity || f.severity,
+        severity: normalizeSeverity(f.info?.severity || f.severity || "info"),
         name: f.info?.name || f.name,
         matched_at: f['matched-at'] || f.matched_at || f.host,
         timestamp: f.timestamp
@@ -1643,12 +1696,12 @@ function getSslyzeTableData(result: any): any[] {
                         rows.push({
                             property: `Certificate Subject (${idx + 1})`,
                             value: leaf.subject?.rfc4514_string || 'Unknown',
-                            status: 'Info'
+                            severity: 'Info'
                         });
                         rows.push({
                             property: `Certificate Not After (${idx + 1})`,
                             value: leaf.not_valid_after,
-                            status: 'Info'
+                            severity: 'Info'
                         });
                     }
                 });
@@ -1657,7 +1710,7 @@ function getSslyzeTableData(result: any): any[] {
             // Cipher Suites (Simplified)
             // Accessing different scan commands
             if (scanData.ssl_2_0_cipher_suites?.result?.is_vulnerable_to_client_renegotiation_dos) { // Just example check
-                rows.push({ property: 'SSL 2.0', value: 'Supported', status: 'Critical' });
+                rows.push({ property: 'SSL 2.0', value: 'Supported', severity: 'Critical' });
             }
             // ... Add more parsers as needed, but SSLyze JSON is huge. 
             // Only adding basic connectivity info for now + what we parsed before
@@ -1680,13 +1733,16 @@ function getMobsfTableData(result: any): any[] {
     const mobsfFindings = data?.findings?.mobsf || data?.summary;
 
     if (mobsfFindings) {
-        // High/Warning/Secure
-        ['high', 'warning', 'hotspot'].forEach(sev => {
+        // High/Warning/Secure/Hotspot
+        ['high', 'warning', 'hotspot', 'secure'].forEach(sev => {
             if (Array.isArray(mobsfFindings[sev])) {
                 mobsfFindings[sev].forEach((f: any) => {
+                    // Map MobSF severity keys to our standard
+                    let standardSeverity = normalizeSeverity(sev); // warning->Medium, hotspot->Low
+
                     rows.push({
                         title: f.title,
-                        severity: sev.charAt(0).toUpperCase() + sev.slice(1),
+                        severity: standardSeverity,
                         component: f.section || f.file_path,
                         description: f.description
                     });
@@ -1699,7 +1755,7 @@ function getMobsfTableData(result: any): any[] {
             mobsfFindings.manifest.findings.forEach((f: any) => {
                 rows.push({
                     title: f.title,
-                    severity: f.severity,
+                    severity: normalizeSeverity(f.severity),
                     component: 'AndroidManifest.xml',
                     description: f.description
                 });
@@ -1723,15 +1779,53 @@ function getOpenVasTableData(result: any): any[] {
         } else {
             findings = [res];
         }
-    } else if (Array.isArray(result)) {
+    }
+    // Format: { results: { result: [...] } }
+    else if (result?.results?.result && Array.isArray(result.results.result)) {
+        findings = result.results.result;
+    }
+    // Format: { data: { results: { result: [...] } } }
+    else if (result?.data?.results?.result && Array.isArray(result.data.results.result)) {
+        findings = result.data.results.result;
+    }
+    // Fallback: direct array
+    else if (Array.isArray(result)) {
         findings = result;
     }
 
-    return findings.map((f: any) => ({
-        name: f.name || f.nvt?.name,
-        severity: f.threat || f.severity,
-        host: f.host?.['#text'] || f.host,
-        port: f.port?.['#text'] || f.port,
-        description: f.description
-    }));
+    // Filter out "Log" level findings if there are other findings
+    const hasRealFindings = findings.some((r: any) => {
+        const threat = (r.threat || "").toLowerCase();
+        const severity = parseFloat(r.severity || "0");
+        return threat !== "log" && threat !== "" && severity > 0;
+    });
+
+    return findings
+        .filter((f: any) => {
+            const threat = (f.threat || "").toLowerCase();
+            const score = parseFloat(f.severity || "0");
+            // If we have real vulnerabilities, hide Log/Info (severity 0) items to reduce noise
+            if (hasRealFindings && (threat === "log" || score === 0)) {
+                return false;
+            }
+            return true;
+        })
+        .map((f: any) => {
+            // Normalize severity using standard helper, but check score first if needed
+            let severityInput = (f.threat || "").toLowerCase();
+            const score = parseFloat(f.severity || "0");
+
+            if (score >= 9.0) severityInput = "critical";
+            else if (score >= 7.0) severityInput = "high";
+            else if (score >= 4.0) severityInput = "medium";
+            else if (score >= 0.1) severityInput = "low";
+
+            return {
+                name: f.name || f.nvt?.name || "Unknown Finding",
+                severity: normalizeSeverity(severityInput), // Use our calculated one which matches the standard
+                host: f.host?.['#text'] || f.host,
+                port: f.port?.['#text'] || f.port,
+                description: f.description
+            };
+        });
 }

@@ -92,7 +92,7 @@ export function ToolMetadata({ toolData, target }: ToolMetadataProps) {
                                 )}
                             </h5>
                         </div>
-                        <ParsedResultTable tool={toolData.tool} data={tableData} />
+                        <ParsedResultTable tool={toolData.tool} data={tableData} status={toolData.status} />
                     </div>
                 ) : (
                     <div>

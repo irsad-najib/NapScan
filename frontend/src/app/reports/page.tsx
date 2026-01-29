@@ -51,15 +51,13 @@ export default function ReportsPage() {
     try {
       setIsExporting(true);
 
-      // Use batchId if available, otherwise fall back to provided test ID
-      // This ensures existing scans can at least trigger a download for testing purposes
-      const reportId = selectedScan.batchId || "0212ce25-5184-4695-b87d-475b062bdeb8";
-
       if (!selectedScan.batchId) {
-        console.warn("No batchId found for scan, using test ID:", reportId);
+        alert("Report not available for this scan (missing batch ID). Please run a new scan.");
+        setIsExporting(false);
+        return;
       }
 
-      const res = await batchApi.report(reportId);
+      const res = await batchApi.report(selectedScan.batchId);
 
       if (!res.ok) {
         alert(`Failed to download report: ${res.message || "Unknown error"}`);

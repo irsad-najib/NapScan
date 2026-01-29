@@ -24,6 +24,7 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
                 return [
                     { header: 'Port', accessor: 'port', className: 'w-24 font-mono' },
                     { header: 'Protocol', accessor: 'protocol', className: 'w-24 uppercase text-xs font-bold' },
+                    { header: 'Severity', accessor: 'severity', className: 'w-24' },
                     { header: 'State', accessor: 'state', className: 'w-32 capitalize' },
                     { header: 'Service', accessor: 'service', className: 'font-medium' },
                     { header: 'Version', accessor: 'version', className: 'text-slate-500 hidden md:table-cell' },
@@ -92,7 +93,7 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
         switch (tool) {
             case 'zap': field = 'risk'; break;
             case 'nuclei': field = 'severity'; break;
-            case 'nmap': field = 'state'; break;
+            case 'nmap': field = 'severity'; break;
             case 'ffuf': field = 'status'; break;
             case 'openvas': field = 'severity'; break;
             case 'mobsf': field = 'severity'; break;
@@ -111,7 +112,7 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
         switch (tool) {
             case 'zap': field = 'risk'; break;
             case 'nuclei': field = 'severity'; break;
-            case 'nmap': field = 'state'; break;
+            case 'nmap': field = 'severity'; break;
             case 'ffuf': field = 'status'; break;
             case 'openvas': field = 'severity'; break;
             case 'mobsf': field = 'severity'; break;
@@ -144,6 +145,44 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
     }
 
     if (!data || data.length === 0) {
+        if (status?.toLowerCase() === 'running' || status?.toLowerCase() === 'pending') {
+            return (
+                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 to-white dark:from-slate-900 dark:to-slate-800 p-12 text-center border border-slate-200 dark:border-slate-800 group">
+                    {/* Background Decor */}
+                    <div className="absolute top-0 left-0 w-full h-full overflow-hidden opacity-50 pointer-events-none">
+                        <div className="absolute top-10 right-10 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl animate-pulse"></div>
+                        <div className="absolute bottom-10 left-10 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl animate-pulse delay-700"></div>
+                    </div>
+
+                    {/* Icon wrapper with glow effect */}
+                    <div className="relative mx-auto w-24 h-24 mb-6">
+                        <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl animate-pulse"></div>
+                        <div className="relative w-full h-full bg-gradient-to-br from-white to-blue-50 dark:from-slate-800 dark:to-slate-900 rounded-full flex items-center justify-center border-2 border-blue-100 dark:border-blue-900 shadow-xl">
+                            <span className="material-symbols-outlined text-5xl text-blue-500 dark:text-blue-400 drop-shadow-sm animate-bounce-slow">
+                                search
+                            </span>
+                        </div>
+
+                        {/* Orbiting particles */}
+                        <div className="absolute inset-0 animate-spin-slow">
+                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-400 rounded-full opacity-60"></div>
+                            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-cyan-400 rounded-full opacity-40"></div>
+                        </div>
+                    </div>
+
+                    {/* Text content */}
+                    <div className="relative z-10 space-y-3">
+                        <h3 className="text-2xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+                            Scan in Progress
+                        </h3>
+                        <p className="text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed text-base">
+                            We are currently analyzing the target. Please wait while the scan completes.
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
         return (
             <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-800 p-12 text-center border border-slate-200 dark:border-slate-800 group">
                 {/* Background Decor */}
@@ -215,13 +254,20 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
         }
 
         if (column.accessor === 'severity' || column.accessor === 'risk') {
-            let color = 'text-slate-600';
+            let color = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
             const v = String(value).toLowerCase();
-            if (v === 'critical' || v === 'high') color = 'text-red-600 font-bold';
-            else if (v === 'medium') color = 'text-amber-600 font-bold';
-            else if (v === 'low') color = 'text-blue-600';
 
-            return <span className={color}>{value}</span>;
+            if (v.includes('critical')) color = 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+            else if (v.includes('high')) color = 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
+            else if (v.includes('medium')) color = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+            else if (v.includes('low')) color = 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+            else if (v.includes('info')) color = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+
+            return (
+                <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide ${color}`}>
+                    {value}
+                </span>
+            );
         }
 
         return value;
@@ -249,7 +295,7 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
                                         switch (tool) {
                                             case 'zap': field = 'risk'; break;
                                             case 'nuclei': field = 'severity'; break;
-                                            case 'nmap': field = 'state'; break;
+                                            case 'nmap': field = 'severity'; break;
                                             case 'ffuf': field = 'status'; break;
                                             case 'openvas': field = 'severity'; break;
                                             case 'mobsf': field = 'severity'; break;
