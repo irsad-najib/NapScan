@@ -424,7 +424,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
         try {
             let progress = 0;
-            const POLL_INTERVAL = 5000;
+            const POLL_INTERVAL = 15000;
             let failureCount = 0;
             const MAX_FAILURES = 5;
 
@@ -590,7 +590,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             // Step 2: Poll for status (until completed)
             let progress = 0;
-            const POLL_INTERVAL = 5000; // 5 seconds
+            const POLL_INTERVAL = 15000; // 15 seconds
             let pollCount = 0;
 
             console.log(`[FFUF] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
@@ -698,7 +698,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             // Step 2: Poll for status (until completed)
             let progress = 0;
-            const POLL_INTERVAL = 5000; // 5 seconds
+            const POLL_INTERVAL = 15000; // 15 seconds
             let pollCount = 0;
 
             console.log(`[SSLyze] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
@@ -806,7 +806,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             // Step 2: Poll for status (until completed)
             let progress = 0;
-            const POLL_INTERVAL = 10000; // 10 seconds (ZAP scans can be longer)
+            const POLL_INTERVAL = 15000; // 15 seconds
             let pollCount = 0;
 
             console.log(`[ZAP] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
@@ -909,7 +909,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             // Step 2: Poll for status (until completed)
             let progress = 0;
-            const POLL_INTERVAL = 10000; // 10 seconds
+            const POLL_INTERVAL = 15000; // 15 seconds
             let pollCount = 0;
 
             console.log(`[Nuclei] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
@@ -1026,7 +1026,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             updateToolStatus(scanId, tool, { progress: 20, fileId });
 
             // Step 2: Poll for status until WAITING_USER_DECISION or terminal state
-            const POLL_INTERVAL = 5000; // 5 seconds
+            const POLL_INTERVAL = 15000; // 15 seconds
             let pollCount = 0;
 
             console.log(`[MobSF] Step 2: Polling for status (interval ${POLL_INTERVAL}ms)...`);
@@ -1367,7 +1367,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                 });
 
                 // Poll for Frida completion
-                const POLL_INTERVAL = 5000;
+                const POLL_INTERVAL = 15000;
                 let pollCount = 0;
 
                 console.log(`[MobSF] Continuing with Frida, polling for completion...`);
@@ -1454,15 +1454,15 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         console.log(`[Resume] Resuming polling for ${tool} (taskId: ${taskId}) in scan ${scanId}`);
 
         const POLL_INTERVALS: Record<string, number> = {
-            nmap: 5000,
-            ffuf: 5000,
-            sslyze: 5000,
-            zap: 10000,
-            nuclei: 10000,
+            nmap: 15000,
+            ffuf: 15000,
+            sslyze: 15000,
+            zap: 15000,
+            nuclei: 15000,
             openvas: 15000,
         };
 
-        const POLL_INTERVAL = POLL_INTERVALS[tool] || 5000;
+        const POLL_INTERVAL = POLL_INTERVALS[tool] || 15000;
 
         try {
             while (true) {
