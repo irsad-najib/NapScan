@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -257,8 +258,17 @@ func (s *OpenVASService) StartScan(ctx context.Context, target string, batchID s
 	// 1. Create Target
 	log.Printf("[OPENVAS_SERVICE] Creating target: %s", targetName)
 	portListID := "33d0cd82-57c6-11e1-8ed1-406186ea4fc5" // All IANA configured TCP
+
+	// Sanitize target (remove protocol/path)
+	cleanTarget := target
+	if  strings.Contains(target, "://") {
+		if u, err := url.Parse(target); err == nil {
+			cleanTarget = u.Hostname()
+		}
+	}
+	
 	createTargetXML := fmt.Sprintf(`<create_target><name>%s</name><hosts>%s</hosts><port_list id="%s"/></create_target>`, 
-		targetName, target, portListID)
+		targetName, cleanTarget, portListID)
 	
 	out, err := s.RunGVMCLI(ctx, createTargetXML)
 	if err != nil {

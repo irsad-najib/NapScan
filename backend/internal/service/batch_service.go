@@ -980,7 +980,9 @@ func (s *BatchService) GetBatchReportData(
 	critical := 0
 	high := 0
 	medium := 0
+
 	low := 0
+	info := 0
 
 	for _, res := range scanResults {
 
@@ -1030,6 +1032,8 @@ func (s *BatchService) GetBatchReportData(
 				medium++
 			case "LOW":
 				low++
+			case "INFO":
+				info++
 			}
 
 			vulnerabilities = append(vulnerabilities, models.UnifiedVulnerability{
@@ -1066,6 +1070,7 @@ func (s *BatchService) GetBatchReportData(
 		HighCount:            high,
 		MediumCount:          medium,
 		LowCount:             low,
+		InfoCount:            info,
 		OverallRiskScore:     riskResponse.RiskScore,
 		RiskLevel:            string(riskResponse.RiskLevel),
 	}

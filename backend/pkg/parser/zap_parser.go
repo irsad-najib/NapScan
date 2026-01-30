@@ -51,6 +51,11 @@ func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		alertName, _ := alertMap["alert"].(string)
 		url, _ := alertMap["url"].(string)
 
+		if strings.Contains(strings.ToLower(alertName), "user agent fuzzer") &&
+			strings.EqualFold(riskStr, "informational") {
+			continue
+		}
+
 		description := fmt.Sprintf("%s on %s", alertName, url)
 
 		sev := strings.ToLower(riskStr)
@@ -111,6 +116,7 @@ func (p *ZAPParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, 
 		findingCount = 1
 	}
 
+	
 	detail.Score = float64(highestRisk)*10 + findingCount*2
 	return detail, nil
 }

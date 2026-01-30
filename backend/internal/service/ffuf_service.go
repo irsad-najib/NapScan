@@ -88,6 +88,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-t", "25",                 // Max 25 concurrent threads
 		"-timeout", "10",           // Connection timeout: 10 seconds
 		"-H", "User-Agent: "+randomUA,
+		"-H", "X-Scanner-Origin: ffuf",
 		"-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
 		"-H", "Accept-Language: en-US,en;q=0.9",
 		"-H", "Accept-Encoding: gzip, deflate",

@@ -22,6 +22,7 @@ type RiskSummary struct {
 	HighCount            int     `json:"high_count"`
 	MediumCount          int     `json:"medium_count"`
 	LowCount             int     `json:"low_count"`
+	InfoCount            int     `json:"info_count"`
 	OverallRiskScore     float64 `json:"overall_risk_score"` // 0-100
 	RiskLevel            string  `json:"risk_level"`         // Safe, Low, Medium, High, Critical
 }

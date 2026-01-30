@@ -235,6 +235,10 @@ func RunZapAsync(ctx context.Context, taskID string, manager *ScanManager) error
 	log.Printf("[ZAP_ASYNC] Initiating spider scan")
 	manager.UpdateProgress(taskID, 5, models.StatusRunning)
 
+	// Configure replacer to ignore ffuf traffic
+	log.Printf("[ZAP_ASYNC] Configuring replacer to ignore ffuf traffic")
+	zapSvc.configureReplacer(ctx, baseURL, apiKey)
+
 	spiderQ := url.Values{}
 	spiderQ.Set("url", target)
 	spiderQ.Set("recurse", "true")
@@ -432,4 +436,22 @@ func (s *ZapService) ExecuteFullScan(ctx context.Context, target string) (map[st
 		"active":    map[string]interface{}{"scanId": ascanID},
 		"alertsRaw": alertsRes,
 	}, nil
+}
+
+func (s *ZapService) configureReplacer(ctx context.Context, baseURL, apiKey string) {
+	q := url.Values{}
+	q.Set("description", "Ignore FFUF Traffic")
+	q.Set("enabled", "true")
+	q.Set("matchtype", "REQ_HEADER")
+	q.Set("matchregex", "true")
+	q.Set("matchstring", "X-Scanner-Origin: ffuf")
+	q.Set("replacement", "")
+	q.Set("initiators", "7") // Proxy only
+
+	if apiKey != "" {
+		q.Set("apikey", apiKey)
+	}
+
+	_, _ = s.zapGetJSON(ctx, baseURL,
+		"/JSON/replacer/action/addRule/", q)
 }

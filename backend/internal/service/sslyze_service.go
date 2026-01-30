@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"napscan-be/internal/models"
@@ -37,11 +39,20 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	tmpFile := filepath.Join(os.TempDir(), "sslyze_"+time.Now().Format("20060102150405")+".json")
 	defer os.Remove(tmpFile)
 
+
+	// Sanitize target
+	cleanTarget := target
+	if strings.Contains(target, "://") {
+		if u, err := url.Parse(target); err == nil {
+			cleanTarget = u.Hostname()
+		}
+	}
+
 	// Build sslyze command with context
 	cmd := exec.CommandContext(ctx,
 		"sslyze",
 		"--json_out", tmpFile,
-		target,
+		cleanTarget,
 	)
 
 	// Phase 1: Start scan (0-50%)
@@ -87,6 +98,13 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 
 	// Phase 3: Parse results (90%)
 	manager.UpdateProgress(taskID, 90, models.StatusRunning)
+
+	// Check file size / existence before reading
+	if info, err := os.Stat(tmpFile); err != nil || info.Size() == 0 {
+		log.Printf("[SSLYZE_ASYNC] Output file empty or missing. stderr: %s", outputBuffer.String())
+		manager.Fail(taskID, fmt.Errorf("sslyze produced no output. stderr: %s", outputBuffer.String()))
+		return fmt.Errorf("sslyze produced no output")
+	}
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
@@ -142,10 +160,18 @@ func (s *SslyzeService) ExecuteScan(ctx context.Context, target string) (interfa
 	tmpFile := filepath.Join(os.TempDir(), "sslyze_"+time.Now().Format("20060102150405")+".json")
 	defer os.Remove(tmpFile)
 
+	// Sanitize target
+	cleanTarget := target
+	if strings.Contains(target, "://") {
+		if u, err := url.Parse(target); err == nil {
+			cleanTarget = u.Hostname()
+		}
+	}
+
 	cmd := exec.CommandContext(ctx,
 		"sslyze",
 		"--json_out", tmpFile,
-		target,
+		cleanTarget,
 	)
 
 	log.Printf("[SSLYZE_SERVICE] Executing sslyze command")
