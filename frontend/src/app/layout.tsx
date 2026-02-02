@@ -19,6 +19,7 @@ export const metadata: Metadata = {
 };
 
 import { ScanProvider } from "@/context/ScanContext";
+import { ScheduleProvider } from "@/context/ScheduleContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 
@@ -70,7 +71,9 @@ export default function RootLayout({
         <AuthProvider>
           <ThemeProvider>
             <ScanProvider>
-              {children}
+              <ScheduleProvider>
+                {children}
+              </ScheduleProvider>
             </ScanProvider>
           </ThemeProvider>
         </AuthProvider>

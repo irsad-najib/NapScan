@@ -47,7 +47,7 @@ export interface ScanJob {
     status: ScanStatus;
     createdAt: string;
     updatedAt: string;
-    tools: Record<ToolKey, ToolExecution>;
+    tools: Partial<Record<ToolKey, ToolExecution>>;
     vulnerabilities: ScanVulnerability[];
 }
 
@@ -145,6 +145,126 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     const [pendingDecisions, setPendingDecisions] = useState<MobSFPendingDecision[]>(() => loadPendingDecisionsFromStorage());
     // Track which tools are already being polled to prevent duplicate polling
     const [pollingTools, setPollingTools] = useState<Set<string>>(new Set());
+
+    // --- Global Active Scan Polling ---
+    const syncActiveScans = useCallback(async () => {
+        try {
+            const res = await scannersApi.getActiveScans();
+            if (!res.ok || !res.data) return;
+
+            setScans((prevScans) => {
+                let hasChanges = false;
+                const newScans = [...prevScans];
+
+                // Group tasks by BatchID (or TaskID if no batch)
+                const tasksByScanId = new Map<string, Array<any>>();
+
+                res.data.forEach((task) => {
+                    const scanId = task.batch_id || task.task_id;
+                    if (!tasksByScanId.has(scanId)) {
+                        tasksByScanId.set(scanId, []);
+                    }
+                    tasksByScanId.get(scanId)?.push(task);
+                });
+
+                tasksByScanId.forEach((tasks, scanId) => {
+                    const existingScanIndex = newScans.findIndex((s) => s.id === scanId);
+
+                    // Helper to map backend status to frontend status
+                    const mapStatus = (s: string): ScanStatus => {
+                        const low = s.toLowerCase();
+                        if (low === 'done' || low === 'success') return 'completed';
+                        if (low === 'error') return 'failed';
+                        return low as ScanStatus;
+                    };
+
+                    const toolUpdates: Record<ToolKey, ToolExecution> = {};
+                    let isScanRunning = false;
+
+                    tasks.forEach((t) => {
+                        const toolKey = t.tool.toLowerCase() as ToolKey;
+                        const status = mapStatus(t.status);
+                        if (status === 'running' || status === 'pending') isScanRunning = true;
+
+                        toolUpdates[toolKey] = {
+                            tool: toolKey,
+                            status: status,
+                            progress: t.progress,
+                            taskId: t.task_id,
+                            startTime: t.started_at,
+                            endTime: (status === 'completed' || status === 'failed') ? t.updated_at : undefined,
+                        };
+                    });
+
+                    if (existingScanIndex !== -1) {
+                        // Update existing scan
+                        const existingScan = newScans[existingScanIndex];
+                        let scanChanged = false;
+
+                        // Check for tool updates
+                        Object.entries(toolUpdates).forEach(([key, update]) => {
+                            const toolKey = key as ToolKey;
+                            const current = existingScan.tools[toolKey];
+
+                            // Only update if changed
+                            if (!current ||
+                                current.status !== update.status ||
+                                current.progress !== update.progress ||
+                                current.taskId !== update.taskId) { // Added taskId check
+
+                                existingScan.tools = {
+                                    ...existingScan.tools,
+                                    [toolKey]: { ...(current || {}), ...update }
+                                };
+                                scanChanged = true;
+                            }
+                        });
+
+                        // Update overall status if running
+                        if (isScanRunning && existingScan.status !== 'running') {
+                            existingScan.status = 'running';
+                            scanChanged = true;
+                        }
+
+                        if (scanChanged) {
+                            existingScan.updatedAt = new Date().toISOString();
+                            newScans[existingScanIndex] = existingScan;
+                            hasChanges = true;
+                        }
+
+                    } else {
+                        // Create new scan entry for discovered backend scan
+                        const firstTask = tasks[0];
+                        const newScan: ScanJob = {
+                            id: scanId,
+                            batchId: firstTask.batch_id,
+                            name: `Scheduled Scan ${scanId.substring(0, 8)}`, // Fallback name
+                            target: firstTask.target,
+                            status: isScanRunning ? 'running' : 'completed', // Simplified
+                            createdAt: firstTask.started_at || new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                            tools: toolUpdates,
+                            vulnerabilities: [],
+                        };
+                        newScans.unshift(newScan); // Add to top
+                        hasChanges = true;
+                    }
+                });
+
+                return hasChanges ? newScans : prevScans;
+            });
+
+        } catch (err) {
+            console.error("[ScanContext] Failed to sync active scans:", err);
+        }
+    }, []);
+
+    // Poll active scans every 5 seconds
+    useEffect(() => {
+        syncActiveScans(); // Initial fetch
+        const interval = setInterval(syncActiveScans, 5000);
+        return () => clearInterval(interval);
+    }, [syncActiveScans]);
 
     // --- Save scans to localStorage whenever they change ---
     useEffect(() => {

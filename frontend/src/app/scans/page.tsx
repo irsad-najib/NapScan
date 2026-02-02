@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
+import { useSchedule } from "@/context/ScheduleContext";
 import { useAuth } from "@/context/AuthContext";
 import { ToolList } from "@/components/scans/ToolList";
 import { Sidebar, Header } from "@/components/layout";
@@ -12,6 +13,7 @@ import { AuthRequiredDialog } from "@/components/common/AuthRequiredDialog";
 
 export default function ScansPage() {
   const { scans, startScan, deleteScan, pendingDecisions, submitMobSFDecision } = useScan();
+  const { createSchedule } = useSchedule();
   const { isAuthenticated } = useAuth();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
@@ -176,12 +178,73 @@ export default function ScansPage() {
     }
 
     setIsSubmitting(true);
+
     try {
-      const scanId = await startScan(target, selectedTools, formData.scanName);
-      setShowNewScanForm(false);
-      // Removed redirect: router.push(`/scans/${scanId}`);
-      // Expand the newly created scan
-      setExpandedScanId(scanId);
+      if (formData.scanTiming === "scheduled") {
+        // Validate date/time
+        if (!formData.scheduledDate || !formData.scheduledTime) {
+          alert("Please select both date and time for the scheduled scan.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        const date = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`);
+        if (date < new Date()) {
+          alert("Scheduled time must be in the future.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Generate simple cron: Minute Hour Day Month DayOfWeek
+        // Note: This creates a recurring schedule if we strictly follow cron format implied by the user request.
+        // However, "Schedule for Later" usually implies a one-time thing, but our backend uses Cron.
+        // The current CreateScheduleDialog supports recurring.
+        // For this quick integration, let's assume specific date/time = "At this time every year" or "One time" if backend supports it.
+        // Since the prompt example was recurring "45 10 * * 1" (Weekly), I will convert this specific date into a cron that runs at this minute/hour/day/month
+        // Or better, just minute/hour/day/month/* for yearly, or minute/hour/* * * for daily?
+        // Given the UI is "Schedule for later", a one-time run is seemingly expected, but the backend API is "cron_expression".
+        // I'll implementation it as a daily schedule at that time for now, or ask clarification.
+        // Wait, user said "same as page scan... schedule for later... integrate".
+        // Let's generate a cron for the specific time.
+        const minute = date.getMinutes();
+        const hour = date.getHours();
+        const day = date.getDate();
+        const month = date.getMonth() + 1;
+        // Cron: "min hour day month *" => Yearly at this date time?
+        // Or just use the input as "Runs at HH:MM" daily?
+        // Let's assume daily for now if they just pick a time, but they picked a DATE too.
+        // So it's "Minute Hour Day Month *".
+        const cron = `${minute} ${hour} ${day} ${month} *`;
+
+        // Limitations: Our POST /schedule only takes ONE tool string, but new scan form allows multiple.
+        // I must loop and create individual schedules or ask backend to support list.
+        // The current implementation plan said "UI might need to restrict to single-tool".
+        // I will iterate and create a schedule for each selected tool to be safe.
+
+        let successCount = 0;
+        for (const tool of selectedTools) {
+          const success = await createSchedule({
+            name: formData.scanName || `${tool.toUpperCase()} Scan on ${target}`,
+            target: target,
+            tool: tool,
+            cron_expression: cron
+          });
+          if (success) successCount++;
+        }
+
+        if (successCount > 0) {
+          alert(`Successfully scheduled ${successCount} scan(s).`);
+          setShowNewScanForm(false);
+        } else {
+          alert("Failed to schedule scans.");
+        }
+
+      } else {
+        // Normal Immediate Scan
+        const scanId = await startScan(target, selectedTools, formData.scanName);
+        setShowNewScanForm(false);
+        setExpandedScanId(scanId);
+      }
     } catch (error) {
       console.error("Error creating scan:", error);
       alert("Failed to create scan. Please try again.");
