@@ -161,6 +161,7 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 		TaskID:    taskID,
 		UserID:    userID,
 		Target:    req.Target,
+		Tool:      "ffuf",
 		Status:    models.StatusPending,
 		Progress:  0,
 		Error:     nil,

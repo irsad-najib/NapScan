@@ -67,10 +67,10 @@ func (ts *TaskStore) Create(userID, target, batchID string) *ScanTask {
 	}
 
 	ts.tasks[task.TaskID] = task
-	
+
 	// Cleanup old tasks
 	go ts.cleanup()
-	
+
 	return task
 }
 
@@ -99,7 +99,7 @@ func (ts *TaskStore) Delete(taskID string) {
 func (ts *TaskStore) cleanup() {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	
+
 	now := time.Now()
 	for id, task := range ts.tasks {
 		if now.Sub(task.UpdatedAt) > ts.ttl {
@@ -107,6 +107,18 @@ func (ts *TaskStore) cleanup() {
 			delete(ts.tasks, id)
 		}
 	}
+}
+
+// GetAllActiveNucleiTasks returns all active tasks from the store
+func GetAllActiveNucleiTasks() []*ScanTask {
+	nucleiTaskStore.mu.RLock()
+	defer nucleiTaskStore.mu.RUnlock()
+
+	tasks := make([]*ScanTask, 0, len(nucleiTaskStore.tasks))
+	for _, task := range nucleiTaskStore.tasks {
+		tasks = append(tasks, task)
+	}
+	return tasks
 }
 
 // StartScanAsync initiates an async Nuclei scan
@@ -123,7 +135,7 @@ func (ts *TaskStore) cleanup() {
 // @Router /nuclei/scan/async [post]
 func (h *NucleiHandler) StartScanAsync(c *fiber.Ctx) error {
 	log.Printf("[NUCLEI_ASYNC] Received async scan request")
-	
+
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
@@ -204,7 +216,7 @@ func (h *NucleiHandler) GetTaskStatus(c *fiber.Ctx) error {
 	}
 
 	if task.UserID != userID {
-		log.Printf("[NUCLEI_ASYNC] Access denied: user=%s tried to access task=%s owned by %s", 
+		log.Printf("[NUCLEI_ASYNC] Access denied: user=%s tried to access task=%s owned by %s",
 			userID, taskID, task.UserID)
 		return response.Error(c, fiber.StatusForbidden, "Access denied", nil)
 	}
@@ -266,7 +278,7 @@ func (h *NucleiHandler) GetTaskResult(c *fiber.Ctx) error {
 	}
 
 	if task.Status != TaskStatusCompleted {
-		return response.Error(c, fiber.StatusBadRequest, 
+		return response.Error(c, fiber.StatusBadRequest,
 			"Scan not completed yet. Status: "+string(task.Status), nil)
 	}
 
@@ -313,7 +325,7 @@ func (h *NucleiHandler) GetTaskResult(c *fiber.Ctx) error {
 
 // runAsyncScan executes the scan in background
 func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
-	log.Printf("[NUCLEI_ASYNC] Starting background scan for task=%s target=%s", 
+	log.Printf("[NUCLEI_ASYNC] Starting background scan for task=%s target=%s",
 		task.TaskID, task.Target)
 
 	// Update status to running
@@ -328,7 +340,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 
 	// Execute scan
 	results, err := h.service.ExecuteScan(ctx, task.Target)
-	
+
 	if err != nil {
 		log.Printf("[NUCLEI_ASYNC] Scan failed for task=%s: %v", task.TaskID, err)
 		nucleiTaskStore.Update(task.TaskID, func(t *ScanTask) {
@@ -339,7 +351,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 		return
 	}
 
-	log.Printf("[NUCLEI_ASYNC] Scan completed for task=%s with %d findings", 
+	log.Printf("[NUCLEI_ASYNC] Scan completed for task=%s with %d findings",
 		task.TaskID, len(results))
 
 	// Update task with results
@@ -360,7 +372,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 
 		dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		
+
 		_, dbErr := h.scanRepo.Insert(dbCtx, &models.ScanResult{
 			BatchID:   task.BatchID,
 			Tool:      "nuclei",
@@ -368,9 +380,9 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 			Result:    payload,
 			CreatedAt: time.Now().UTC(),
 		})
-		
+
 		if dbErr != nil {
-			log.Printf("[NUCLEI_ASYNC] Failed to save to database for task=%s: %v", 
+			log.Printf("[NUCLEI_ASYNC] Failed to save to database for task=%s: %v",
 				task.TaskID, dbErr)
 		} else {
 			log.Printf("[NUCLEI_ASYNC] Database insert success for task=%s", task.TaskID)
@@ -379,7 +391,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 
 	// Log response size
 	if jsonBytes, err := json.Marshal(results); err == nil {
-		log.Printf("[NUCLEI_ASYNC] Result size for task=%s: %d bytes (%.2f KB)", 
+		log.Printf("[NUCLEI_ASYNC] Result size for task=%s: %d bytes (%.2f KB)",
 			task.TaskID, len(jsonBytes), float64(len(jsonBytes))/1024)
 	}
 }

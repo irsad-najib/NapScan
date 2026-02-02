@@ -161,6 +161,7 @@ func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
 		TaskID:    taskID,
 		UserID:    userID,
 		Target:    req.Target,
+		Tool:      "nmap", // Set tool name
 		Status:    models.StatusPending,
 		Progress:  0,
 		Error:     nil,

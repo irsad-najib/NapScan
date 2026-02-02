@@ -159,6 +159,7 @@ func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
 		TaskID:    taskID,
 		UserID:    userID,
 		Target:    req.Target,
+		Tool:      "sslyze",
 		Status:    models.StatusPending,
 		Progress:  0,
 		Error:     nil,

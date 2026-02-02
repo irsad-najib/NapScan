@@ -5,6 +5,7 @@ import (
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -90,7 +91,7 @@ func (h *ScanHandler) GetStatus(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusNotFound, "task not found", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Status retrieved: task_id=%s, status=%s, progress=%d%%", 
+	log.Printf("[SCAN_HANDLER] Status retrieved: task_id=%s, status=%s, progress=%d%%",
 		taskID, task.Status, task.Progress)
 
 	return response.Success(c, "status retrieved successfully", task.ToResponse())
@@ -127,8 +128,8 @@ func (h *ScanHandler) GetReport(c *fiber.Ctx) error {
 	// Only allow report access if scan is completed
 	if task.Status != models.StatusCompleted {
 		log.Printf("[SCAN_HANDLER] Report not available: task_id=%s, status=%s", taskID, task.Status)
-		return response.Error(c, fiber.StatusConflict, 
-			"report not available: scan is not completed (current status: " + string(task.Status) + ")", nil)
+		return response.Error(c, fiber.StatusConflict,
+			"report not available: scan is not completed (current status: "+string(task.Status)+")", nil)
 	}
 
 	log.Printf("[SCAN_HANDLER] Report retrieved: task_id=%s", taskID)
@@ -138,4 +139,46 @@ func (h *ScanHandler) GetReport(c *fiber.Ctx) error {
 		"target":  task.Target,
 		"result":  task.Result,
 	})
+}
+
+// GetActiveScans returns all currently active scan tasks (from ScanManager and Nuclei)
+// @Summary List Active Scans
+// @Description Get a list of all currently running or pending scan tasks
+// @Tags Scan Control
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} response.Response
+// @Router /scan/active [get]
+func (h *ScanHandler) GetActiveScans(c *fiber.Ctx) error {
+	log.Printf("[SCAN_HANDLER] Fetching all active scans")
+
+	activeScans := make([]models.ScanTaskResponse, 0)
+
+	// 1. Get from ScanManager (Nmap, Zap, Ffuf, Sslyze)
+	taskIDs := h.scanManager.List()
+	for _, id := range taskIDs {
+		task, err := h.scanManager.Get(id)
+		if err == nil {
+			activeScans = append(activeScans, task.ToResponse())
+		}
+	}
+
+	// 2. Get from Nuclei Store
+	nucleiTasks := GetAllActiveNucleiTasks()
+	for _, t := range nucleiTasks {
+		// Convert private ScanTask to models.ScanTaskResponse
+		activeScans = append(activeScans, models.ScanTaskResponse{
+			TaskID:    t.TaskID,
+			Target:    t.Target,
+			BatchID:   t.BatchID,
+			Status:    models.ScanStatus(t.Status),
+			Progress:  t.Progress,
+			Tool:      "nuclei", // Explicitly set tool
+			UserID:    t.UserID,
+			StartedAt: t.StartedAt.Format(time.RFC3339),
+			UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	return response.Success(c, "active scans retrieved", activeScans)
 }

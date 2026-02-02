@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.User{}, &models.Batch{}, &models.ScanResult{}, &models.UploadedFile{})
+	err = db.AutoMigrate(&models.User{}, &models.Batch{}, &models.ScanResult{}, &models.UploadedFile{}, &models.Schedule{})
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate models: %v", err)
 	}
@@ -78,20 +78,21 @@ func main() {
 	userRepo := repository.NewGormUserRepository(db)
 	scanResultRepo := repository.NewGormScanResultRepository(db)
 	batchRepo := repository.NewGormBatchRepository(db)
+	scheduleRepo := repository.NewGormScheduleRepository(db)
 
 	app := fiber.New(fiber.Config{
 		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
 		BodyLimit: 100 * 1024 * 1024,
-		
+
 		// Disable startup message untuk development yang lebih bersih
 		DisableStartupMessage: false,
-		
+
 		// Reduce server header untuk keamanan
 		ServerHeader: "",
-		
+
 		// Enable prefork untuk performance (optional, bisa di-disable untuk debugging)
 		// Prefork: true,
-		
+
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
@@ -136,10 +137,15 @@ func main() {
 	batchService := service.NewBatchService(batchRepo, scanResultRepo)
 	lifecycleService := service.NewLifecycleService(db)
 	reportService := service.NewReportService()
-	
+
 	// Initialize global ScanManager for async scan orchestration
 	scanManager := service.NewScanManager()
-	
+
+	// Initialize Scheduler Service
+	schedulerService := service.NewSchedulerService(scheduleRepo, batchService, scanManager, scanResultRepo)
+	schedulerService.Start()
+	defer schedulerService.Stop()
+
 	// Start cleanup worker (TTL 24h, check every 1h)
 	lifecycleService.StartCleanupWorker(context.Background(), 24*time.Hour, 1*time.Hour)
 
@@ -154,6 +160,7 @@ func main() {
 	sslyzeHandler := handler.NewSslyzeHandler(sslyzeService, scanResultRepo, batchService, scanManager)
 	lifecycleHandler := handler.NewLifecycleHandler(lifecycleService, batchService)
 	mobsfHandler := handler.NewMobSFHandler(scanResultRepo, batchService, lifecycleService)
+	schedulerHandler := handler.NewSchedulerHandler(schedulerService)
 
 	// Auth & Batch Handlers
 	batchHandler := handler.NewBatchHandler(batchService, reportService)
@@ -187,6 +194,7 @@ func main() {
 	routes.SslyzeRoutes(api, sslyzeHandler, scanHandler)
 	routes.BatchRoutes(api, batchHandler) // <-- Batch routes are now protected
 	routes.LifecycleRoutes(api, lifecycleHandler)
+	routes.ScheduleRoutes(api, schedulerHandler)
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)

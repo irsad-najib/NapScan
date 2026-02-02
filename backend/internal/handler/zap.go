@@ -148,12 +148,12 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 	if target == "" {
 		return response.BadRequest(c, "target is required", nil)
 	}
-	
+
 	// Add protocol if missing
 	if !strings.HasPrefix(strings.ToLower(target), "http://") && !strings.HasPrefix(strings.ToLower(target), "https://") {
 		target = "https://" + target
 	}
-	
+
 	// Validate URL
 	if _, err := url.ParseRequestURI(target); err != nil {
 		log.Printf("[ZAP_ASYNC] Invalid URL: %v", err)
@@ -181,6 +181,7 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 		TaskID:    taskID,
 		UserID:    userID,
 		Target:    target,
+		Tool:      "zap",
 		Status:    models.StatusPending,
 		Progress:  0,
 		Error:     nil,
