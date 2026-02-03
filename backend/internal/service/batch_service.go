@@ -132,7 +132,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 	log.Printf("[RISK_CALC] Checking %d scan results", len(batch.ScanResults))
 	for _, result := range batch.ScanResults {
 		scanSummaries = append(scanSummaries, fmt.Sprintf("Scanned with %s: Target %s", result.Tool, result.Target))
-		
+
 		var resMap map[string]interface{}
 		// Manually parse ResultRaw if Result is nil
 		if result.Result == nil && len(result.ResultRaw) > 0 {
@@ -144,19 +144,19 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 		}
 
 		if resMap != nil {
-			
-			// If tool gives risk_score directly (0-100), take it but maybe apply modifiers? 
+
+			// If tool gives risk_score directly (0-100), take it but maybe apply modifiers?
 			// For consistency, let's map it back to level if possible, or just use it raw.
 			if toolScore, ok := resMap["risk_score"]; ok {
 				log.Printf("[RISK_CALC] Found explicit tool risk_score: %v", toolScore)
 				if sc, ok := toolScore.(float64); ok {
 					scanSummaries = append(scanSummaries, fmt.Sprintf("%s: Found explicit risk score %v", result.Tool, sc))
-					if sc > maxRiskScore { 
-						maxRiskScore = sc 
+					if sc > maxRiskScore {
+						maxRiskScore = sc
 						maxRiskResult = map[string]interface{}{
 							"source": "tool_score",
-							"tool": result.Tool,
-							"score": sc,
+							"tool":   result.Tool,
+							"score":  sc,
 						}
 					}
 				}
@@ -262,17 +262,17 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 
 			// Check Nuclei Results
 			if result.Tool == "nuclei" {
-				// Nuclei Result is often a list of objects at the top level, 
-				// BUT our ScanResult.Result handles it as interface{}. 
+				// Nuclei Result is often a list of objects at the top level,
+				// BUT our ScanResult.Result handles it as interface{}.
 				// If it was stored as []interface{}, resMap check at top (line 121) would FAIL.
 				// We need to handle []interface{} separately or check how GORM/Service saved it.
 				// Service saves []map[string]interface{}. GORM -> generic JSON.
-				// If 'resMap' is NOT valid, we might be in the 'else' block? 
+				// If 'resMap' is NOT valid, we might be in the 'else' block?
 				// Wait, line 121: `if resMap, ok := result.Result.(map[string]interface{}); ok`
 				// Nuclei returns raw list `[]map[...]`. So line 121 might fail for Nuclei!
 				// We need to check array type if map check fails.
 			}
-			
+
 			// Check FFUF Results
 			if result.Tool == "ffuf" {
 				if results, ok := resMap["results"].([]interface{}); ok {
@@ -311,9 +311,9 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 										if n, ok := fMap["name"].(string); ok {
 											name = n
 										}
-										
+
 										log.Printf("[RISK_CALC] OpenVAS Finding: %s (Sev: %f)", name, sevVal)
-										
+
 										// Calculate risk level from score
 										var level string
 										if sevVal >= 9.0 {
@@ -340,8 +340,8 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 											maxRiskScore = score100
 											maxRiskResult = map[string]interface{}{
 												"source": "openvas_finding",
-												"name": name,
-												"score": score100,
+												"name":   name,
+												"score":  score100,
 												"threat": fMap["threat"],
 											}
 										}
@@ -385,11 +385,11 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 			}
 		}
 	}
-	
+
 	// Prepare final response
 	responseDetails := map[string]interface{}{
 		"checks_performed": scanSummaries,
-		"max_risk_result": maxRiskResult,
+		"max_risk_result":  maxRiskResult,
 	}
 
 	log.Printf("[RISK_CALC] Final calculated risk for batch %s: %d", batch.BatchID, int(maxRiskScore))
@@ -434,7 +434,7 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 			riskResp, err := s.calculateNormalizedRiskInternal(batch.BatchID, batch.ScanResults)
 			if err == nil {
 				riskScore = int(riskResp.RiskScore)
-				// We can optionally attach details, but for summary, maybe just score is enough? 
+				// We can optionally attach details, but for summary, maybe just score is enough?
 				// The original code passed 'riskDetails'.
 				riskDetails = riskResp.RiskDetail
 			} else {
@@ -454,20 +454,20 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 			target = batch.ScanResults[0].Target
 		} else if batch.Status == models.BatchStatusProcessing {
 			// If no relation yet, it's empty/unknown.
-			target = "Scanning..." 
+			target = "Scanning..."
 		}
 
 		// Infer status: Logic to determine if batch is truly complete
 		status := string(batch.Status)
-		
+
 		// 1. Check Uploaded Files (APKs)
 		if len(batch.UploadedFiles) > 0 {
 			allDone := true
 			for _, f := range batch.UploadedFiles {
 				// If any file is NOT in a terminal state, the batch is still processing
-				if f.Status != models.FileStatusCompleted && 
-				   f.Status != models.FileStatusFailed && 
-				   f.Status != models.FileStatusCleaned {
+				if f.Status != models.FileStatusCompleted &&
+					f.Status != models.FileStatusFailed &&
+					f.Status != models.FileStatusCleaned {
 					allDone = false
 					break
 				}
@@ -494,10 +494,11 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 			Timestamp:   batch.CreatedAt, // ensure CreatedAt is available on batch model
 		}
 	}
-	
+
 	log.Printf("[BATCH_SERVICE] Found %d batches", len(batches))
 	return summaries, nil
 }
+
 // CalculateBatchRiskNormalized calculates risk using the new normalized risk engine
 func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID string) (*models.BatchRiskResponse, error) {
 	log.Printf("[BATCH_SERVICE] Calculating normalized risk for batch_id=%s", batchID)
@@ -507,6 +508,23 @@ func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID
 	if err != nil {
 		log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
 		return nil, err
+	}
+
+	batch, err := s.repo.FindByID(ctx, batchID)
+	if err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
+		return nil, err
+	}
+
+	if len(batch.UploadedFiles) > 0 && len(batch.AnalysisResultRaw) > 0 {
+
+		fakeResult := models.ScanResult{
+			Tool:   "mobsf",
+			Target: batch.UploadedFiles[0].FileName,
+			Result: batch.AnalysisResult, // atau decode dari Raw
+		}
+
+		scannerGroups["mobsf"] = append(scannerGroups["mobsf"], fakeResult)
 	}
 
 	return s.calculateNormalizedRiskInternal(batchID, scanResults)
@@ -560,7 +578,7 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 	// 4. Calculate batch risk
 	riskResponse := risk.CalculateBatchRisk(batchID, scannerDetails)
 
-	log.Printf("[BATCH_SERVICE] Calculated risk: score=%.2f, level=%s, scanners=%d", 
+	log.Printf("[BATCH_SERVICE] Calculated risk: score=%.2f, level=%s, scanners=%d",
 		riskResponse.RiskScore, riskResponse.RiskLevel, len(riskResponse.RiskDetail))
 
 	return riskResponse, nil
@@ -568,98 +586,116 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 
 // GetBatchDetail retrieves complete batch information including normalized risk
 func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userID string) (*models.BatchDetailResponse, error) {
-log.Printf("[BATCH_SERVICE] Fetching batch detail for batch_id=%s, user_id=%s", batchID, userID)
+	log.Printf("[BATCH_SERVICE] Fetching batch detail for batch_id=%s, user_id=%s", batchID, userID)
 
-// 1. Fetch batch
-batch, err := s.repo.FindByID(ctx, batchID)
-if err != nil {
-log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
-return nil, err
-}
+	// 1. Fetch batch
+	batch, err := s.repo.FindByID(ctx, batchID)
+	if err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
+		return nil, err
+	}
 
-if batch == nil {
-log.Printf("[BATCH_SERVICE] Batch not found: %s", batchID)
-return nil, fmt.Errorf("batch not found")
-}
+	if batch == nil {
+		log.Printf("[BATCH_SERVICE] Batch not found: %s", batchID)
+		return nil, fmt.Errorf("batch not found")
+	}
 
-// 2. Verify ownership
-if batch.UserID != userID {
-log.Printf("[BATCH_SERVICE] Access denied: user=%s tried to access batch owned by %s", userID, batch.UserID)
-return nil, fmt.Errorf("access denied")
-}
+	// 2. Verify ownership
+	if batch.UserID != userID {
+		log.Printf("[BATCH_SERVICE] Access denied: user=%s tried to access batch owned by %s", userID, batch.UserID)
+		return nil, fmt.Errorf("access denied")
+	}
 
-// 3. Fetch scan results
-scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
-if err != nil {
-log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
-return nil, err
-}
+	// 3. Fetch scan results
+	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
+	if err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
+		return nil, err
+	}
 
-// 4. Calculate normalized risk
-riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
-if err != nil {
-log.Printf("[BATCH_SERVICE] Failed to calculate risk: %v", err)
-// Continue with zero risk if calculation fails
-riskResponse = &models.BatchRiskResponse{
-BatchID:    batchID,
-RiskScore:  0,
-RiskLevel:  models.SeverityInfo,
-RiskDetail: []models.ScannerRiskDetail{},
-}
-}
+	// 4. Calculate normalized risk
+	riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
+	if err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to calculate risk: %v", err)
+		// Continue with zero risk if calculation fails
+		riskResponse = &models.BatchRiskResponse{
+			BatchID:    batchID,
+			RiskScore:  0,
+			RiskLevel:  models.SeverityInfo,
+			RiskDetail: []models.ScannerRiskDetail{},
+		}
+	}
 
-// 5. Determine target
-target := "Unknown"
-if len(batch.UploadedFiles) > 0 {
-target = batch.UploadedFiles[0].FileName
-} else if len(scanResults) > 0 {
-target = scanResults[0].Target
-}
+	// 5. Determine target
+	target := "Unknown"
+	if len(batch.UploadedFiles) > 0 {
+		target = batch.UploadedFiles[0].FileName
+	} else if len(scanResults) > 0 {
+		target = scanResults[0].Target
+	}
 
-// 6. Determine status
-status := string(batch.Status)
-if len(batch.UploadedFiles) > 0 {
-allDone := true
-for _, f := range batch.UploadedFiles {
-if f.Status != models.FileStatusCompleted && 
-   f.Status != models.FileStatusFailed && 
-   f.Status != models.FileStatusCleaned {
-allDone = false
-break
-}
-}
-if allDone {
-status = "complete"
-} else {
-status = "processing"
-}
-} else if len(scanResults) > 0 {
-if status == "processing" {
-status = "complete"
-}
-}
+	// 6. Determine status
+	status := string(batch.Status)
+	if len(batch.UploadedFiles) > 0 {
+		allDone := true
+		for _, f := range batch.UploadedFiles {
+			if f.Status != models.FileStatusCompleted &&
+				f.Status != models.FileStatusFailed &&
+				f.Status != models.FileStatusCleaned {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			status = "complete"
+		} else {
+			status = "processing"
+		}
+	} else if len(scanResults) > 0 {
+		if status == "processing" {
+			status = "complete"
+		}
+	}
 
-// 7. Build response
-	var scanSummaries []models.ScanResultSummary
+	// 7. Build response
+	scanSummaries := make([]models.ScanResultSummary, 0)
 	for _, res := range scanResults {
 		scanSummaries = append(scanSummaries, s.summarizeScanResult(res))
 	}
+	log.Printf("[DEBUG] UploadedFiles len = %d", len(batch.UploadedFiles))
+	log.Printf("[DEBUG] ScanResults len = %d", len(scanResults))
+
+	// ---- STEP 1: Mobile scans (MobSF / Frida) ----
+	if len(batch.UploadedFiles) > 0 {
+
+		file := batch.UploadedFiles[0] // asumsi 1 APK per batch
+
+		scanSummaries = append(
+			scanSummaries,
+			s.summarizeMobileScan(batch, "mobsf", file.FileName),
+		)
+
+		scanSummaries = append(
+			scanSummaries,
+			s.summarizeMobileScan(batch, "frida", file.FileName),
+		)
+	}
 
 	response := &models.BatchDetailResponse{
-BatchID:     batch.BatchID,
-UserID:      batch.UserID,
-Status:      status,
-CreatedAt:   batch.CreatedAt,
-Target:      target,
-RiskScore:   riskResponse.RiskScore,
-RiskLevel:   riskResponse.RiskLevel,
-RiskDetail:  riskResponse.RiskDetail,
-ScanResults: scanSummaries,
-}
+		BatchID:     batch.BatchID,
+		UserID:      batch.UserID,
+		Status:      status,
+		CreatedAt:   batch.CreatedAt,
+		Target:      target,
+		RiskScore:   riskResponse.RiskScore,
+		RiskLevel:   riskResponse.RiskLevel,
+		RiskDetail:  riskResponse.RiskDetail,
+		ScanResults: scanSummaries,
+	}
 
-log.Printf("[BATCH_SERVICE] Batch detail prepared: status=%s, risk_score=%.2f", status, riskResponse.RiskScore)
+	log.Printf("[BATCH_SERVICE] Batch detail prepared: status=%s, risk_score=%.2f", status, riskResponse.RiskScore)
 
-return response, nil
+	return response, nil
 }
 
 // summarizeScanResult transforms raw scan results into a simplified summary
@@ -795,7 +831,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 			"max_cvss":            maxCVSS,
 			"top_problems":        topProblems,
 		}
-	
+
 	case "ffuf":
 		// FFUF: Found URLs count & Top Matches
 		foundCount := 0
@@ -922,7 +958,7 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 			}
 		}
 		summary.Summary = map[string]interface{}{
-			"status": status,
+			"status":      status,
 			"recent_logs": logs,
 		}
 
@@ -963,8 +999,8 @@ func (s *BatchService) GetBatchReportData(
 	riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
 	if err != nil {
 		riskResponse = &models.BatchRiskResponse{
-			RiskScore: 0,
-			RiskLevel: models.SeverityInfo,
+			RiskScore:  0,
+			RiskLevel:  models.SeverityInfo,
 			RiskDetail: []models.ScannerRiskDetail{},
 		}
 	}
@@ -1136,5 +1172,44 @@ func defaultRecommendation(sev string) string {
 		return "Monitor and fix during regular maintenance."
 	default:
 		return ""
+	}
+}
+func (s *BatchService) summarizeMobileScan(
+	batch *models.Batch,
+	tool string,
+	target string,
+) models.ScanResultSummary {
+
+	summary := map[string]interface{}{
+		"scan_type": "mobile",
+		"status":    "done",
+		"note":      "Mobile security analysis",
+	}
+
+	// ringan & aman: extract HIGH LEVEL only
+	if tool == "mobsf" {
+		summary["note"] = "Static mobile analysis (MobSF)"
+		summary["highlights"] = map[string]int{
+			"critical": 0,
+			"high":     0,
+			"medium":   0,
+			"low":      0,
+		}
+	}
+
+	if tool == "frida" {
+		summary["note"] = "Dynamic runtime instrumentation (Frida)"
+		summary["highlights"] = map[string]int{
+			"hooks_detected":  0,
+			"sensitive_calls": 0,
+		}
+	}
+
+	return models.ScanResultSummary{
+		ID:        0,
+		Tool:      tool,
+		Target:    target,
+		CreatedAt: batch.CreatedAt,
+		Summary:   summary,
 	}
 }

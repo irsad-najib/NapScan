@@ -22,13 +22,17 @@ func (r *GormBatchRepository) Create(ctx context.Context, batch *models.Batch) e
 
 func (r *GormBatchRepository) FindByID(ctx context.Context, batchID string) (*models.Batch, error) {
 	var batch models.Batch
-	err := r.db.WithContext(ctx).Where("batch_id = ?", batchID).First(&batch).Error
+
+	err := r.db.WithContext(ctx).
+		Preload("UploadedFiles").
+		Preload("ScanResults").
+		Where("batch_id = ?", batchID).
+		First(&batch).Error
+
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
-		}
 		return nil, err
 	}
+
 	return &batch, nil
 }
 
