@@ -28,7 +28,7 @@ export default function Home() {
     };
 
     fetchBatches();
-    const interval = setInterval(fetchBatches, 10000); // Poll every 10s
+    const interval = setInterval(fetchBatches, 15000); // Poll every 10s
     return () => clearInterval(interval);
   }, []);
 

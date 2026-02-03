@@ -178,7 +178,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                         return low as ScanStatus;
                     };
 
-                    const toolUpdates: Record<ToolKey, ToolExecution> = {};
+                    const toolUpdates: Partial<Record<ToolKey, ToolExecution>> = {};
                     let isScanRunning = false;
 
                     tasks.forEach((t) => {

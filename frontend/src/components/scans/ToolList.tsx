@@ -6,7 +6,7 @@ import { ToolExecution, ScanVulnerability } from "@/context/ScanContext";
 import { ToolRow } from "./ToolRow";
 
 interface ToolListProps {
-    tools: Record<ToolKey, ToolExecution>;
+    tools: Partial<Record<ToolKey, ToolExecution>>;
     target: string;
     vulnerabilities: ScanVulnerability[];
     scanId?: string;
@@ -28,17 +28,21 @@ export function ToolList({ tools, target, vulnerabilities, scanId }: ToolListPro
                 <div className="w-10"></div>
             </div>
 
-            {sortedKeys.map((key) => (
-                <ToolRow
-                    key={key}
-                    tool={key}
-                    data={tools[key]}
-                    target={target}
-                    vulnerabilities={vulnerabilities}
-                    scanId={scanId}
-                    fullScanResult={tools[key].result}
-                />
-            ))}
+            {sortedKeys.map((key) => {
+                const toolData = tools[key];
+                if (!toolData) return null;
+                return (
+                    <ToolRow
+                        key={key}
+                        tool={key}
+                        data={toolData}
+                        target={target}
+                        vulnerabilities={vulnerabilities}
+                        scanId={scanId}
+                        fullScanResult={toolData.result}
+                    />
+                );
+            })}
         </div>
     );
 }

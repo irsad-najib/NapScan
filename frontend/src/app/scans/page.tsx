@@ -10,6 +10,7 @@ import { ToolList } from "@/components/scans/ToolList";
 import { Sidebar, Header } from "@/components/layout";
 import { MobSFDecisionDialog } from "@/components/scans/MobSFDecisionDialog";
 import { AuthRequiredDialog } from "@/components/common/AuthRequiredDialog";
+import SuccessModal from "@/components/common/SuccessModal";
 
 export default function ScansPage() {
   const { scans, startScan, deleteScan, pendingDecisions, submitMobSFDecision } = useScan();
@@ -17,6 +18,17 @@ export default function ScansPage() {
   const { isAuthenticated } = useAuth();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [notification, setNotification] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "success" | "error" | "info";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "success"
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
 
@@ -233,10 +245,20 @@ export default function ScansPage() {
         }
 
         if (successCount > 0) {
-          alert(`Successfully scheduled ${successCount} scan(s).`);
+          setNotification({
+            isOpen: true,
+            title: "Scheduled Successfully",
+            message: `Successfully scheduled ${successCount} scan(s).`,
+            type: "success"
+          });
           setShowNewScanForm(false);
         } else {
-          alert("Failed to schedule scans.");
+          setNotification({
+            isOpen: true,
+            title: "Scheduling Failed",
+            message: "Failed to schedule scans. Please try again.",
+            type: "error"
+          });
         }
 
       } else {
@@ -247,7 +269,12 @@ export default function ScansPage() {
       }
     } catch (error) {
       console.error("Error creating scan:", error);
-      alert("Failed to create scan. Please try again.");
+      setNotification({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to create scan. Please try again.",
+        type: "error"
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -270,33 +297,6 @@ export default function ScansPage() {
         {/* Main Content Scroll Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
           <div className="max-w-7xl mx-auto flex flex-col gap-8 pb-20">
-            {/* Breadcrumbs */}
-            <div className="flex items-center gap-2 text-sm">
-              <Link
-                className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors font-medium"
-                href="/">
-                Home
-              </Link>
-              <span className="material-symbols-outlined text-slate-400 text-[18px]">
-                chevron_right
-              </span>
-              <Link
-                className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors font-medium"
-                href="/scans">
-                Scans
-              </Link>
-              {showNewScanForm && (
-                <>
-                  <span className="material-symbols-outlined text-slate-400 text-[18px]">
-                    chevron_right
-                  </span>
-                  <span className="text-slate-900 dark:text-slate-100 font-semibold">
-                    New Scan
-                  </span>
-                </>
-              )}
-            </div>
-
             {/* Page Header */}
             {!showNewScanForm && (
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -647,7 +647,8 @@ export default function ScansPage() {
                               scheduledDate: e.target.value,
                             })
                           }
-                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                          onClick={(e) => e.currentTarget.showPicker()}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
                         />
                       </div>
                       <div>
@@ -663,7 +664,8 @@ export default function ScansPage() {
                               scheduledTime: e.target.value,
                             })
                           }
-                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                          onClick={(e) => e.currentTarget.showPicker()}
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
                         />
                       </div>
                     </>
@@ -906,6 +908,15 @@ export default function ScansPage() {
           isSubmitting={isSubmittingDecision}
         />
       )}
+      {/* Notification Modal */}
+      <SuccessModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification({ ...notification, isOpen: false })}
+        title={notification.title}
+        message={notification.message}
+        type={notification.type}
+      />
+
       {/* Auth Dialog */}
       <AuthRequiredDialog
         isOpen={showAuthDialog}

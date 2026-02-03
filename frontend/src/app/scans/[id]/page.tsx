@@ -37,7 +37,7 @@ export default function ScanDetailPage() {
         };
 
         fetchBatchDetails();
-        const interval = setInterval(fetchBatchDetails, 5000); // Poll for updates
+        const interval = setInterval(fetchBatchDetails, 15000); // Poll for updates
         return () => clearInterval(interval);
     }, [scanId]);
 
