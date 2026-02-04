@@ -144,37 +144,14 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 	}
 
 	// 1. Create Batch for this run
-	// BatchService.CreateBatch requires internal interaction?
-	// BatchService.Create returns (string, error). We need to pass userID.
-	// But BatchService Create method might expect *fiber.Ctx or something if it validates ownership?
-	// Let's check BatchService implementation.
-	// If unavailable, we might need to manually create a batch model and save it.
-	// Assuming s.batchService has a helper to create batch without context if we pass userID.
-	// Checking batch_service.go content would be ideal but I'll assume I can just invoke repo if needed.
-	// For now, let's create a Batch via repo directly if accessible, or assume BatchService logic.
-	// Let's assume we can simply Generate a BatchID and use it, validating usually happens at Handler level.
-	// But the Scan Logic requires a VALID BatchID in DB usually?
-	// Let's create a batch ID manually.
-	batchID := uuid.New().String()
+	batchID, err := s.batchService.CreateBatch(context.Background(), sch.UserID)
+	if err != nil {
+		log.Printf("[SCHEDULER] Failed to create batch for schedule %s: %v", scheduleID, err)
+		return
+	}
 
-	// Create Batch Record in DB (if BatchService doesn't expose a clean method)
-	// I'll skip explicit batch creation in DB for now as some scanners might do it or it might be fine.
-	// Wait, Handler uses batchService.ValidateBatchOwnership.
-	// If I don't create it in DB, ownership check might fail if validation is strict?
-	// Since this is a system-triggered scan, we might bypass user check, but the record should exist.
-	// I'll add a CreateBatch method to SchedulerService helper if needed, or better:
-	// Just use the batchID. The scanners usually link valid batchIDs.
-	// Actually, `nmapHandler` calls `ValidateBatchOwnership`. Use calls `nmapHandler`.
-	// But here I call `RunNmapAsync` directly (Service level). The Service level usually assumes data is correct.
-	// The `Save` step (models.ScanResult) inserts BatchID. If Batch table has FK, it will fail.
-	// Let's Assume database has FK constraint on BatchID. So I MUST create a batch.
-	// I will use s.batchService. repo field is private in BatchService unfortunately.
-	// But I have `s.repo` (ScheduleRepo). I don't have BatchRepo.
-	// I should probably inject BatchRepository into SchedulerService too, just to be safe.
-	// Or I can add `CreateBatch` to `BatchService` exported methods.
-	// For now I'll create a dummy Batch using a raw SQL or just assuming it works (risky).
-	// Actually, `BatchService` typically has `CreateBatch`.
-	// I'll assume `s.batchService.CreateBatch(userID, target, name)` exists.
+	// Optional: You might want to update the batch with target/tool info immediately
+	// but currently CreateBatch only takes userID. The scan results will link to it.
 
 	// 2. Create Task
 	taskID := uuid.New().String()

@@ -658,20 +658,5 @@ export const scannersApi = {
       }),
   },
 
-  // Global Active Scans
-  getActiveScans: async (): Promise<ApiResult<Array<{
-    task_id: string;
-    batch_id: string;
-    user_id: string;
-    target: string;
-    tool: string;
-    status: string;
-    progress: number;
-    started_at: string;
-    updated_at: string;
-  }>>> =>
-    request({
-      method: "GET",
-      url: "/api/scan/active",
-    }),
+
 } as const;

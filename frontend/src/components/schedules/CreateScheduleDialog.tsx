@@ -98,7 +98,14 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
             const dom = dateObj.getDate();
             const month = dateObj.getMonth() + 1;
 
-            const cronExpression = `${min} ${hour} ${dom} ${month} *`;
+            // Get User Timezone
+            const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+            // Prepend CRON_TZ to ensure backend runs it in user's timezone
+            // Example: "CRON_TZ=Asia/Jakarta 45 14 4 2 *"
+            const cronExpression = `CRON_TZ=${timeZone} ${min} ${hour} ${dom} ${month} *`;
+
+            console.log("Generated Cron:", cronExpression); // Debug log
 
             const promises = selectedTools.map(tool => {
                 const req: CreateScheduleRequest = {

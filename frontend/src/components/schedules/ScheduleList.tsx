@@ -258,14 +258,34 @@ export default function ScheduleList() {
                                                                             schedule.last_run_status === 'running' ? "text-blue-600 bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30" :
                                                                                 "text-slate-500 bg-slate-50 dark:bg-slate-500/10 border-slate-200 dark:border-slate-500/30"
                                                                         }`}>
-                                                                        <span className={`material-symbols-outlined text-sm ${schedule.last_run_status === 'running' ? 'animate-spin' : ''}`}>
-                                                                            {schedule.last_run_status === 'success' ? "check_circle" :
-                                                                                schedule.last_run_status === 'failed' ? "error" :
-                                                                                    schedule.last_run_status === 'running' ? "sync" : "pending"}
-                                                                        </span>
-                                                                        <span className="capitalize text-[10px]">
-                                                                            {schedule.last_run_status || 'Never Ran'}
-                                                                        </span>
+                                                                        {schedule.last_resource_id ? (
+                                                                            <a
+                                                                                href={`/scans/${schedule.last_resource_id}`}
+                                                                                className="flex items-center gap-1.5 hover:underline"
+                                                                                title="View Scan Result"
+                                                                            >
+                                                                                <span className={`material-symbols-outlined text-sm ${schedule.last_run_status === 'running' ? 'animate-spin' : ''}`}>
+                                                                                    {schedule.last_run_status === 'success' ? "check_circle" :
+                                                                                        schedule.last_run_status === 'failed' ? "error" :
+                                                                                            schedule.last_run_status === 'running' ? "sync" : "pending"}
+                                                                                </span>
+                                                                                <span className="capitalize text-[10px]">
+                                                                                    {schedule.last_run_status || 'Never Ran'}
+                                                                                </span>
+                                                                                <span className="material-symbols-outlined text-[10px]">open_in_new</span>
+                                                                            </a>
+                                                                        ) : (
+                                                                            <>
+                                                                                <span className={`material-symbols-outlined text-sm ${schedule.last_run_status === 'running' ? 'animate-spin' : ''}`}>
+                                                                                    {schedule.last_run_status === 'success' ? "check_circle" :
+                                                                                        schedule.last_run_status === 'failed' ? "error" :
+                                                                                            schedule.last_run_status === 'running' ? "sync" : "pending"}
+                                                                                </span>
+                                                                                <span className="capitalize text-[10px]">
+                                                                                    {schedule.last_run_status || 'Never Ran'}
+                                                                                </span>
+                                                                            </>
+                                                                        )}
                                                                     </div>
                                                                 </div>
 

@@ -146,125 +146,65 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     // Track which tools are already being polled to prevent duplicate polling
     const [pollingTools, setPollingTools] = useState<Set<string>>(new Set());
 
-    // --- Global Active Scan Polling ---
-    const syncActiveScans = useCallback(async () => {
+    // --- Sync Scans from Backend (Batch History) ---
+    const syncScansFromBatchHistory = useCallback(async () => {
+        // console.log("[ScanContext] Syncing scans from batch history...");
         try {
-            const res = await scannersApi.getActiveScans();
+            const res = await batchApi.list();
             if (!res.ok || !res.data) return;
 
             setScans((prevScans) => {
                 let hasChanges = false;
                 const newScans = [...prevScans];
+                const backendBatches = res.data;
 
-                // Group tasks by BatchID (or TaskID if no batch)
-                const tasksByScanId = new Map<string, Array<any>>();
+                // 1. Update existing scans and add new ones from backend
+                backendBatches.forEach((batch) => {
+                    const existingIndex = newScans.findIndex((s) => s.id === batch.batch_id || s.batchId === batch.batch_id);
 
-                res.data.forEach((task) => {
-                    const scanId = task.batch_id || task.task_id;
-                    if (!tasksByScanId.has(scanId)) {
-                        tasksByScanId.set(scanId, []);
-                    }
-                    tasksByScanId.get(scanId)?.push(task);
-                });
-
-                tasksByScanId.forEach((tasks, scanId) => {
-                    const existingScanIndex = newScans.findIndex((s) => s.id === scanId);
-
-                    // Helper to map backend status to frontend status
-                    const mapStatus = (s: string): ScanStatus => {
-                        const low = s.toLowerCase();
-                        if (low === 'done' || low === 'success') return 'completed';
-                        if (low === 'error') return 'failed';
-                        return low as ScanStatus;
-                    };
-
-                    const toolUpdates: Partial<Record<ToolKey, ToolExecution>> = {};
-                    let isScanRunning = false;
-
-                    tasks.forEach((t) => {
-                        const toolKey = t.tool.toLowerCase() as ToolKey;
-                        const status = mapStatus(t.status);
-                        if (status === 'running' || status === 'pending') isScanRunning = true;
-
-                        toolUpdates[toolKey] = {
-                            tool: toolKey,
-                            status: status,
-                            progress: t.progress,
-                            taskId: t.task_id,
-                            startTime: t.started_at,
-                            endTime: (status === 'completed' || status === 'failed') ? t.updated_at : undefined,
-                        };
-                    });
-
-                    if (existingScanIndex !== -1) {
-                        // Update existing scan
-                        const existingScan = newScans[existingScanIndex];
-                        let scanChanged = false;
-
-                        // Check for tool updates
-                        Object.entries(toolUpdates).forEach(([key, update]) => {
-                            const toolKey = key as ToolKey;
-                            const current = existingScan.tools[toolKey];
-
-                            // Only update if changed
-                            if (!current ||
-                                current.status !== update.status ||
-                                current.progress !== update.progress ||
-                                current.taskId !== update.taskId) { // Added taskId check
-
-                                existingScan.tools = {
-                                    ...existingScan.tools,
-                                    [toolKey]: { ...(current || {}), ...update }
-                                };
-                                scanChanged = true;
-                            }
-                        });
-
-                        // Update overall status if running
-                        if (isScanRunning && existingScan.status !== 'running') {
-                            existingScan.status = 'running';
-                            scanChanged = true;
-                        }
-
-                        if (scanChanged) {
-                            existingScan.updatedAt = new Date().toISOString();
-                            newScans[existingScanIndex] = existingScan;
+                    if (existingIndex !== -1) {
+                        // Update existing scan status if backend has newer info
+                        const backendStatus = batch.status.toLowerCase();
+                        if (newScans[existingIndex].status !== backendStatus &&
+                            (backendStatus === 'completed' || backendStatus === 'failed')) {
+                            newScans[existingIndex] = {
+                                ...newScans[existingIndex],
+                                status: backendStatus as ScanStatus,
+                                updatedAt: batch.timestamp,
+                            };
                             hasChanges = true;
                         }
-
                     } else {
-                        // Create new scan entry for discovered backend scan
-                        const firstTask = tasks[0];
-                        const newScan: ScanJob = {
-                            id: scanId,
-                            batchId: firstTask.batch_id,
-                            name: `Scheduled Scan ${scanId.substring(0, 8)}`, // Fallback name
-                            target: firstTask.target,
-                            status: isScanRunning ? 'running' : 'completed', // Simplified
-                            createdAt: firstTask.started_at || new Date().toISOString(),
-                            updatedAt: new Date().toISOString(),
-                            tools: toolUpdates,
+                        // Add new scan from backend (e.g. Scheduled Scans)
+                        newScans.unshift({
+                            id: batch.batch_id,
+                            batchId: batch.batch_id,
+                            name: `Scan ${batch.timestamp.substring(0, 10)}`, // Generate a name or use target
+                            target: batch.target,
+                            status: batch.status.toLowerCase() as ScanStatus,
+                            createdAt: batch.timestamp,
+                            updatedAt: batch.timestamp,
+                            tools: {}, // We don't know tools from list, detail page will fetch
                             vulnerabilities: [],
-                        };
-                        newScans.unshift(newScan); // Add to top
+                        });
                         hasChanges = true;
                     }
                 });
 
                 return hasChanges ? newScans : prevScans;
             });
-
         } catch (err) {
-            console.error("[ScanContext] Failed to sync active scans:", err);
+            console.error("[ScanContext] Failed to sync batch history:", err);
         }
     }, []);
 
-    // Poll active scans every 5 seconds
+    // Initial load from backend
     useEffect(() => {
-        syncActiveScans(); // Initial fetch
-        const interval = setInterval(syncActiveScans, 5000);
+        syncScansFromBatchHistory();
+        // Optional: Poll occasionally for new scheduled scans
+        const interval = setInterval(syncScansFromBatchHistory, 10000);
         return () => clearInterval(interval);
-    }, [syncActiveScans]);
+    }, [syncScansFromBatchHistory]);
 
     // --- Save scans to localStorage whenever they change ---
     useEffect(() => {

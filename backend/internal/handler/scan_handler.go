@@ -5,7 +5,6 @@ import (
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -139,46 +138,4 @@ func (h *ScanHandler) GetReport(c *fiber.Ctx) error {
 		"target":  task.Target,
 		"result":  task.Result,
 	})
-}
-
-// GetActiveScans returns all currently active scan tasks (from ScanManager and Nuclei)
-// @Summary List Active Scans
-// @Description Get a list of all currently running or pending scan tasks
-// @Tags Scan Control
-// @Security BearerAuth
-// @Produce json
-// @Success 200 {object} response.Response
-// @Router /scan/active [get]
-func (h *ScanHandler) GetActiveScans(c *fiber.Ctx) error {
-	log.Printf("[SCAN_HANDLER] Fetching all active scans")
-
-	activeScans := make([]models.ScanTaskResponse, 0)
-
-	// 1. Get from ScanManager (Nmap, Zap, Ffuf, Sslyze)
-	taskIDs := h.scanManager.List()
-	for _, id := range taskIDs {
-		task, err := h.scanManager.Get(id)
-		if err == nil {
-			activeScans = append(activeScans, task.ToResponse())
-		}
-	}
-
-	// 2. Get from Nuclei Store
-	nucleiTasks := GetAllActiveNucleiTasks()
-	for _, t := range nucleiTasks {
-		// Convert private ScanTask to models.ScanTaskResponse
-		activeScans = append(activeScans, models.ScanTaskResponse{
-			TaskID:    t.TaskID,
-			Target:    t.Target,
-			BatchID:   t.BatchID,
-			Status:    models.ScanStatus(t.Status),
-			Progress:  t.Progress,
-			Tool:      "nuclei", // Explicitly set tool
-			UserID:    t.UserID,
-			StartedAt: t.StartedAt.Format(time.RFC3339),
-			UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
-		})
-	}
-
-	return response.Success(c, "active scans retrieved", activeScans)
 }

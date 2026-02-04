@@ -109,18 +109,6 @@ func (ts *TaskStore) cleanup() {
 	}
 }
 
-// GetAllActiveNucleiTasks returns all active tasks from the store
-func GetAllActiveNucleiTasks() []*ScanTask {
-	nucleiTaskStore.mu.RLock()
-	defer nucleiTaskStore.mu.RUnlock()
-
-	tasks := make([]*ScanTask, 0, len(nucleiTaskStore.tasks))
-	for _, task := range nucleiTaskStore.tasks {
-		tasks = append(tasks, task)
-	}
-	return tasks
-}
-
 // StartScanAsync initiates an async Nuclei scan
 // @Summary Start Nuclei Scan (Async)
 // @Description Start a Nuclei scan asynchronously. Returns task_id immediately.
