@@ -6,6 +6,7 @@ import (
 	"napscan-be/internal/models"
 	"napscan-be/pkg/parser"
 	"sort"
+	"strings"
 )
 
 // Scanner weights for risk calculation
@@ -34,7 +35,6 @@ func CalculateScannerScore(detail *models.ScannerRiskDetail) float64 {
 	weight := GetScannerWeight(detail.Scanner)
 
 	score := detail.Score
-
 
 	if score == 0 {
 		base := models.GetSeverityScore(detail.NormalizedSeverity)
@@ -76,7 +76,6 @@ func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetai
 	// Cap at 100
 	maxTotal := float64(len(scannerDetails)) * 100
 
-
 	if maxTotal <= 0 {
 		totalScore = 0
 	} else {
@@ -100,7 +99,7 @@ func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetai
 
 // GetParser returns the appropriate parser for a scanner type
 func GetParser(scannerType string) parser.ScannerParser {
-	switch scannerType {
+	switch strings.ToLower(scannerType) {
 	case "nmap":
 		return parser.NewNmapParser()
 	case "ffuf":

@@ -13,16 +13,16 @@ func NewFridaParser() *FridaParser {
 }
 
 var fridaRiskKeywords = map[string]int{
-	"ssl unpin": 90,
-	"unpinning": 90,
-	"bypass": 85,
-	"hooked": 80,
-	"hook success": 80,
-	"anti-debug": 85,
-	"root bypass": 85,
+	"ssl unpin":        90,
+	"unpinning":        90,
+	"bypass":           85,
+	"hooked":           80,
+	"hook success":     80,
+	"anti-debug":       85,
+	"root bypass":      85,
 	"jailbreak bypass": 85,
-	"detected": 50,
-	"found": 50,
+	"detected":         50,
+	"found":            50,
 }
 
 func (p *FridaParser) Parse(rawResult interface{}) (*ParsedResult, error) {
@@ -37,27 +37,91 @@ func (p *FridaParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		return nil, fmt.Errorf("frida result is not a map")
 	}
 
+	// Unwrap "frida" key if present (persistence wrapper)
+	if inner, ok := resultMap["frida"].(map[string]interface{}); ok {
+		resultMap = inner
+	}
+
 	// 1. Check Status
 	status, _ := resultMap["status"].(string)
 	result.Metadata["status"] = status
 
-	// 2. Parse Logs for key events
-	if logs, ok := resultMap["logs"].([]interface{}); ok {
+	// 2. Parse Events (New Schema)
+	if events, ok := resultMap["events"].([]interface{}); ok {
+		for _, e := range events {
+			if eMap, ok := e.(map[string]interface{}); ok {
+				eventType, _ := eMap["event"].(string)
+				dataMap, _ := eMap["data"].(map[string]interface{})
+
+				// Construct description
+				desc := fmt.Sprintf("Event: %s", eventType)
+				if len(dataMap) > 0 {
+					// simple serialization for desc
+					desc += fmt.Sprintf(" Data: %v", dataMap)
+				}
+
+				// Check for specific interesting events
+				if eventType == "hook_installed" {
+					desc = "Hook installed"
+					if cls, ok := dataMap["class"]; ok {
+						desc += fmt.Sprintf(" on %v", cls)
+					}
+					if mjd, ok := dataMap["method"]; ok {
+						desc += fmt.Sprintf(".%v", mjd)
+					}
+				}
+
+				// Keyword matching for risk
+				lowerDesc := strings.ToLower(desc)
+				severity := "info"
+
+				// Add "hook_installed" to check
+				if strings.Contains(lowerDesc, "hook_installed") || strings.Contains(lowerDesc, "hook installed") {
+					if 80 > highestRisk {
+						highestRisk = 80
+					}
+					severity = "medium" // hooking is generally interesting/warning
+				}
+
+				for keyword, risk := range fridaRiskKeywords {
+					if strings.Contains(lowerDesc, keyword) {
+						if risk > highestRisk {
+							highestRisk = risk
+						}
+						// crude mapping
+						if risk >= 80 {
+							severity = "high"
+						} else if risk >= 50 {
+							severity = "medium"
+						}
+						break
+					}
+				}
+
+				result.Findings = append(result.Findings, Finding{
+					Severity:    severity,
+					Title:       fmt.Sprintf("Frida: %s", eventType),
+					Description: desc,
+					RawData:     eMap,
+				})
+			}
+		}
+	} else if logs, ok := resultMap["logs"].([]interface{}); ok {
+		// Fallback to Old Schema (logs)
 		for _, l := range logs {
 			if logLine, ok := l.(string); ok {
 				// Keyword matching for risk
 				lowerLog := strings.ToLower(logLine)
-				
+
+				result.Findings = append(result.Findings, Finding{
+					Severity:    "info", // placeholder
+					Title:       "Frida Finding",
+					Description: logLine,
+					RawData:     logLine,
+				})
+
 				for keyword, risk := range fridaRiskKeywords {
 					if strings.Contains(lowerLog, keyword) {
-
-						result.Findings = append(result.Findings, Finding{
-							Severity: "info", // placeholder
-							Title: "Frida Finding",
-							Description: logLine,
-							RawData: logLine,
-						})
-
 						if risk > highestRisk {
 							highestRisk = risk
 						}
@@ -74,7 +138,7 @@ func (p *FridaParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 
 func (p *FridaParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, error) {
 	detail := &models.ScannerRiskDetail{
-		Scanner: "frida",
+		Scanner:  "frida",
 		Findings: []string{},
 	}
 
@@ -105,7 +169,9 @@ func (p *FridaParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail
 	detail.Findings = allFindings
 
 	findingCount := float64(len(allFindings))
-	if findingCount == 0 { findingCount = 1 }
+	if findingCount == 0 {
+		findingCount = 1
+	}
 
 	detail.Score = float64(highestRisk)*10 + findingCount*2
 	return detail, nil

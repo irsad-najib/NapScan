@@ -10,11 +10,11 @@ import (
 // ScanResult stores the raw output of a tool scan.
 // For SQL backends, this maps to the "scan_results" table.
 type ScanResult struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	BatchID   string    `json:"batch_id" gorm:"type:varchar(191);index"`
-	Tool      string    `json:"tool" gorm:"type:varchar(64)"`
+	ID        uint            `json:"id" gorm:"primaryKey"`
+	BatchID   string          `json:"batch_id" gorm:"type:varchar(191);index"`
+	Tool      string          `json:"tool" gorm:"type:varchar(64)"`
 	Target    string          `json:"target" gorm:"type:varchar(255)"`
-	ResultRaw json.RawMessage `json:"result" gorm:"column:result" swaggertype:"object"`
+	ResultRaw json.RawMessage `json:"result" gorm:"column:result;type:longtext" swaggertype:"object"`
 	Result    interface{}     `json:"-" gorm:"-"`
 	CreatedAt time.Time       `json:"created_at"`
 }
@@ -22,10 +22,10 @@ type ScanResult struct {
 // ScanResultSummary represents a cleansed version of the scan result
 // This is used for API responses to avoid sending massive raw JSON
 type ScanResultSummary struct {
-	ID        uint        `json:"id"`
-	Tool      string      `json:"tool"`
+	ID        uint            `json:"id"`
+	Tool      string          `json:"tool"`
 	Target    string          `json:"target"`
-	Summary   interface{}     `json:"summary"` // Dynamic summary based on tool
+	Summary   interface{}     `json:"summary"`                               // Dynamic summary based on tool
 	Result    json.RawMessage `json:"result,omitempty" swaggertype:"object"` // Raw result
 	CreatedAt time.Time       `json:"created_at"`
 }

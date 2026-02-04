@@ -197,7 +197,7 @@ func (s *ReportService) drawDetailPage(pdf *fpdf.Fpdf, data *models.ReportData) 
 		pdf.SetTextColor(45, 85, 210)
 		pdf.SetXY(25, 45)
 		pdf.Cell(0, 10, "["+data.TargetInfo+"]")
-		
+
 		pdf.SetXY(25, 55)
 		pdf.SetFont("Arial", "B", 14)
 		pdf.SetTextColor(45, 85, 210) // Blue-ish
@@ -260,7 +260,7 @@ func (s *ReportService) drawDetailPage(pdf *fpdf.Fpdf, data *models.ReportData) 
 
 			// 4. Draw Content
 			currentY := y + 2.0 // padding top
-			
+
 			// Title
 			pdf.SetXY(36, currentY)
 			pdf.SetFont("Arial", "B", 11)
@@ -278,7 +278,7 @@ func (s *ReportService) drawDetailPage(pdf *fpdf.Fpdf, data *models.ReportData) 
 			pdf.SetXY(36, currentY)
 			pdf.SetFont("Arial", "", 10)
 			pdf.MultiCell(contentWidth, lineHtDesc+1, v.Description, "", "", false)
-			
+
 			// Move Y for next item
 			y += totalBlockHeight + 10.0 // 10mm gap between vulnerabilities
 		}
@@ -303,6 +303,8 @@ func (s *ReportService) getToolDescription(toolName string) string {
 		return "FFUF is a fast web fuzzer written in Go."
 	case "mobsf":
 		return "MobSF (Mobile Security Framework) is an automated, all-in-one mobile application (Android/iOS/Windows) pen-testing, malware analysis and security assessment framework."
+	case "frida":
+		return "Frida is a dynamic instrumentation toolkit for developers, reverse-engineers, and security researchers."
 	default:
 		return "Security scanning tool."
 	}
@@ -343,16 +345,16 @@ func drawBottomBar(pdf *fpdf.Fpdf) {
 }
 
 func (s *ReportService) severityColor(sev string) []int {
-    switch strings.ToUpper(sev) {
-    case "CRITICAL":
-        return []int{200, 0, 0}
-    case "HIGH":
-        return []int{255, 120, 0}
-    case "MEDIUM":
-        return []int{255, 190, 0}
-    case "LOW":
-        return []int{60, 90, 200}
-    default:
-        return []int{160, 160, 160}
-    }
+	switch strings.ToUpper(sev) {
+	case "CRITICAL":
+		return []int{200, 0, 0}
+	case "HIGH":
+		return []int{255, 120, 0}
+	case "MEDIUM":
+		return []int{255, 190, 0}
+	case "LOW":
+		return []int{60, 90, 200}
+	default:
+		return []int{160, 160, 160}
+	}
 }

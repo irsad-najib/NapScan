@@ -510,23 +510,6 @@ func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID
 		return nil, err
 	}
 
-	batch, err := s.repo.FindByID(ctx, batchID)
-	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
-		return nil, err
-	}
-
-	if len(batch.UploadedFiles) > 0 && len(batch.AnalysisResultRaw) > 0 {
-
-		fakeResult := models.ScanResult{
-			Tool:   "mobsf",
-			Target: batch.UploadedFiles[0].FileName,
-			Result: batch.AnalysisResult, // atau decode dari Raw
-		}
-
-		scannerGroups["mobsf"] = append(scannerGroups["mobsf"], fakeResult)
-	}
-
 	return s.calculateNormalizedRiskInternal(batchID, scanResults)
 }
 
@@ -625,6 +608,48 @@ func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userI
 			RiskDetail: []models.ScannerRiskDetail{},
 		}
 	}
+	if riskResponse.RiskDetail == nil {
+		riskResponse.RiskDetail = []models.ScannerRiskDetail{}
+	}
+
+	// for _, res := range scanResults {
+
+	// 	parser := risk.GetParser(res.Tool)
+	// 	if parser == nil {
+	// 		continue
+	// 	}
+
+	// 	var raw interface{}
+	// 	if res.Result != nil {
+	// 		raw = res.Result
+	// 	} else if len(res.ResultRaw) > 0 {
+	// 		var tmp interface{}
+	// 		dec := json.NewDecoder(bytes.NewReader(res.ResultRaw))
+	// 		dec.UseNumber()
+	// 		if err := dec.Decode(&tmp); err == nil {
+	// 			raw = tmp
+	// 		}
+	// 	}
+
+	// 	if raw == nil {
+	// 		continue
+	// 	}
+
+	// 	parsed, err := parser.Parse(raw)
+	// 	if err != nil {
+	// 		continue
+	// 	}
+
+	// 	normalized, err := parser.Normalize(parsed)
+	// 	if err != nil {
+	// 		continue
+	// 	}
+
+	// 	riskResponse.RiskDetail = append(
+	// 		riskResponse.RiskDetail,
+	// 		*normalized,
+	// 	)
+	// }
 
 	// 5. Determine target
 	target := "Unknown"
@@ -662,24 +687,24 @@ func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userI
 	for _, res := range scanResults {
 		scanSummaries = append(scanSummaries, s.summarizeScanResult(res))
 	}
-	log.Printf("[DEBUG] UploadedFiles len = %d", len(batch.UploadedFiles))
-	log.Printf("[DEBUG] ScanResults len = %d", len(scanResults))
+	// log.Printf("[DEBUG] UploadedFiles len = %d", len(batch.UploadedFiles))
+	// log.Printf("[DEBUG] ScanResults len = %d", len(scanResults))
 
-	// ---- STEP 1: Mobile scans (MobSF / Frida) ----
-	if len(batch.UploadedFiles) > 0 {
+	// // ---- STEP 1: Mobile scans (MobSF / Frida) ----
+	// if len(batch.UploadedFiles) > 0 {
 
-		file := batch.UploadedFiles[0] // asumsi 1 APK per batch
+	// 	file := batch.UploadedFiles[0] // asumsi 1 APK per batch
 
-		scanSummaries = append(
-			scanSummaries,
-			s.summarizeMobileScan(batch, "mobsf", file.FileName),
-		)
+	// 	scanSummaries = append(
+	// 		scanSummaries,
+	// 		s.summarizeMobileScan(batch, "mobsf", file.FileName),
+	// 	)
 
-		scanSummaries = append(
-			scanSummaries,
-			s.summarizeMobileScan(batch, "frida", file.FileName),
-		)
-	}
+	// 	scanSummaries = append(
+	// 		scanSummaries,
+	// 		s.summarizeMobileScan(batch, "frida", file.FileName),
+	// 	)
+	// }
 
 	response := &models.BatchDetailResponse{
 		BatchID:     batch.BatchID,
@@ -730,6 +755,44 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 	summary.Tool = toolName // Normalize in output too
 
 	switch toolName {
+	case "mobsf":
+		summary.Summary = map[string]interface{}{
+			"info": "See detailed report for more info",
+		}
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
+			// Unwrap if nested
+			if inner, ok := resMap["mobsf"].(map[string]interface{}); ok {
+				resMap = inner
+			}
+			if score, ok := resMap["security_score"]; ok {
+				summary.Summary = map[string]interface{}{
+					"security_score": score,
+					"average_cvss":   resMap["average_cvss"],
+				}
+			}
+		}
+
+	case "frida":
+		summary.Summary = map[string]interface{}{
+			"info": "See detailed report for more info",
+		}
+		if resMap, ok := resultInterface.(map[string]interface{}); ok {
+			// Unwrap if nested
+			if inner, ok := resMap["frida"].(map[string]interface{}); ok {
+				resMap = inner
+			}
+			summary.Summary = map[string]interface{}{
+				"status":     resMap["status"],
+				"logs_count": 0,
+			}
+			if logs, ok := resMap["logs"].([]interface{}); ok {
+				summary.Summary = map[string]interface{}{
+					"status":     resMap["status"],
+					"logs_count": len(logs),
+				}
+			}
+		}
+
 	case "nmap":
 		// Nmap: Open Ports, Service Names
 		var openPorts []int
@@ -901,67 +964,6 @@ func (s *BatchService) summarizeScanResult(scan models.ScanResult) models.ScanRe
 			"critical_findings": criticalFindings,
 		}
 
-	case "mobsf":
-		// MobSF: Parse Score and High/Critical issues if available in logic
-		// Usually MobSF returns a massive JSON. We look for specific high-level keys.
-		var score float64
-		var permissionsCount int
-		highIssues := 0
-
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
-			// Attempt to find average_cvss or security_score
-			if s, ok := resMap["average_cvss"].(float64); ok {
-				score = s * 10 // Convert 10-scale to 100-scale approx? Or just use as is.
-			}
-			if s, ok := resMap["security_score"].(float64); ok {
-				score = s
-			}
-			// Permissions
-			if perms, ok := resMap["permissions"].(map[string]interface{}); ok {
-				permissionsCount = len(perms)
-			}
-			// Code Analysis (finding high severity)
-			if codeAnalysis, ok := resMap["code_analysis"].(map[string]interface{}); ok {
-				if findings, ok := codeAnalysis["findings"].(map[string]interface{}); ok {
-					for _, f := range findings {
-						if fMap, ok := f.(map[string]interface{}); ok {
-							if sev, ok := fMap["severity"].(string); ok && (sev == "high" || sev == "critical") {
-								highIssues++
-							}
-						}
-					}
-				}
-			}
-		}
-		summary.Summary = map[string]interface{}{
-			"security_score": score,
-			"high_issues":    highIssues,
-			"permissions":    permissionsCount,
-		}
-
-	case "frida":
-		// Frida: Check status and specific hook matches
-		status := "unknown"
-		logs := []string{}
-		if resMap, ok := scan.Result.(map[string]interface{}); ok {
-			if s, ok := resMap["status"].(string); ok {
-				status = s
-			}
-			if l, ok := resMap["logs"].([]interface{}); ok {
-				for i, log := range l {
-					if i < 5 { // limit logs
-						if logStr, ok := log.(string); ok {
-							logs = append(logs, logStr)
-						}
-					}
-				}
-			}
-		}
-		summary.Summary = map[string]interface{}{
-			"status":      status,
-			"recent_logs": logs,
-		}
-
 	default:
 		// Default: pass thorough generic info or limited raw
 		summary.Summary = map[string]string{"info": "See detailed report for more info"}
@@ -995,8 +997,71 @@ func (s *BatchService) GetBatchReportData(
 		return nil, err
 	}
 
-	// 3. Calculate normalized risk
-	riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
+	// [NEW] 2a. Inject Mobile Scans (APK) from AnalysisResultRaw
+	// If AnalysisResultRaw exists, we check for MobSF/Frida results and treat them as ScanResults
+	if len(batch.AnalysisResultRaw) > 0 {
+		var analysisMap map[string]interface{}
+		decoder := json.NewDecoder(bytes.NewReader(batch.AnalysisResultRaw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&analysisMap); err == nil {
+
+			// Determine Target Name (APK Filename)
+			target := "MobileApp.apk" // Fallback
+			if len(batch.UploadedFiles) > 0 {
+				target = batch.UploadedFiles[0].FileName
+			}
+
+			// Check MobSF
+			if mobsf, ok := analysisMap["mobsf"]; ok {
+				log.Printf("[REPORT] Found MobSF data (key-wrapped) in batch %s", batchID)
+				scanResults = append(scanResults, models.ScanResult{
+					BatchID:   batchID,
+					Tool:      "mobsf",
+					Target:    target,
+					Result:    mobsf,
+					CreatedAt: batch.CreatedAt,
+				})
+			} else if _, ok := analysisMap["security_score"]; ok {
+				// Fallback: If no "mobsf" key but has "security_score", assume the whole map is MobSF
+				log.Printf("[REPORT] Found MobSF data (direct-map) in batch %s", batchID)
+				scanResults = append(scanResults, models.ScanResult{
+					BatchID:   batchID,
+					Tool:      "mobsf",
+					Target:    target,
+					Result:    analysisMap,
+					CreatedAt: batch.CreatedAt,
+				})
+			}
+
+			// Check Frida
+			if frida, ok := analysisMap["frida"]; ok {
+				log.Printf("[REPORT] Found Frida data (key-wrapped) in batch %s", batchID)
+				scanResults = append(scanResults, models.ScanResult{
+					BatchID:   batchID,
+					Tool:      "frida",
+					Target:    target,
+					Result:    frida,
+					CreatedAt: batch.CreatedAt,
+				})
+			} else if _, ok := analysisMap["logs"]; ok {
+				// Fallback: If no "frida" key but has "logs" (array), assume the whole map is Frida
+				// But rely on 'status' + 'logs' combination to be safe?
+				// FridaParser looks for "logs" and "status".
+				log.Printf("[REPORT] Found Frida data (direct-map) in batch %s", batchID)
+				scanResults = append(scanResults, models.ScanResult{
+					BatchID:   batchID,
+					Tool:      "frida",
+					Target:    target,
+					Result:    analysisMap,
+					CreatedAt: batch.CreatedAt,
+				})
+			}
+		}
+	}
+
+	// 3. Calculate normalized risk using ALL scan results (Network + APK)
+	// We use internal method to avoid refetching from DB which would miss our virtual fields
+	riskResponse, err := s.calculateNormalizedRiskInternal(batchID, scanResults)
 	if err != nil {
 		riskResponse = &models.BatchRiskResponse{
 			RiskScore:  0,
@@ -1016,7 +1081,6 @@ func (s *BatchService) GetBatchReportData(
 	critical := 0
 	high := 0
 	medium := 0
-
 	low := 0
 	info := 0
 

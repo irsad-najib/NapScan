@@ -23,6 +23,11 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		return nil, fmt.Errorf("mobsf result is not a map")
 	}
 
+	// Unwrap "mobsf" key if present (persistence wrapper)
+	if inner, ok := resultMap["mobsf"].(map[string]interface{}); ok {
+		resultMap = inner
+	}
+
 	// 1. Extract Score
 	if score, ok := resultMap["security_score"].(float64); ok {
 		// MobSF: 100 = aman, 0 = buruk
@@ -32,8 +37,61 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		result.Metadata["average_cvss"] = avgCVSS
 	}
 
-	// 2. Parse Code Analysis for High/Critical issues
-	if codeAnalysis, ok := resultMap["code_analysis"].(map[string]interface{}); ok {
+	// 2. Parse Findings (New Schema: findings are at root under "high", "warning", etc.)
+	// Structure: { "findings": { "high": [...], "warning": [...], ... } }
+	if findingsMap, ok := resultMap["findings"].(map[string]interface{}); ok {
+		// Iterate over severity keys
+		for sevKey, indList := range findingsMap {
+			// standard keys: high, warning, info, secure, hotspot
+			if findingsList, ok := indList.([]interface{}); ok {
+				for _, fItem := range findingsList {
+					if fMap, ok := fItem.(map[string]interface{}); ok {
+						// Determine severity
+						severity := "info"
+						switch sevKey {
+						case "high", "critical":
+							severity = "high"
+						case "warning":
+							severity = "medium"
+						case "secure":
+							severity = "info"
+						}
+
+						// Extract details
+						title := "MobSF Finding"
+						if t, ok := fMap["title"].(string); ok {
+							title = t
+						}
+
+						desc := ""
+						if d, ok := fMap["description"].(string); ok {
+							desc = d
+						}
+
+						result.Findings = append(result.Findings, Finding{
+							Severity:    severity,
+							Title:       title,
+							Description: desc,
+							RawData:     fMap,
+						})
+
+						// Update highest risk
+						switch severity {
+						case "high":
+							if 80 > highestRisk {
+								highestRisk = 80
+							}
+						case "medium":
+							if 60 > highestRisk {
+								highestRisk = 60
+							}
+						}
+					}
+				}
+			}
+		}
+	} else if codeAnalysis, ok := resultMap["code_analysis"].(map[string]interface{}); ok {
+		// Fallback to OLD Schema (code_analysis)
 		if findings, ok := codeAnalysis["findings"].(map[string]interface{}); ok {
 			for key, f := range findings {
 				if fMap, ok := f.(map[string]interface{}); ok {
@@ -48,26 +106,27 @@ func (p *MobSFParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 						}
 					}
 
-					// Only add meaningful findings
-					if severity != "info" {
-						title := key
-						if metadata, ok := fMap["metadata"].(map[string]interface{}); ok {
-							if desc, ok := metadata["description"].(string); ok {
-								title = desc
-							}
+					title := key
+					if metadata, ok := fMap["metadata"].(map[string]interface{}); ok {
+						if desc, ok := metadata["description"].(string); ok {
+							title = desc
 						}
+					}
 
-						result.Findings = append(result.Findings, Finding{
-							Severity:    severity,
-							Title:       title,
-							Description: fmt.Sprintf("Found in file: %v", key), // key is often filename
-							RawData:     fMap,
-						})
-						switch severity {
-						case "high":
-							if 80 > highestRisk { highestRisk = 80 }
-						case "medium":
-							if 60 > highestRisk { highestRisk = 60 }
+					result.Findings = append(result.Findings, Finding{
+						Severity:    severity,
+						Title:       title,
+						Description: fmt.Sprintf("Found in file: %v", key), // key is often filename
+						RawData:     fMap,
+					})
+					switch severity {
+					case "high":
+						if 80 > highestRisk {
+							highestRisk = 80
+						}
+					case "medium":
+						if 60 > highestRisk {
+							highestRisk = 60
 						}
 					}
 				}
@@ -134,7 +193,9 @@ func (p *MobSFParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail
 	detail.Findings = allFindings
 
 	findingCount := float64(len(allFindings))
-	if findingCount == 0 { findingCount = 1 }
+	if findingCount == 0 {
+		findingCount = 1
+	}
 
 	detail.Score = highestRisk*10 + findingCount*2
 	return detail, nil
@@ -148,7 +209,7 @@ func (p *MobSFParser) ParseAndNormalize(rawResults []models.ScanResult) (*models
 	// For APKs, we might have multiple files, but typically one primary result.
 	// We'll process the first valid one or aggregate.
 	// Let's aggregate findings.
-	
+
 	detail := &models.ScannerRiskDetail{
 		Scanner:  "mobsf",
 		Findings: []string{},
@@ -169,9 +230,9 @@ func (p *MobSFParser) ParseAndNormalize(rawResults []models.ScanResult) (*models
 		if models.GetSeverityScore(normalized.NormalizedSeverity) > models.GetSeverityScore(highestSeverity) {
 			highestSeverity = normalized.NormalizedSeverity
 		}
-		
+
 		allFindings = append(allFindings, normalized.Findings...)
-		
+
 		// Track worst score
 		if normalized.Score > detail.Score {
 			detail.Score = normalized.Score

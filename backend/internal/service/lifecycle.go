@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/internal/repository"
 
 	"gorm.io/gorm"
 )
@@ -21,9 +22,10 @@ type LifecycleService struct {
 	basePath string
 	mobsf    *MobSFService
 	frida    *FridaService
+	scanRepo repository.ScanResultRepository
 }
 
-func NewLifecycleService(db *gorm.DB) *LifecycleService {
+func NewLifecycleService(db *gorm.DB, scanRepo repository.ScanResultRepository) *LifecycleService {
 	// Ensure base storage path exists
 	basePath := os.Getenv("UPLOAD_DIR")
 	if basePath == "" {
@@ -41,6 +43,7 @@ func NewLifecycleService(db *gorm.DB) *LifecycleService {
 		basePath: basePath,
 		mobsf:    NewMobSFService(),
 		frida:    NewFridaService(),
+		scanRepo: scanRepo,
 	}
 }
 
@@ -140,7 +143,7 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 			log.Printf("[LIFECYCLE] Failed to get file %d: %v", fileID, err)
 			return
 		}
-		
+
 		// Open file from disk
 		f, err := os.Open(file.FilePath)
 		if err != nil {
@@ -171,7 +174,7 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 		// But we already did upload+scan step by step?
 		// Let's use ReportJSON directly.
 		log.Printf("[LIFECYCLE] Fetching MobSF report for hash %s", info.Hash)
-		
+
 		// Simple retry wrapper for report
 		var reportRaw map[string]interface{}
 		for i := 0; i < 5; i++ {
@@ -181,7 +184,7 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 			}
 			time.Sleep(2 * time.Second)
 		}
-		
+
 		if err != nil {
 			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("MobSF report failed: %v", err))
 			return
@@ -190,7 +193,7 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 		// 4. Evaluate & Save
 		// Use shared summarizer to get full report details (permissions, findings, etc)
 		mobsfSummary := BuildMobSFSummary(info, nil, reportRaw)
-		
+
 		// Wrap in "mobsf" key for future merging
 		finalSummary := map[string]interface{}{
 			"mobsf": mobsfSummary,
@@ -199,17 +202,17 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 
 		// Determine severity/recommendation
 		scoreStr := fmt.Sprintf("%v", getMapValue(getMapValue(reportRaw, "appsec"), "security_score"))
-		score, _ :=  itemToInt(scoreStr) // helper needed or just minimal logic
-		
+		score, _ := itemToInt(scoreStr) // helper needed or just minimal logic
+
 		// Update DB to MOBSF_DONE / WAITING_USER_DECISION
 		// "Implement explicit states ... WAITING_USER_DECISION"
-		
+
 		updates := map[string]interface{}{
 			"status":           models.FileStatusWaitingUserDecision,
 			"findings_summary": string(summaryBytes),
 			"updated_at":       time.Now().UTC(),
 		}
-		
+
 		if score < 50 {
 			updates["severity_score"] = "high"
 		} else if score < 80 {
@@ -221,17 +224,24 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 		if err := s.db.Model(&models.UploadedFile{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
 			log.Printf("[LIFECYCLE] Failed to save findings: %v", err)
 		}
-		
-		// Save full scan result to scan_results table for consistency with other tools? 
-		// Creating a ScanResult record might be good practice.
-		// "Store MobSF report and key findings"
-		// The requirements say "Store metadata in database ... Store MobSF report ..."
-		// ScanResultRepository is used for that.
-		
-		// To decouple, we might skip `scanResultRepo` here or inject it into LifecycleService too?
-		// For simplicity, I'll rely on `UploadedFile` for status and maybe push to ScanResult table via `scanRepo` if I inject it.
-		// But the prompt says "Produce: Go structs for file + scan state".
-		
+
+		// Save full scan result to scan_results table for consistency with other tools
+		if s.scanRepo != nil {
+			scanResult := &models.ScanResult{
+				BatchID:   file.BatchID,
+				Tool:      "mobsf",
+				Target:    file.FileName,
+				Result:    finalSummary,
+				CreatedAt: time.Now().UTC(),
+			}
+
+			if _, err := s.scanRepo.Insert(context.Background(), scanResult); err != nil {
+				log.Printf("[LIFECYCLE] Failed to save MobSF scan result: %v", err)
+			} else {
+				log.Printf("[LIFECYCLE] MobSF scan result persisted to DB for file %d", fileID)
+			}
+		}
+
 		log.Printf("[LIFECYCLE] File %d MobSF scan completed. Waiting user decision.", fileID)
 	}()
 
@@ -259,9 +269,9 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 		log.Printf("[LIFECYCLE] Frida: Inside goroutine for file %d", fileID)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		
+
 		// Re-fetch file inside goroutine to be safe? or use `file` captured?
-		// `file` is captured by value (copy of struct). Safe. 
+		// `file` is captured by value (copy of struct). Safe.
 
 		log.Printf("[LIFECYCLE] Frida: Parsing findings, Findings length: %d", len(file.Findings))
 		// Parse findings to get package_name
@@ -280,7 +290,7 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 			return
 		}
 		log.Printf("[LIFECYCLE] Frida: Successfully extracted MobSF data")
-		
+
 		// Extract package_name from identity object
 		identity, ok := mobsf["identity"].(map[string]interface{})
 		if !ok {
@@ -302,7 +312,7 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 			log.Printf("[LIFECYCLE] Uninstalling APK from emulator: %s", pkgName)
 			uninstallCtx, uninstallCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer uninstallCancel()
-			
+
 			uninstallCmd := exec.CommandContext(uninstallCtx, "adb", "uninstall", pkgName)
 			if output, err := uninstallCmd.CombinedOutput(); err != nil {
 				log.Printf("[LIFECYCLE] Failed to uninstall APK (non-fatal): %v, output: %s", err, string(output))
@@ -315,7 +325,7 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 		log.Printf("[LIFECYCLE] Installing APK to emulator: %s", file.FilePath)
 		installCtx, installCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer installCancel()
-		
+
 		installCmd := exec.CommandContext(installCtx, "adb", "install", "-r", file.FilePath)
 		installOutput, err := installCmd.CombinedOutput()
 		if err != nil {
@@ -345,10 +355,27 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 		if err := s.db.Model(&models.UploadedFile{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
 			log.Printf("[LIFECYCLE] Failed to save Frida findings: %v", err)
 		}
-		
+
+		// Save Frida scan result to scan_results table
+		if s.scanRepo != nil {
+			scanResult := &models.ScanResult{
+				BatchID:   file.BatchID,
+				Tool:      "frida",
+				Target:    pkgName,
+				Result:    findings["frida"],
+				CreatedAt: time.Now().UTC(),
+			}
+
+			if _, err := s.scanRepo.Insert(context.Background(), scanResult); err != nil {
+				log.Printf("[LIFECYCLE] Failed to save Frida scan result: %v", err)
+			} else {
+				log.Printf("[LIFECYCLE] Frida scan result persisted to DB for file %d", fileID)
+			}
+		}
+
 		log.Printf("[LIFECYCLE] Frida scan completed for file %d", fileID)
 	}()
-	
+
 	return nil
 }
 
@@ -403,14 +430,14 @@ func (s *LifecycleService) cleanupOldFiles(ttl time.Duration) {
 	// AND not yet CLEANED
 	threshold := time.Now().Add(-ttl)
 	var files []models.UploadedFile
-	
+
 	// Guards: ONLY cleanup COMPLETED or FAILED.
 	// NEVER cleanup UPLOADED, RUNNING, or WAITING.
-	
-	err := s.db.Where("status IN ? AND updated_at < ?", 
-		[]models.FileStatus{models.FileStatusCompleted}, 
+
+	err := s.db.Where("status IN ? AND updated_at < ?",
+		[]models.FileStatus{models.FileStatusCompleted},
 		threshold).Find(&files).Error
-		
+
 	if err != nil {
 		log.Printf("[LIFECYCLE] Cleanup worker failed to query: %v", err)
 		return
