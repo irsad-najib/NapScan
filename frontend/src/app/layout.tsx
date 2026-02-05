@@ -22,6 +22,7 @@ import { ScanProvider } from "@/context/ScanContext";
 import { ScheduleProvider } from "@/context/ScheduleContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { LayoutProvider } from "@/context/LayoutContext";
 
 export default function RootLayout({
   children,
@@ -68,15 +69,17 @@ export default function RootLayout({
           src="https://accounts.google.com/gsi/client"
           strategy="afterInteractive"
         />
-        <AuthProvider>
-          <ThemeProvider>
-            <ScanProvider>
-              <ScheduleProvider>
-                {children}
-              </ScheduleProvider>
-            </ScanProvider>
-          </ThemeProvider>
-        </AuthProvider>
+        <LayoutProvider>
+          <AuthProvider>
+            <ThemeProvider>
+              <ScanProvider>
+                <ScheduleProvider>
+                  {children}
+                </ScheduleProvider>
+              </ScanProvider>
+            </ThemeProvider>
+          </AuthProvider>
+        </LayoutProvider>
       </body>
     </html>
   );

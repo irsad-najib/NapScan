@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 
+import { useLayout } from "@/context/LayoutContext";
+
 interface HeaderProps {
   title?: string;
   showSearch?: boolean;
@@ -15,6 +17,7 @@ export default function Header({
   searchPlaceholder = "Search...",
 }: HeaderProps) {
   const { user, isAuthenticated, loading: authLoading, loginWithPopup, logout } = useAuth();
+  const { toggleSidebar } = useLayout();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -38,7 +41,10 @@ export default function Header({
   return (
     <header className="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 backdrop-blur-sm shrink-0 z-10">
       {/* Mobile menu */}
-      <button className="md:hidden text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-colors">
+      <button
+        onClick={toggleSidebar}
+        className="md:hidden text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-colors mr-4"
+      >
         <span className="material-symbols-outlined">menu</span>
       </button>
 

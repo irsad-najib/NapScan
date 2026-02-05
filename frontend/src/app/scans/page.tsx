@@ -10,6 +10,7 @@ import { ToolList } from "@/components/scans/ToolList";
 import { Sidebar, Header } from "@/components/layout";
 import { MobSFDecisionDialog } from "@/components/scans/MobSFDecisionDialog";
 import { AuthRequiredDialog } from "@/components/common/AuthRequiredDialog";
+import { AlertModal } from "@/components/common/AlertModal";
 import SuccessModal from "@/components/common/SuccessModal";
 
 export default function ScansPage() {
@@ -18,6 +19,12 @@ export default function ScansPage() {
   const { isAuthenticated } = useAuth();
   const [showNewScanForm, setShowNewScanForm] = useState(false);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [alertModal, setAlertModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "warning" as "info" | "warning" | "error"
+  });
   const [notification, setNotification] = useState<{
     isOpen: boolean;
     title: string;
@@ -38,6 +45,9 @@ export default function ScansPage() {
   // State for file upload
   const [dragActive, setDragActive] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+
+  // State for consent
+  const [consentChecked, setConsentChecked] = useState(false);
 
   // State for expanding scan rows
   const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
@@ -100,6 +110,7 @@ export default function ScansPage() {
     // Clear target/file
     setSelectedTarget(null);
     setUploadedFile(null);
+    setConsentChecked(false);
   };
 
 
@@ -145,7 +156,22 @@ export default function ScansPage() {
     // For APK scans, validate file is uploaded
     if (scanType === "apk") {
       if (!uploadedFile) {
-        alert("Please upload an APK file");
+        setAlertModal({
+          isOpen: true,
+          title: "APK File Missing",
+          message: "Please upload an APK file to proceed with the scan.",
+          type: "warning"
+        });
+        return;
+      }
+
+      if (!consentChecked) {
+        setAlertModal({
+          isOpen: true,
+          title: "Authorization Required",
+          message: "Please confirm that you have authorization to scan this application by checking the box.",
+          type: "warning"
+        });
         return;
       }
 
@@ -154,7 +180,12 @@ export default function ScansPage() {
         .map(([tool]) => tool) as ToolKey[];
 
       if (selectedTools.length === 0) {
-        alert("Please select at least one scanner tool");
+        setAlertModal({
+          isOpen: true,
+          title: "No Tools Selected",
+          message: "Please select at least one scanner tool.",
+          type: "warning"
+        });
         return;
       }
 
@@ -166,7 +197,12 @@ export default function ScansPage() {
         setUploadedFile(null); // Reset file after scan starts
       } catch (error) {
         console.error("Error creating scan:", error);
-        alert("Failed to create scan. Please try again.");
+        setAlertModal({
+          isOpen: true,
+          title: "Scan Creation Failed",
+          message: "Failed to create scan. Please try again.",
+          type: "error"
+        });
       } finally {
         setIsSubmitting(false);
       }
@@ -176,7 +212,12 @@ export default function ScansPage() {
     // For Web scans
     const target = String(selectedTarget ?? "").trim();
     if (!target) {
-      alert("Please select a target");
+      setAlertModal({
+        isOpen: true,
+        title: "Target Missing",
+        message: "Please select or enter a target URL/Host.",
+        type: "warning"
+      });
       return;
     }
 
@@ -185,7 +226,12 @@ export default function ScansPage() {
       .map(([tool]) => tool) as ToolKey[];
 
     if (selectedTools.length === 0) {
-      alert("Please select at least one scanner tool");
+      setAlertModal({
+        isOpen: true,
+        title: "No Tools Selected",
+        message: "Please select at least one scanner tool.",
+        type: "warning"
+      });
       return;
     }
 
@@ -195,14 +241,24 @@ export default function ScansPage() {
       if (formData.scanTiming === "scheduled") {
         // Validate date/time
         if (!formData.scheduledDate || !formData.scheduledTime) {
-          alert("Please select both date and time for the scheduled scan.");
+          setAlertModal({
+            isOpen: true,
+            title: "Incomplete Schedule",
+            message: "Please select both date and time for the scheduled scan.",
+            type: "warning"
+          });
           setIsSubmitting(false);
           return;
         }
 
         const date = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`);
         if (date < new Date()) {
-          alert("Scheduled time must be in the future.");
+          setAlertModal({
+            isOpen: true,
+            title: "Invalid Schedule Time",
+            message: "Scheduled time must be in the future.",
+            type: "warning"
+          });
           setIsSubmitting(false);
           return;
         }
@@ -490,6 +546,26 @@ export default function ScansPage() {
                             }
                           }}
                         />
+
+                        {/* Consent Checkbox for APK */}
+                        <div className="mt-3 p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl">
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={consentChecked}
+                              onChange={(e) => setConsentChecked(e.target.checked)}
+                              className="mt-1 w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                            />
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                Authorization Confirmation
+                              </p>
+                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                                I confirm that I own this application or have explicit authorization to perform security analysis on it.
+                              </p>
+                            </div>
+                          </label>
+                        </div>
                       </>
                     )}
                   </div>
@@ -921,6 +997,15 @@ export default function ScansPage() {
       <AuthRequiredDialog
         isOpen={showAuthDialog}
         onClose={() => setShowAuthDialog(false)}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal({ ...alertModal, isOpen: false })}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
       />
     </div >
   );
