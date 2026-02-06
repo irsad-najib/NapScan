@@ -112,14 +112,16 @@ export default function ScanDetailPage() {
         // Flatten findings into vulnerabilities
         if (risk.findings && Array.isArray(risk.findings)) {
             risk.findings.forEach((finding: any) => {
+                // Handle both object and string findings
+                const isString = typeof finding === 'string';
+
                 vulnerabilities.push({
-                    id: `${toolName}-${Math.random().toString(36).substr(2, 9)}`, // Generate ID if missing
+                    id: `${toolName}-${Math.random().toString(36).substr(2, 9)}`,
                     tool: toolName as ToolKey,
-                    severity: normalizeSeverity(finding.severity || risk.normalized_severity),
-                    name: finding.name || risk.description,
-                    description: finding.description || risk.description,
-                    affectedAsset: finding.location || "N/A",
-                    // Detail is not in ScanVulnerability interface, using description/name/affectedAsset to convey info
+                    severity: normalizeSeverity(isString ? risk.normalized_severity : (finding.severity || risk.normalized_severity)),
+                    name: isString ? finding : (finding.name || risk.description),
+                    description: isString ? finding : (finding.description || risk.description),
+                    affectedAsset: isString ? "Batch Summary" : (finding.location || "N/A"),
                 });
             });
         }

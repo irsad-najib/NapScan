@@ -93,21 +93,21 @@ const isBrowser = typeof window !== 'undefined';
 const saveScansToStorage = (scans: ScanJob[]) => {
     if (!isBrowser) return;
     try {
-        localStorage.setItem(SCANS_STORAGE_KEY, JSON.stringify(scans));
+        sessionStorage.setItem(SCANS_STORAGE_KEY, JSON.stringify(scans));
     } catch (e) {
-        console.error('[ScanContext] Failed to save scans to localStorage:', e);
+        console.error('[ScanContext] Failed to save scans to sessionStorage:', e);
     }
 };
 
 const loadScansFromStorage = (): ScanJob[] => {
     if (!isBrowser) return [];
     try {
-        const data = localStorage.getItem(SCANS_STORAGE_KEY);
+        const data = sessionStorage.getItem(SCANS_STORAGE_KEY);
         if (data) {
             return JSON.parse(data);
         }
     } catch (e) {
-        console.error('[ScanContext] Failed to load scans from localStorage:', e);
+        console.error('[ScanContext] Failed to load scans from sessionStorage:', e);
     }
     return [];
 };
@@ -115,21 +115,21 @@ const loadScansFromStorage = (): ScanJob[] => {
 const savePendingDecisionsToStorage = (decisions: MobSFPendingDecision[]) => {
     if (!isBrowser) return;
     try {
-        localStorage.setItem(PENDING_DECISIONS_KEY, JSON.stringify(decisions));
+        sessionStorage.setItem(PENDING_DECISIONS_KEY, JSON.stringify(decisions));
     } catch (e) {
-        console.error('[ScanContext] Failed to save pending decisions to localStorage:', e);
+        console.error('[ScanContext] Failed to save pending decisions to sessionStorage:', e);
     }
 };
 
 const loadPendingDecisionsFromStorage = (): MobSFPendingDecision[] => {
     if (!isBrowser) return [];
     try {
-        const data = localStorage.getItem(PENDING_DECISIONS_KEY);
+        const data = sessionStorage.getItem(PENDING_DECISIONS_KEY);
         if (data) {
             return JSON.parse(data);
         }
     } catch (e) {
-        console.error('[ScanContext] Failed to load pending decisions from localStorage:', e);
+        console.error('[ScanContext] Failed to load pending decisions from sessionStorage:', e);
     }
     return [];
 };
@@ -1311,8 +1311,24 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         return newScanId;
     };
 
-    const deleteScan = (id: string) => {
+    const deleteScan = async (id: string) => {
+        // Optimistically remove from UI
         setScans((prev) => prev.filter((s) => s.id !== id));
+
+        // Remove from backend if it has a batchId
+        // Find the scan first to get batchId (we need to do this before setting state, 
+        // but since we're inside the function we can lookup from current state 'scans')
+        const scanToDelete = scans.find(s => s.id === id);
+        if (scanToDelete?.batchId) {
+            try {
+                console.log(`[ScanContext] Deleting batch ${scanToDelete.batchId} from backend...`);
+                await batchApi.delete(scanToDelete.batchId);
+                console.log(`[ScanContext] Batch deleted successfully`);
+            } catch (err) {
+                console.error(`[ScanContext] Failed to delete batch ${scanToDelete.batchId}:`, err);
+                // Optionally revert UI change here if critical, but for now we prioritize UI responsiveness
+            }
+        }
     };
 
     // Stop a running tool scan

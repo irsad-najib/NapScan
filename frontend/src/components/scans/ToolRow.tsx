@@ -5,7 +5,7 @@ import { ToolKey } from "@/services/api";
 import { ToolExecution, ScanVulnerability, useScan } from "@/context/ScanContext";
 import { ToolRiskOverview } from "./ToolRiskOverview";
 import { ToolMetadata } from "./ToolMetadata";
-import { parseFridaResults, extractMobsfAppInfo, getToolTableData } from "@/utils/toolParsers";
+import { parseFridaResults, extractMobsfAppInfo, getToolTableData, parseMobsfResults } from "@/utils/toolParsers";
 import { ParsedResultTable } from "./ParsedResultTable";
 import { MobSFResultsView } from "./MobSFResultsView";
 
@@ -267,13 +267,26 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
                         <MobSFResultsView
                             toolData={data}
                             target={target}
-                            mobsfVulnerabilities={toolVulns.filter(v => !v.tags?.includes('frida'))}
-                            fridaVulnerabilities={toolVulns.filter(v => v.tags?.includes('frida'))}
+                            // Use client-side parsed results if available (fixing missing backend findings)
+                            mobsfVulnerabilities={
+                                data.result
+                                    ? parseMobsfResults(data.result).filter(v => !v.tags?.includes('frida'))
+                                    : toolVulns.filter(v => !v.tags?.includes('frida'))
+                            }
+                            fridaVulnerabilities={
+                                data.result
+                                    ? parseFridaResults(data.result)
+                                    : toolVulns.filter(v => v.tags?.includes('frida'))
+                            }
                             appInfo={extractMobsfAppInfo(data.result)}
                             showFrida={true}
                         />
                     ) : (
-                        <ToolMetadata toolData={data} target={target} />
+                        <ToolMetadata
+                            toolData={data}
+                            target={target}
+                            vulnerabilities={toolVulns}
+                        />
                     )}
                 </div>
             )}

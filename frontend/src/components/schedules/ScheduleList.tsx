@@ -81,7 +81,9 @@ export default function ScheduleList() {
 
     const formatCronDisplay = (expression: string) => {
         try {
-            let str = cronstrue.toString(expression, { use24HourTimeFormat: true });
+            // detailed cleanup for CRON_TZ prefix
+            const cleanExpression = expression.replace(/CRON_TZ=[^ ]+ /, "").trim();
+            let str = cronstrue.toString(cleanExpression, { use24HourTimeFormat: true });
             // Simplify text
             str = str.replace(", on day", " ")
                 .replace(" of the month", "")
@@ -216,7 +218,7 @@ export default function ScheduleList() {
                                                         <div className="w-48">Schedule Component</div>
                                                         <div className="flex-1 px-4">Target</div>
                                                         <div className="w-32">Frequency</div>
-                                                        <div className="w-32">Last Status</div>
+                                                        {/* <div className="w-32">Last Status</div> */}
                                                         <div className="w-24 text-right px-4">Status</div>
                                                     </div>
 

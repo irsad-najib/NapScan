@@ -323,7 +323,7 @@ export function ParsedResultTable({ tool, data, type, status }: ParsedResultTabl
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                         {filteredData.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors" title={item.description || item.vulnerability || item.name || ""}>
                                 {columns.map((col) => (
                                     <td key={`${idx}-${col.accessor}`} className={`px-4 py-3 text-slate-600 dark:text-slate-300 ${col.className || ''}`}>
                                         {renderCell(item, col)}

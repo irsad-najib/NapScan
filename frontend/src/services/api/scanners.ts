@@ -296,6 +296,12 @@ export const batchApi = {
       url: `/api/batch/${batchId}/report`,
       responseType: "blob",
     }),
+
+  delete: async (batchId: string): Promise<ApiResult<void>> =>
+    request<void>({
+      method: "DELETE",
+      url: `/api/batch/${batchId}`,
+    }),
 };
 
 export const scannersApi = {

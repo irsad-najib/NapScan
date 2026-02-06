@@ -217,7 +217,7 @@ export function extractAlerts(rawResult: any): ZapAlert[] {
 // ============================================================================
 
 /**
- * Parse ZAP results into basic ScanVulnerability array
+ * Parse ZAP results into a standard format
  */
 export function parseZapResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
@@ -225,6 +225,16 @@ export function parseZapResults(rawResult: any): ScanVulnerability[] {
     console.log("[ZapParser] Raw result received:", rawResult);
 
     try {
+        // Handle stringified JSON
+        if (typeof rawResult === "string") {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                console.error("Failed to parse stringified ZAP JSON:", e);
+            }
+        }
+
+        // ZAP results often come wrapped in { site: [...] } or just an array of alerts
         const alerts = extractAlerts(rawResult);
 
         console.log(`[ZapParser] Found ${alerts.length} alerts`);

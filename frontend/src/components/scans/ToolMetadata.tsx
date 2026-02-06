@@ -5,12 +5,15 @@ import { ToolExecution } from "@/context/ScanContext";
 import { ParsedResultTable } from "./ParsedResultTable";
 import { getToolTableData } from "@/utils/toolParsers";
 
+import { ScanVulnerability } from "@/context/ScanContext";
+
 interface ToolMetadataProps {
     toolData: ToolExecution;
     target: string;
+    vulnerabilities?: ScanVulnerability[];
 }
 
-export function ToolMetadata({ toolData, target }: ToolMetadataProps) {
+export function ToolMetadata({ toolData, target, vulnerabilities = [] }: ToolMetadataProps) {
     const [showRaw, setShowRaw] = useState(false);
 
     const metadata = [
@@ -28,9 +31,99 @@ export function ToolMetadata({ toolData, target }: ToolMetadataProps) {
 
     // Compute tabular data for the table view
     const tableData = useMemo(() => {
-        if (!toolData.result) return [];
-        return getToolTableData(toolData.tool, toolData.result);
-    }, [toolData.tool, toolData.result]);
+        // 1. Try to get data from raw result first (more detailed)
+        if (toolData.result) {
+            const parsed = getToolTableData(toolData.tool, toolData.result);
+            if (parsed && parsed.length > 0) return parsed;
+        }
+
+        // 2. Fallback: Convert generic ScanVulnerabilities to tool-specific table format
+        if (vulnerabilities && vulnerabilities.length > 0) {
+            return vulnerabilities.map(v => {
+                // Map based on tool to match ParsedResultTable columns
+                switch (toolData.tool) {
+                    case 'nmap':
+                        // Try to parse "Port 80 open (http)" string
+                        const nmapMatch = v.name.match(/Port (\d+) (\w+) \(([^)]+)\)/);
+                        if (nmapMatch) {
+                            return {
+                                port: nmapMatch[1],
+                                state: nmapMatch[2],
+                                service: nmapMatch[3],
+                                protocol: v.name.toLowerCase().includes('udp') ? 'udp' : 'tcp',
+                                severity: v.severity,
+                                description: v.name
+                            };
+                        }
+                        return {
+                            port: '-',
+                            service: v.name,
+                            state: 'open',
+                            severity: v.severity,
+                            description: v.name
+                        };
+                    case 'zap':
+                        // Parse "Alert Name on URL " string
+                        // Regex looks for " on http" as delimiter
+                        const zapMatch = v.name.match(/^(.*?) on (https?:\/\/.*)$/);
+                        if (zapMatch) {
+                            return {
+                                alert: zapMatch[1],
+                                risk: v.severity,
+                                confidence: 'Medium', // Default for summary
+                                method: 'GET', // Validation assumption
+                                url: zapMatch[2],
+                                description: v.name
+                            };
+                        }
+                        return {
+                            alert: v.name,
+                            risk: v.severity,
+                            confidence: 'Medium',
+                            method: '-',
+                            url: v.affectedAsset,
+                            description: v.name
+                        };
+                    case 'nuclei':
+                        return {
+                            template: v.tags?.[0] || v.name,
+                            severity: v.severity,
+                            name: v.name,
+                            matched_at: v.affectedAsset
+                        };
+                    case 'openvas':
+                        return {
+                            name: v.name,
+                            severity: v.severity,
+                            host: target,
+                            port: v.affectedAsset || '-'
+                        };
+                    case 'sslyze':
+                        return {
+                            property: v.name,
+                            value: v.description,
+                            status: v.severity === 'Info' ? 'OK' : 'WARN'
+                        };
+                    case 'ffuf':
+                        return {
+                            path: v.name.replace('Path Found: ', ''),
+                            status: v.description.match(/HTTP (\d+)/)?.[1] || '-',
+                            size: v.description.match(/Size: (\d+)B/)?.[1] || '-',
+                            words: v.description.match(/Words: (\d+)/)?.[1] || '-',
+                            lines: v.description.match(/Lines: (\d+)/)?.[1] || '-'
+                        };
+                    default:
+                        return {
+                            vulnerability: v.name,
+                            severity: v.severity,
+                            description: v.description
+                        };
+                }
+            });
+        }
+
+        return [];
+    }, [toolData.tool, toolData.result, vulnerabilities, target]);
 
     const hasTableData = tableData.length > 0;
 

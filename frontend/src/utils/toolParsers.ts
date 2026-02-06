@@ -24,6 +24,15 @@ export function parseOpenVasResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
     try {
+        // Handle stringified JSON
+        if (typeof rawResult === "string") {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                console.error("[OpenVAS Parser] Failed to parse stringified JSON:", e);
+            }
+        }
+
         console.log("[OpenVAS Parser] Raw result type:", typeof rawResult);
         console.log("[OpenVAS Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
@@ -142,6 +151,18 @@ export function parseNucleiResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
     try {
+        // Handle stringified JSON (unless it's NDJSON string format which is handled later)
+        // We only parse if it looks like a JSON object/array, not NDJSON
+        if (typeof rawResult === "string" && (rawResult.trim().startsWith('[') || rawResult.trim().startsWith('{'))) {
+            try {
+                const parsed = JSON.parse(rawResult);
+                // Only use parsed if it's not a single string (which might be NDJSON line)
+                rawResult = parsed;
+            } catch (e) {
+                // Ignore, might be NDJSON or raw text
+            }
+        }
+
         console.log("[Nuclei Parser] Raw result type:", typeof rawResult);
         console.log("[Nuclei Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
@@ -269,6 +290,15 @@ export function parseSslyzeResults(rawResult: any): ScanVulnerability[] {
     let vulnIdx = 0;
 
     try {
+        // Handle stringified JSON
+        if (typeof rawResult === "string" && (rawResult.trim().startsWith('[') || rawResult.trim().startsWith('{'))) {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                // Ignore, might be raw text output (legacy format)
+            }
+        }
+
         console.log("[SSLyze Parser] Raw result type:", typeof rawResult);
         console.log("[SSLyze Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
@@ -553,6 +583,15 @@ export function parseFfufResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
     try {
+        // Handle stringified JSON
+        if (typeof rawResult === "string") {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                console.error("[FFUF Parser] Failed to parse stringified JSON:", e);
+            }
+        }
+
         console.log("[FFUF Parser] Raw result type:", typeof rawResult);
         console.log("[FFUF Parser] Raw result keys:", rawResult ? Object.keys(rawResult) : "null");
 
@@ -703,6 +742,15 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
         console.log("[MobSF Parser] Parsing results...");
         console.log("[MobSF Parser] Raw result keys:", Object.keys(rawResult || {}));
 
+        // Handle stringified JSON
+        if (typeof rawResult === "string") {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                console.error("[MobSF Parser] Failed to parse stringified JSON:", e);
+            }
+        }
+
         // Handle nested data structure
         const data = rawResult?.data || rawResult;
 
@@ -717,7 +765,9 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
         };
 
         // --- Format 1: findings.mobsf structure (new combined scan response) ---
-        const mobsfData = rawResult?.findings?.mobsf || data?.findings?.mobsf;
+        // Also checks result.mobsf for the format provided by user
+        // Also checks if rawResult IS the mobsf object (has certificate/manifest)
+        const mobsfData = rawResult?.findings?.mobsf || data?.findings?.mobsf || rawResult?.result?.mobsf || (rawResult?.certificate ? rawResult : null);
         if (mobsfData) {
             console.log("[MobSF Parser] Found findings.mobsf structure, parsing...");
 

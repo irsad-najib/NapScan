@@ -220,9 +220,27 @@ function parseRisk(risk: NmapRisk, status: "new" | "existing" | "closed"): NmapV
 export function parseNmapResults(rawResult: any): ScanVulnerability[] {
     const vulnerabilities: ScanVulnerability[] = [];
 
-    console.log("[NmapParser] Raw result received:", rawResult);
-
     try {
+        // Handle stringified JSON
+        if (typeof rawResult === "string") {
+            try {
+                rawResult = JSON.parse(rawResult);
+            } catch (e) {
+                console.error("Failed to parse stringified Nmap JSON:", e);
+                // Try to handle as raw text output if JSON parse fails
+                // But for now, we assume it's JSON if passed to this parser
+            }
+        }
+
+        console.log("Parsing Nmap Results:", rawResult);
+
+        console.log("[NmapParser] Raw result received:", rawResult);
+
+        if (!rawResult) {
+            console.warn("[NmapParser] No rawResult object found in Nmap response");
+            return [];
+        }
+
         const risks = rawResult?.risks;
 
         console.log("[NmapParser] Risks object:", risks);
