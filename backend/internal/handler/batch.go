@@ -73,7 +73,6 @@ func (h *BatchHandler) GetUserBatches(c *fiber.Ctx) error {
 		log.Printf("[BATCH] Failed to retrieve batches: %v", err)
 		return response.InternalServerError(c, "Failed to retrieve batches", err)
 	}
-	
 
 	log.Printf("[BATCH] Retrieved %d batches", len(batches))
 	return c.JSON(batches)
@@ -95,7 +94,7 @@ func (h *BatchHandler) GetUserBatches(c *fiber.Ctx) error {
 func (h *BatchHandler) GetBatchDetail(c *fiber.Ctx) error {
 	batchID := c.Params("batch_id")
 	log.Printf("[BATCH] Received get batch detail request for batch_id=%s", batchID)
-	
+
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
 		log.Printf("[BATCH] User not authenticated")
@@ -159,6 +158,44 @@ func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
 		return response.InternalServerError(c, "Failed to generate report", err)
 	}
 
-	log.Printf("[BATCH] Report generated successfully: %s", filePath)
+	log.Printf("[BATCH_SERVICE] Report generated successfully: %s", filePath)
 	return c.Download(filePath)
+}
+
+// DeleteBatch removes a batch and its associated data
+// @Summary Delete Batch
+// @Description Delete a specific batch
+// @Tags Batch
+// @Security BearerAuth
+// @Produce json
+// @Param batch_id path string true "Batch ID"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 403 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /batch/{batch_id} [delete]
+func (h *BatchHandler) DeleteBatch(c *fiber.Ctx) error {
+	batchID := c.Params("batch_id")
+	log.Printf("[BATCH] Received delete request for batch_id=%s", batchID)
+
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		log.Printf("[BATCH] User not authenticated")
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	err := h.service.DeleteBatch(c.Context(), batchID, userID)
+	if err != nil {
+		log.Printf("[BATCH] Failed to delete batch: %v", err)
+		if err.Error() == "batch not found" {
+			return response.NotFound(c, "Batch not found")
+		}
+		if err.Error() == "access denied" {
+			return response.Forbidden(c, "You do not have permission to delete this batch")
+		}
+		return response.InternalServerError(c, "Failed to delete batch", err)
+	}
+
+	return response.Success(c, "Batch deleted successfully", nil)
 }

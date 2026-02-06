@@ -50,3 +50,7 @@ func (r *GormBatchRepository) FindBatchesByUserID(ctx context.Context, userID st
 func (r *GormBatchRepository) Update(ctx context.Context, batch *models.Batch) error {
 	return r.db.WithContext(ctx).Save(batch).Error
 }
+
+func (r *GormBatchRepository) Delete(ctx context.Context, batchID string) error {
+	return r.db.WithContext(ctx).Where("batch_id = ?", batchID).Delete(&models.Batch{}).Error
+}

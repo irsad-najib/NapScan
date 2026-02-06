@@ -76,6 +76,34 @@ func (s *BatchService) ValidateBatchOwnership(c *fiber.Ctx, batchID string) erro
 	return nil
 }
 
+// DeleteBatch deletes a batch if owned by the user
+func (s *BatchService) DeleteBatch(ctx context.Context, batchID, userID string) error {
+	log.Printf("[BATCH_SERVICE] Deleting batch_id=%s for user_id=%s", batchID, userID)
+
+	// Verify ownership first
+	// Note: ValidateBatchOwnership takes *fiber.Ctx which we don't have here directly,
+	// so we'll do manual check similar to GetBatchDetail
+	batch, err := s.repo.FindByID(ctx, batchID)
+	if err != nil {
+		return err
+	}
+	if batch == nil {
+		return fmt.Errorf("batch not found")
+	}
+	if batch.UserID != userID {
+		return fmt.Errorf("access denied")
+	}
+
+	// Delete
+	if err := s.repo.Delete(ctx, batchID); err != nil {
+		log.Printf("[BATCH_SERVICE] Failed to delete batch: %v", err)
+		return err
+	}
+
+	log.Printf("[BATCH_SERVICE] Batch deleted successfully")
+	return nil
+}
+
 // calculateBatchRisk computes a risk score and returns detailed explanation
 func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}) {
 	maxRiskScore := 0.0
