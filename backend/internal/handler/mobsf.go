@@ -74,7 +74,7 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 	defer file.Close()
 
 	log.Printf("[MOBSF] Starting upload for file=%s", fileHeader.Filename)
-	
+
 	// Create uploaded file record via LifecycleService
 	// Note: We need to pass a reader that we can read. `file` is already open.
 	// But `Upload` in lifecycle expects to read fully.
@@ -91,17 +91,17 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 	// It was: "Upload(batchID string, fileName string, file io.Reader, size int64, hash string)" ... wait, line 40 of step 50 output says:
 	// "func (s *LifecycleService) Upload(batchID string, fileName string, file io.Reader, size int64, hash string) (*models.UploadedFile, error) {"
 	// YES.
-	
+
 	// So I need to calculate hash first?
 	// MobSF usually calculates hash.
 	// But LifecycleService needs it for path: /data/uploads/{batch_id}/{hash}.{ext}
 	// So I MUST calculate hash before calling lifecycle.Upload.
 	// `file` is `multipart.File`.
-	
+
 	// We need to read file to calculate hash, then seek back to 0.
 	// Or use tee reader? But we need hash for filename.
 	// So: Read all -> Hash -> Seek 0 -> Pass to Lifecycle.
-	
+
 	// Helper to calc hash
 	hash, err := calculateHash(file)
 	if err != nil {
@@ -112,17 +112,17 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 		log.Printf("[MOBSF] Failed to seek file: %v", err)
 		return response.InternalServerError(c, "Failed to reset file pointer", err)
 	}
-	
+
 	uploadedFile, err := h.lifecycle.Upload(batchID, fileHeader.Filename, file, fileHeader.Size, hash)
 	if err != nil {
 		log.Printf("[MOBSF] Lifecycle Upload failed: %v", err)
 		return response.InternalServerError(c, "Failed to process upload", err)
 	}
-	
+
 	log.Printf("[MOBSF] Lifecycle Upload completed, id=%d hash=%s", uploadedFile.ID, uploadedFile.Hash)
-	
+
 	// Trigger MobSF Scan Async
-	h.lifecycle.StartMobSF(uploadedFile.ID)
+	h.lifecycle.StartMobSF(uploadedFile.ID, false)
 
 	payload := fiber.Map{
 		"hash":      uploadedFile.Hash,
@@ -298,7 +298,7 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 
 	log.Printf("[MOBSF] Full scan request completed successfully")
 	return response.Success(c, "MobSF scan completed", payload)
-}	
+}
 
 func isMobSFDebug() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("MOBSF_DEBUG")))

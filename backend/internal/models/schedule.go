@@ -14,9 +14,10 @@ type Schedule struct {
 	Target         string         `json:"target" gorm:"type:varchar(255);not null"`
 	Tool           string         `json:"tool" gorm:"type:varchar(50);not null"` // nmap, zap, etc.
 	CronExpression string         `json:"cron_expression" gorm:"type:varchar(50);not null"`
+	Decision       bool           `json:"decision" gorm:"default:false"` // true = continue to dynamic analysis
 	IsActive       bool           `json:"is_active" gorm:"default:true"`
 	LastRun        *time.Time     `json:"last_run"`
-	LastRunStatus  string         `json:"last_run_status" gorm:"type:varchar(20)"` // success, failed, running
+	LastRunStatus  string         `json:"last_run_status" gorm:"type:varchar(20)"`   // success, failed, running
 	LastResourceID string         `json:"last_resource_id" gorm:"type:varchar(255)"` // TaskID or BatchID
 	NextRun        *time.Time     `json:"next_run"`
 	UserID         string         `json:"user_id" gorm:"type:char(36);not null"`

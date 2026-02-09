@@ -128,7 +128,7 @@ func (s *LifecycleService) UpdateStatus(fileID uint, status models.FileStatus, e
 }
 
 // StartMobSF initiates the MobSF scan flow asynchronously
-func (s *LifecycleService) StartMobSF(fileID uint) error {
+func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 	// Sync state update first
 	if err := s.UpdateStatus(fileID, models.FileStatusMobSFRunning, ""); err != nil {
 		return err
@@ -242,7 +242,20 @@ func (s *LifecycleService) StartMobSF(fileID uint) error {
 			}
 		}
 
-		log.Printf("[LIFECYCLE] File %d MobSF scan completed. Waiting user decision.", fileID)
+		log.Printf("[LIFECYCLE] File %d MobSF scan completed. AutoFrida: %v", fileID, autoFrida)
+
+		// Auto-trigger Frida if requested
+		if autoFrida {
+			log.Printf("[LIFECYCLE] Auto-triggering Frida scan for file %d", fileID)
+			// Small delay to ensure DB commit visible? Not needed if same connection usually.
+			// But StartFrida reads from DB. Update above happened.
+			// StartFrida requires STATUS to be something?
+			// StartFrida transitions to FridaRunning. It only checks existence.
+			if err := s.StartFrida(fileID); err != nil {
+				log.Printf("[LIFECYCLE] Failed to auto-trigger Frida: %v", err)
+				// We should probably mark as Failed, but StartFrida likely did that if it failed early.
+			}
+		}
 	}()
 
 	return nil

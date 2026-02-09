@@ -142,7 +142,7 @@ func main() {
 	scanManager := service.NewScanManager()
 
 	// Initialize Scheduler Service
-	schedulerService := service.NewSchedulerService(scheduleRepo, batchService, scanManager, scanResultRepo)
+	schedulerService := service.NewSchedulerService(scheduleRepo, batchService, scanManager, scanResultRepo, lifecycleService)
 	schedulerService.Start()
 	defer schedulerService.Stop()
 

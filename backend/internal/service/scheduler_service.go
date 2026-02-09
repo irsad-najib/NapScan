@@ -21,6 +21,7 @@ type SchedulerService struct {
 	batchService *BatchService // Same package
 	scanManager  *ScanManager  // Same package
 	scanRepo     repository.ScanResultRepository
+	lifecycle    *LifecycleService // Same package
 }
 
 func NewSchedulerService(
@@ -28,6 +29,7 @@ func NewSchedulerService(
 	batchService *BatchService,
 	scanManager *ScanManager,
 	scanRepo repository.ScanResultRepository,
+	lifecycle *LifecycleService,
 ) *SchedulerService {
 	return &SchedulerService{
 		repo:         repo,
@@ -36,6 +38,7 @@ func NewSchedulerService(
 		batchService: batchService,
 		scanManager:  scanManager,
 		scanRepo:     scanRepo,
+		lifecycle:    lifecycle,
 	}
 }
 
@@ -203,6 +206,18 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 			err = RunFfufAsync(ctx, taskID, s.scanManager)
 		case "sslyze":
 			err = RunSslyzeAsync(ctx, taskID, s.scanManager)
+		case "apk", "mobsf":
+			// Handle APK scan via LifecycleService
+			// sch.Target is expected to be fileID (string)
+			fileID, parseErr := itemToInt(sch.Target)
+			if parseErr != nil {
+				err = fmt.Errorf("invalid target for apk scan (expected fileID): %v", parseErr)
+			} else {
+				// Start MobSF with Decision (autoFrida)
+				// StartMobSF is async but returns error if immediate fail
+				err = s.lifecycle.StartMobSF(uint(fileID), sch.Decision)
+				// Note: RunXXXAsync usually return immediately. StartMobSF also does (spawns goroutine).
+			}
 		default:
 			err = fmt.Errorf("unknown tool: %s", sch.Tool)
 		}
