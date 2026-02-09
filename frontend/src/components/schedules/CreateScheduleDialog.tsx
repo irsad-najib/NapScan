@@ -29,6 +29,9 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
     const [apkFile, setApkFile] = useState<File | null>(null);
     const [selectedTools, setSelectedTools] = useState<ToolKey[]>([]);
 
+    // Authorization State
+    const [isAuthorized, setIsAuthorized] = useState(false);
+
     // Schedule Date/Time
     const [scheduleDate, setScheduleDate] = useState("");
     const [scheduleTime, setScheduleTime] = useState("");
@@ -70,6 +73,9 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
             }
             if (scanType === "mobile" && !apkFile) {
                 throw new Error("Please upload an APK file.");
+            }
+            if (scanType === "mobile" && !isAuthorized) {
+                throw new Error("Please confirm your authorization to scan this application.");
             }
 
             // Schedule Logic
@@ -126,7 +132,9 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
             setSelectedTools([]);
             setScanName("");
             setScheduleDate("");
+            setScheduleDate("");
             setScheduleTime("");
+            setIsAuthorized(false);
         } catch (err: any) {
             setError(err.message || "Failed to create schedule");
         } finally {
@@ -172,7 +180,7 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                         <div className="grid grid-cols-2 gap-4">
                             <button
                                 type="button"
-                                onClick={() => { setScanType("web"); setApkFile(null); setTarget(""); setSelectedTools([]); }}
+                                onClick={() => { setScanType("web"); setApkFile(null); setTarget(""); setSelectedTools([]); setIsAuthorized(false); }}
                                 className={`flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all duration-200 gap-3 ${scanType === "web"
                                     ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400"
                                     : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-600 dark:text-slate-400"
@@ -187,7 +195,7 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
 
                             <button
                                 type="button"
-                                onClick={() => { setScanType("mobile"); setApkFile(null); setTarget(""); setSelectedTools([]); }}
+                                onClick={() => { setScanType("mobile"); setApkFile(null); setTarget(""); setSelectedTools([]); setIsAuthorized(false); }}
                                 className={`flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all duration-200 gap-3 ${scanType === "mobile"
                                     ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400"
                                     : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-600 dark:text-slate-400"
@@ -235,6 +243,25 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                             </div>
                         )}
                     </div>
+
+                    {/* Authorization Checkbox (Mobile Only) */}
+                    {scanType === "mobile" && (
+                        <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl animate-fade-in">
+                            <div className="pt-0.5">
+                                <input
+                                    type="checkbox"
+                                    id="authorization-check"
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                    checked={isAuthorized}
+                                    onChange={(e) => setIsAuthorized(e.target.checked)}
+                                />
+                            </div>
+                            <label htmlFor="authorization-check" className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                                <span className="font-bold block mb-1">Authorization Confirmation</span>
+                                I confirm that I am authorized to scan this application and that I have the necessary permissions to perform security testing on it.
+                            </label>
+                        </div>
+                    )}
 
                     {/* Scanner Tools */}
                     <div className="flex flex-col gap-3">

@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from "react";
 import { ToolExecution, ScanVulnerability } from "@/context/ScanContext";
 import { ParsedResultTable } from "./ParsedResultTable";
-import { getToolTableData, MobSFAppInfo } from "@/utils/toolParsers";
+import { getToolTableData, MobSFAppInfo, parseMobsfResults, parseFridaResults } from "@/utils/toolParsers";
 
 // Severity priority map (higher value = more severe)
 const SEVERITY_ORDER: Record<string, number> = {
@@ -40,6 +40,12 @@ export function MobSFResultsView({
     const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
     const [showRaw, setShowRaw] = useState(false);
 
+    // DEBUG: Log incoming data
+    console.log("[MobSFResultsView] toolData:", toolData);
+    console.log("[MobSFResultsView] toolData.result:", toolData?.result);
+    console.log("[MobSFResultsView] mobsfVulnerabilities:", mobsfVulnerabilities);
+    console.log("[MobSFResultsView] fridaVulnerabilities:", fridaVulnerabilities);
+
     // Standard Metadata for the grid
     const metadata = [
         { label: "Scanner", value: toolData.tool.toUpperCase() },
@@ -69,6 +75,7 @@ export function MobSFResultsView({
         }
     };
 
+
     const getSeverityIcon = (severity: string) => {
         switch (severity.toLowerCase()) {
             case "critical":
@@ -83,6 +90,35 @@ export function MobSFResultsView({
         }
     };
 
+    // Fallback: Parse from toolData.result if props are empty
+    const effectiveMobsfVulns = useMemo(() => {
+        if (mobsfVulnerabilities.length > 0) {
+            return mobsfVulnerabilities;
+        }
+        // Try to parse from toolData.result
+        if (toolData?.result) {
+            const parsed = parseMobsfResults(toolData.result);
+            if (parsed.length > 0) {
+                return parsed.filter(v => !v.tags?.includes('frida'));
+            }
+        }
+        return [];
+    }, [mobsfVulnerabilities, toolData]);
+
+    const effectiveFridaVulns = useMemo(() => {
+        if (fridaVulnerabilities.length > 0) {
+            return fridaVulnerabilities;
+        }
+        // Try to parse from toolData.result for Frida
+        if (toolData?.result) {
+            const parsed = parseFridaResults(toolData.result);
+            if (parsed.length > 0) {
+                return parsed;
+            }
+        }
+        return [];
+    }, [fridaVulnerabilities, toolData]);
+
     const countBySeverity = (vulns: ScanVulnerability[]) => {
         return {
             critical: vulns.filter(v => v.severity.toLowerCase() === "critical").length,
@@ -93,10 +129,10 @@ export function MobSFResultsView({
         };
     };
 
-    const mobsfCounts = countBySeverity(mobsfVulnerabilities);
-    const fridaCounts = countBySeverity(fridaVulnerabilities);
+    const mobsfCounts = countBySeverity(effectiveMobsfVulns);
+    const fridaCounts = countBySeverity(effectiveFridaVulns);
 
-    const currentVulns = activeSection === "mobsf" ? mobsfVulnerabilities : fridaVulnerabilities;
+    const currentVulns = activeSection === "mobsf" ? effectiveMobsfVulns : effectiveFridaVulns;
 
     // Filter vulnerabilities
     const filteredAndSortedVulns = useMemo(() => {
@@ -243,25 +279,9 @@ export function MobSFResultsView({
                                     <span className="material-symbols-outlined text-lg">security</span>
                                     <span>MobSF Static Analysis</span>
                                     <span className="bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs px-2 py-0.5 rounded-full">
-                                        {mobsfVulnerabilities.length}
+                                        {effectiveMobsfVulns.length}
                                     </span>
                                 </button>
-
-                                {showFrida && (
-                                    <button
-                                        onClick={() => setActiveSection("frida")}
-                                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all ${activeSection === "frida"
-                                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                                            }`}
-                                    >
-                                        <span className="material-symbols-outlined text-lg">bug_report</span>
-                                        <span>Frida Dynamic Analysis</span>
-                                        <span className="bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs px-2 py-0.5 rounded-full">
-                                            {fridaVulnerabilities.length}
-                                        </span>
-                                    </button>
-                                )}
                             </div>
                         )}
 

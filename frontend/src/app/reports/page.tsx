@@ -197,29 +197,16 @@ export default function ReportsPage() {
                         <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
                           Export Format
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="w-full">
                           <button
                             onClick={() => setExportFormat("pdf")}
                             className={`w-full flex items-center justify-center gap-4 px-4 py-2 rounded-xl border-2 transition-all ${exportFormat === "pdf"
                               ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
                               : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
                               }`}>
-                            <span className="material-symbols-outlined">
-                              picture_as_pdf
-                            </span>
+                            <span className="material-symbols-outlined">picture_as_pdf</span>
                             <span className="font-bold text-sm">PDF</span>
                           </button>
-                          {/* <button */}
-                          {/* onClick={() => setExportFormat("html")}
-                            className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 transition-all ${exportFormat === "html"
-                              ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                              : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
-                              }`}>
-                            <span className="material-symbols-outlined">
-                              code
-                            </span>
-                            <span className="font-bold text-sm">HTML</span>
-                          </button> */}
                         </div>
                       </div>
 

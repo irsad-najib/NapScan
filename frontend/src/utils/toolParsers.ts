@@ -767,7 +767,7 @@ export function parseMobsfResults(rawResult: any): ScanVulnerability[] {
         // --- Format 1: findings.mobsf structure (new combined scan response) ---
         // Also checks result.mobsf for the format provided by user
         // Also checks if rawResult IS the mobsf object (has certificate/manifest)
-        const mobsfData = rawResult?.findings?.mobsf || data?.findings?.mobsf || rawResult?.result?.mobsf || (rawResult?.certificate ? rawResult : null);
+        const mobsfData = rawResult?.findings?.mobsf || data?.findings?.mobsf || rawResult?.result?.mobsf || rawResult?.mobsf || (rawResult?.certificate ? rawResult : null);
         if (mobsfData) {
             console.log("[MobSF Parser] Found findings.mobsf structure, parsing...");
 
@@ -1780,7 +1780,7 @@ function getMobsfTableData(result: any): any[] {
     const data = result?.data || result;
 
     // Flatten findings
-    const mobsfFindings = data?.findings?.mobsf || data?.summary;
+    const mobsfFindings = data?.findings?.mobsf || data?.mobsf?.findings || data?.findings || data?.summary;
 
     if (mobsfFindings) {
         // High/Warning/Secure/Hotspot

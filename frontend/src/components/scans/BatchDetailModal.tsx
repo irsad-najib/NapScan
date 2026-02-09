@@ -114,22 +114,44 @@ export function BatchDetailModal({ batchId, onClose }: BatchDetailModalProps) {
         };
     });
 
-    // Map risk_detail to Vulnerabilities
-    const riskDetail = batch.risk_detail || [];
-    riskDetail.forEach((risk) => {
+    // Map risk_detail to Vulnerabilities AND create tools if not already present
+    // Note: API may return 'risk_details' (plural) or 'risk_detail' (singular) - handle both
+    const riskDetail = (batch as any).risk_details || batch.risk_detail || [];
+    const isCompleted = batch.status === "completed" || batch.status === "complete";
+
+    // DEBUG: Log batch data to understand structure
+    console.log("[BatchDetailModal] batch:", batch);
+    console.log("[BatchDetailModal] riskDetail:", riskDetail);
+    console.log("[BatchDetailModal] scanResults:", scanResults);
+
+    riskDetail.forEach((risk: any) => {
         let toolName = risk.scanner;
         if (toolName === "owasp-zap") toolName = "zap";
+
+        // Create tool entry if not already created from scan_results
+        if (!tools[toolName]) {
+            tools[toolName] = {
+                status: isCompleted ? "completed" : "running",
+                progress: isCompleted ? 100 : 50,
+                result: null, // No raw result available from list endpoint
+                error: undefined,
+                tool: toolName as ToolKey
+            };
+        }
 
         // Flatten findings into vulnerabilities
         if (risk.findings && Array.isArray(risk.findings)) {
             risk.findings.forEach((finding: any) => {
+                // Handle both string findings (from API summary) and object findings
+                const isStringFinding = typeof finding === 'string';
+
                 vulnerabilities.push({
                     id: `${toolName}-${Math.random().toString(36).substr(2, 9)}`, // Generate ID if missing
                     tool: toolName as ToolKey,
-                    severity: normalizeSeverity(finding.severity || risk.normalized_severity),
-                    name: finding.name || risk.description,
-                    description: finding.description || risk.description,
-                    affectedAsset: finding.location || "N/A",
+                    severity: normalizeSeverity(isStringFinding ? risk.normalized_severity : (finding.severity || risk.normalized_severity)),
+                    name: isStringFinding ? finding : (finding.name || finding.title || risk.description),
+                    description: isStringFinding ? finding : (finding.description || risk.description),
+                    affectedAsset: isStringFinding ? "N/A" : (finding.location || "N/A"),
                 });
             });
         }

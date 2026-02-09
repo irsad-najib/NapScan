@@ -6,6 +6,7 @@ import { ToolExecution, ScanVulnerability, useScan } from "@/context/ScanContext
 import { ToolCard } from "./ToolCard";
 import { ToolMetadata } from "./ToolMetadata";
 import { ToolRiskOverview } from "./ToolRiskOverview";
+import { MobSFResultsView } from "./MobSFResultsView";
 
 interface ToolGridProps {
     tools: Record<ToolKey, ToolExecution>;
@@ -20,7 +21,10 @@ export function ToolGrid({ tools, target, vulnerabilities, scanId }: ToolGridPro
     const sortedKeys = Object.keys(tools) as ToolKey[];
 
     const selectedTool = selectedToolKey ? tools[selectedToolKey] : null;
-    const selectedToolVulns = selectedToolKey ? vulnerabilities.filter(v => v.tool === selectedToolKey) : [];
+    // Case-insensitive filter to handle tool name variations (e.g., "MobSF" vs "mobsf")
+    const selectedToolVulns = selectedToolKey
+        ? vulnerabilities.filter(v => v.tool.toLowerCase() === selectedToolKey.toLowerCase())
+        : [];
 
     const [isStopping, setIsStopping] = useState(false);
     const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
@@ -160,8 +164,23 @@ export function ToolGrid({ tools, target, vulnerabilities, scanId }: ToolGridPro
                             )}
 
                             {/* Tool Content */}
-                            {selectedToolVulns.length > 0 && <ToolRiskOverview vulnerabilities={selectedToolVulns} />}
-                            <ToolMetadata toolData={selectedTool} target={target} />
+                            {selectedToolVulns.length > 0 && selectedToolKey.toLowerCase() !== 'mobsf' && (
+                                <ToolRiskOverview vulnerabilities={selectedToolVulns} />
+                            )}
+
+                            {/* MobSF gets its own specialized view */}
+                            {selectedToolKey.toLowerCase() === 'mobsf' ? (
+                                <MobSFResultsView
+                                    toolData={selectedTool}
+                                    target={target}
+                                    mobsfVulnerabilities={selectedToolVulns.filter(v => !v.tags?.includes('frida'))}
+                                    fridaVulnerabilities={selectedToolVulns.filter(v => v.tags?.includes('frida'))}
+                                    appInfo={null}
+                                    showFrida={true}
+                                />
+                            ) : (
+                                <ToolMetadata toolData={selectedTool} target={target} vulnerabilities={selectedToolVulns} />
+                            )}
                         </div>
                     </div>
                 </div>

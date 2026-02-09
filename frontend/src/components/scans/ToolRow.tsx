@@ -258,30 +258,38 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
             {isExpanded && (
                 <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-6 animate-fade-in space-y-6">
                     {/* Visual Overview - Only show if there are risks and NOT using a custom view like MobSF */}
-                    {toolVulns.length > 0 && tool !== 'mobsf' && (
+                    {toolVulns.length > 0 && tool.toLowerCase() !== 'mobsf' && (
                         <ToolRiskOverview vulnerabilities={toolVulns} />
                     )}
 
                     {/* Tool Specific Views or Generic Metadata Table */}
-                    {tool === 'mobsf' ? (
-                        <MobSFResultsView
-                            toolData={data}
-                            target={target}
-                            // Use client-side parsed results if available (fixing missing backend findings)
-                            mobsfVulnerabilities={
-                                data.result
-                                    ? parseMobsfResults(data.result).filter(v => !v.tags?.includes('frida'))
-                                    : toolVulns.filter(v => !v.tags?.includes('frida'))
-                            }
-                            fridaVulnerabilities={
-                                data.result
-                                    ? parseFridaResults(data.result)
-                                    : toolVulns.filter(v => v.tags?.includes('frida'))
-                            }
-                            appInfo={extractMobsfAppInfo(data.result)}
-                            showFrida={true}
-                        />
-                    ) : (
+                    {tool.toLowerCase() === 'mobsf' ? (() => {
+                        // Parse MobSF results, fallback to toolVulns if parsing returns empty
+                        const parsedMobsf = data.result ? parseMobsfResults(data.result) : [];
+                        const parsedFrida = data.result ? parseFridaResults(data.result) : [];
+
+                        const mobsfVulns = parsedMobsf.filter(v => !v.tags?.includes('frida'));
+                        const fridaVulns = parsedFrida;
+
+                        // Use parsed results if available, otherwise fallback to pre-computed toolVulns
+                        const finalMobsfVulns = mobsfVulns.length > 0
+                            ? mobsfVulns
+                            : toolVulns.filter(v => !v.tags?.includes('frida'));
+                        const finalFridaVulns = fridaVulns.length > 0
+                            ? fridaVulns
+                            : toolVulns.filter(v => v.tags?.includes('frida'));
+
+                        return (
+                            <MobSFResultsView
+                                toolData={data}
+                                target={target}
+                                mobsfVulnerabilities={finalMobsfVulns}
+                                fridaVulnerabilities={finalFridaVulns}
+                                appInfo={extractMobsfAppInfo(data.result)}
+                                showFrida={true}
+                            />
+                        );
+                    })() : (
                         <ToolMetadata
                             toolData={data}
                             target={target}

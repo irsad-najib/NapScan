@@ -145,6 +145,16 @@ export default function Home() {
     }
   };
 
+  // Calculate risk level from score if not provided by API
+  const getRiskLevel = (riskLevel: string | null | undefined, riskScore: number): string => {
+    if (riskLevel) return riskLevel;
+    if (riskScore >= 500) return "CRITICAL";
+    if (riskScore >= 100) return "HIGH";
+    if (riskScore >= 50) return "MEDIUM";
+    if (riskScore > 0) return "LOW";
+    return "INFO";
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-slate-950">
       {/* Sidebar */}
@@ -317,9 +327,9 @@ export default function Home() {
                               <div className="flex items-center gap-2">
                                 <span
                                   className={`text-sm font-bold ${getRiskColor(
-                                    batch.risk_level
+                                    getRiskLevel(batch.risk_level, batch.risk_score)
                                   )}`}>
-                                  {batch.risk_level || "N/A"}
+                                  {getRiskLevel(batch.risk_level, batch.risk_score)}
                                 </span>
                                 <span
                                   className={`px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300`}>
