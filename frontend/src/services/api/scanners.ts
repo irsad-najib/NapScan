@@ -465,6 +465,13 @@ export const scannersApi = {
         method: "GET",
         url: `/api/nuclei/scan/async/${encodeURIComponent(taskId)}/result`,
       }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/nuclei/scan/${encodeURIComponent(taskId)}/stop`,
+      }),
   },
 
   sslyze: {
@@ -623,6 +630,20 @@ export const scannersApi = {
       request<OpenVASReportResponse>({
         method: "GET",
         url: `/api/openvas/report/${encodeURIComponent(reportId)}`,
+      }),
+
+    // Stop scan
+    stop: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/openvas/scan/${encodeURIComponent(taskId)}/stop`,
+      }),
+
+    // Resume scan
+    resume: async (taskId: string): Promise<ApiResult<{ success: boolean; message: string }>> =>
+      request({
+        method: "POST",
+        url: `/api/openvas/scan/${encodeURIComponent(taskId)}/resume`,
       }),
   },
 

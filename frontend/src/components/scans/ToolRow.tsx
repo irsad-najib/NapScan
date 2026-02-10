@@ -30,7 +30,7 @@ export function ToolRow({ tool, data, target, vulnerabilities, scanId, fullScanR
     const showDecisionUI = data.status === "awaiting_decision" && tool === "mobsf";
 
     // Check if this tool supports stop functionality
-    const canStop = data.status === 'running' && ['nmap', 'ffuf', 'sslyze', 'zap'].includes(tool) && data.taskId;
+    const canStop = data.status === 'running' && ['nmap', 'ffuf', 'sslyze', 'zap', 'nuclei', 'openvas'].includes(tool) && data.taskId;
     const [isStopping, setIsStopping] = useState(false);
 
     const handleStop = async () => {

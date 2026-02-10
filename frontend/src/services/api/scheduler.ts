@@ -4,7 +4,7 @@ export interface Schedule {
     id: string;
     name: string;
     target: string;
-    tool: string;
+    tool: string; // comma-separated tools, e.g. "nmap,zap,openvas"
     cron_expression: string;
     is_active: boolean;
     last_run: string | null;
@@ -20,7 +20,7 @@ export interface Schedule {
 export interface CreateScheduleRequest {
     name: string;
     target: string;
-    tool: string;
+    tool: string; // comma-separated tools
     cron_expression: string;
 }
 

@@ -113,17 +113,15 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
 
             console.log("Generated Cron:", cronExpression); // Debug log
 
-            const promises = selectedTools.map(tool => {
-                const req: CreateScheduleRequest = {
-                    name: scanName || `${tool.toUpperCase()} Scan`,
-                    target: finalTarget, // Use the proper target (URL or Filename)
-                    tool: tool,
-                    cron_expression: cronExpression,
-                };
-                return createSchedule(req);
-            });
+            // Create a single schedule with all tools comma-separated
+            const req: CreateScheduleRequest = {
+                name: scanName || `Scheduled Scan`,
+                target: finalTarget,
+                tool: selectedTools.join(","),
+                cron_expression: cronExpression,
+            };
 
-            await Promise.all(promises);
+            await createSchedule(req);
 
             onClose();
             // Reset

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { scannersApi, batchApi, ToolKey } from "@/services/api";
 import { parseToolResults } from "@/utils/toolParsers";
+import { inflateRawSync } from "zlib";
 
 // --- Types ---
 
@@ -138,6 +139,30 @@ const loadPendingDecisionsFromStorage = (): MobSFPendingDecision[] => {
 
 const ScanContext = createContext<ScanContextType | undefined>(undefined);
 
+const DELETED_BATCHES_KEY = 'napscan_deleted_batches';
+
+const loadDeletedBatchesFromStorage = (): Set<string> => {
+    if (!isBrowser) return new Set();
+    try {
+        const data = sessionStorage.getItem(DELETED_BATCHES_KEY);
+        if (data) {
+            return new Set(JSON.parse(data));
+        }
+    } catch (e) {
+        console.error('[ScanContext] Failed to load deleted batches from sessionStorage:', e);
+    }
+    return new Set(); tes
+};
+
+const saveDeletedBatchesToStorage = (ids: Set<string>) => {
+    if (!isBrowser) return;
+    try {
+        sessionStorage.setItem(DELETED_BATCHES_KEY, JSON.stringify(Array.from(ids)));
+    } catch (e) {
+        console.error('[ScanContext] Failed to save deleted batches to sessionStorage:', e);
+    }
+};
+
 export function ScanProvider({ children }: { children: React.ReactNode }) {
     const [scans, setScans] = useState<ScanJob[]>(() => loadScansFromStorage());
     const [isLoading, setIsLoading] = useState(true);
@@ -145,6 +170,14 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     const [pendingDecisions, setPendingDecisions] = useState<MobSFPendingDecision[]>(() => loadPendingDecisionsFromStorage());
     // Track which tools are already being polled to prevent duplicate polling
     const [pollingTools, setPollingTools] = useState<Set<string>>(new Set());
+
+    // Track deleted batch IDs to prevent them from re-appearing during sync
+    const [deletedBatchIds, setDeletedBatchIds] = useState<Set<string>>(() => loadDeletedBatchesFromStorage());
+
+    // --- Save deleted batches to localStorage whenever they change ---
+    useEffect(() => {
+        saveDeletedBatchesToStorage(deletedBatchIds);
+    }, [deletedBatchIds]);
 
     // --- Sync Scans from Backend (Batch History) ---
     const syncScansFromBatchHistory = useCallback(async () => {
@@ -160,6 +193,11 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
                 // 1. Update existing scans and add new ones from backend
                 backendBatches.forEach((batch) => {
+                    // Skip if this batch was explicitly deleted by the user
+                    if (deletedBatchIds.has(batch.batch_id)) {
+                        return;
+                    }
+
                     const existingIndex = newScans.findIndex((s) => s.id === batch.batch_id || s.batchId === batch.batch_id);
 
                     if (existingIndex !== -1) {
@@ -196,7 +234,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
             console.error("[ScanContext] Failed to sync batch history:", err);
         }
-    }, []);
+    }, [deletedBatchIds]); // Depend on deletedBatchIds so callback updates when it changes
 
     // Initial load from backend
     useEffect(() => {
@@ -235,9 +273,6 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         });
     }, [scans]);
 
-    const getScan = useCallback((id: string) => {
-        return scans.find((s) => s.id === id);
-    }, [scans]);
 
     const updateScan = (id: string, updates: Partial<ScanJob>) => {
         setScans((prev) =>
@@ -967,6 +1002,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
             console.log(`[Nuclei] Scan started, task_id: ${taskId}`);
 
+            // Save taskId for stop functionality
+            updateToolStatus(scanId, tool, { taskId });
+
             // Step 2: Poll for status (until completed)
             let progress = 0;
             const POLL_INTERVAL = 15000; // 15 seconds
@@ -1318,14 +1356,23 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         // Remove from backend if it has a batchId
         // Find the scan first to get batchId (we need to do this before setting state, 
         // but since we're inside the function we can lookup from current state 'scans')
+        // Note: scans might have been updated by setScans above in next render, but here 'scans' is closed over
         const scanToDelete = scans.find(s => s.id === id);
         if (scanToDelete?.batchId) {
+            const batchId = scanToDelete.batchId;
+            // Track this ID as deleted to prevent re-sync
+            setDeletedBatchIds(prev => {
+                const newSet = new Set(prev);
+                newSet.add(batchId);
+                return newSet;
+            });
+
             try {
-                console.log(`[ScanContext] Deleting batch ${scanToDelete.batchId} from backend...`);
-                await batchApi.delete(scanToDelete.batchId);
+                console.log(`[ScanContext] Deleting batch ${batchId} from backend...`);
+                await batchApi.delete(batchId);
                 console.log(`[ScanContext] Batch deleted successfully`);
             } catch (err) {
-                console.error(`[ScanContext] Failed to delete batch ${scanToDelete.batchId}:`, err);
+                console.error(`[ScanContext] Failed to delete batch ${batchId}:`, err);
                 // Optionally revert UI change here if critical, but for now we prioritize UI responsiveness
             }
         }
@@ -1367,6 +1414,12 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
                     break;
                 case 'zap':
                     stopRes = await scannersApi.zap.stop(taskId);
+                    break;
+                case 'nuclei':
+                    stopRes = await scannersApi.nuclei.stop(taskId);
+                    break;
+                case 'openvas':
+                    stopRes = await scannersApi.openvas.stop(taskId);
                     break;
                 default:
                     console.error(`[StopTool] Tool ${tool} does not support stop`);
@@ -1685,6 +1738,10 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
             });
         }
     }, []); // Run once on mount
+
+    const getScan = useCallback((id: string) => {
+        return scans.find((s) => s.id === id);
+    }, [scans]);
 
     const value = {
         scans,
