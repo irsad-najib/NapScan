@@ -19,18 +19,19 @@ const (
 
 // ScanTask represents a single scan task with all its metadata
 type ScanTask struct {
-	BatchID   string          `json:"batch_id"`
-	TaskID    string          `json:"task_id"`
-	UserID    string          `json:"user_id"`
-	Target    string          `json:"target"`
-	Tool      string          `json:"tool"` // "nmap", "zap", etc
-	Status    ScanStatus      `json:"status"`
-	Progress  int             `json:"progress"`
-	Error     *string         `json:"error"`
-	ResultRaw json.RawMessage `json:"result_raw" swaggertype:"object"`
-	Result    interface{}     `json:"result,omitempty"` // Flexible result type
-	StartedAt time.Time       `json:"started_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	BatchID    string          `json:"batch_id"`
+	TaskID     string          `json:"task_id"`
+	ExternalID string          `json:"external_id,omitempty"` // ID from external scanner (e.g. OpenVAS Task ID)
+	UserID     string          `json:"user_id"`
+	Target     string          `json:"target"`
+	Tool       string          `json:"tool"` // "nmap", "zap", etc
+	Status     ScanStatus      `json:"status"`
+	Progress   int             `json:"progress"`
+	Error      *string         `json:"error"`
+	ResultRaw  json.RawMessage `json:"result_raw" swaggertype:"object"`
+	Result     interface{}     `json:"result,omitempty"` // Flexible result type
+	StartedAt  time.Time       `json:"started_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 
 	// Internal fields (not exported to JSON)
 	Cancel context.CancelFunc `json:"-"`

@@ -187,10 +187,10 @@ func main() {
 	// Routes (now protected by middleware)
 	routes.MobSFRoutes(api, mobsfHandler)
 	routes.NmapRoutes(api, nmapHandler, scanHandler)
-	routes.NucleiRoutes(api, nucleiHandler)
+	routes.NucleiRoutes(api, nucleiHandler, scanHandler)
 	routes.ZapRoutes(api, zapHandler, scanHandler)
 	routes.FfufRoutes(api, ffufHandler, scanHandler)
-	routes.OpenVASRoutes(api, openvasHandler)
+	routes.OpenVASRoutes(api, openvasHandler, scanHandler)
 	routes.SslyzeRoutes(api, sslyzeHandler, scanHandler)
 	routes.BatchRoutes(api, batchHandler) // <-- Batch routes are now protected
 	routes.LifecycleRoutes(api, lifecycleHandler)

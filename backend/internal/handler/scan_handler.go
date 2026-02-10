@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
@@ -21,6 +22,72 @@ func NewScanHandler(scanManager *service.ScanManager) *ScanHandler {
 	}
 }
 
+// ResumeScan resumes a stopped scan task
+// @Summary Resume Scan
+// @Description Resumes a stopped scan task (Only supported for OpenVAS)
+// @Tags Scan Control
+// @Security BearerAuth
+// @Produce json
+// @Param task_id path string true "Task ID"
+// @Success 200 {object} models.ScanTaskResponse
+// @Failure 404 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Router /scan/{task_id}/resume [post]
+// @Router /openvas/scan/{task_id}/resume [post]
+func (h *ScanHandler) ResumeScan(c *fiber.Ctx) error {
+	taskID := c.Params("task_id")
+	if taskID == "" {
+		return response.Error(c, fiber.StatusBadRequest, "task_id is required", nil)
+	}
+
+	log.Printf("[SCAN_HANDLER] Resume request for task_id=%s", taskID)
+
+	task, err := h.scanManager.Get(taskID)
+	if err != nil {
+		return response.Error(c, fiber.StatusNotFound, "task not found", nil)
+	}
+
+	// Only allow resume if stopped
+	if task.Status != models.StatusStopped {
+		return response.Error(c, fiber.StatusConflict, "task is not in stopped state", nil)
+	}
+
+	if task.Tool != "openvas" {
+		return response.Error(c, fiber.StatusBadRequest, "resume not supported for this tool", nil)
+	}
+
+	// For OpenVAS, we launch the resume async
+	openvasSvc := service.NewOpenVASService() // Instantiate service
+	// Should we use long-lived context?
+	// Yes, similar to Scheduler, we fire and forget the goroutine but it manages its own context/lifecycle
+
+	// We need to manage the context cancellation for Stop to work again.
+	// scanManager.Register stored a Cancel func. But it's old/stale if the task stopped?
+	// When task stopped, the old context was cancelled.
+	// We need to UPDATE the Cancel func in ScanManager!
+	// New feature needed in ScanManager: UpdateCancel?
+
+	// Simplified: ResumeOpenVASAsync takes a context.
+	// We can't update the internal Cancel func easily.
+	// BUT, `ResumeOpenVASAsync` monitors the context.
+	// If `ResumeOpenVASAsync` starts, it runs in a goroutine.
+	// If `StopScan` is called, it calls `scanManager.Stop(taskID)`.
+	// `scanManager.Stop` calls `task.Cancel()`.
+	// So we MUST update `task.Cancel` with the new context's cancel function!
+
+	newCtx, newCancel := context.WithCancel(context.Background())
+	h.scanManager.UpdateCancel(taskID, newCancel)
+
+	go func() {
+		if err := service.ResumeOpenVASAsync(newCtx, taskID, h.scanManager, openvasSvc); err != nil {
+			log.Printf("[SCAN_HANDLER] Failed to resume task %s: %v", taskID, err)
+			h.scanManager.Fail(taskID, err)
+		}
+	}()
+
+	return response.Success(c, "scan resumed successfully", task.ToResponse())
+}
+
 // StopScan stops a running scan task
 // @Summary Stop Scan
 // @Description Stops a running or pending scan task by task ID (works for all scanners)
@@ -35,6 +102,8 @@ func NewScanHandler(scanManager *service.ScanManager) *ScanHandler {
 // @Router /ffuf/scan/{task_id}/stop [post]
 // @Router /sslyze/scan/{task_id}/stop [post]
 // @Router /zap/scan/{task_id}/stop [post]
+// @Router /openvas/scan/{task_id}/stop [post]
+// @Router /nuclei/scan/{task_id}/stop [post]
 func (h *ScanHandler) StopScan(c *fiber.Ctx) error {
 	taskID := c.Params("task_id")
 	if taskID == "" {

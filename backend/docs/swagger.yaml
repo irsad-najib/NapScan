@@ -213,6 +213,8 @@ definitions:
         type: string
       task_id:
         type: string
+      tool:
+        type: string
       updated_at:
         description: RFC3339 format
         type: string
@@ -233,6 +235,42 @@ definitions:
         type: string
       score:
         type: number
+    type: object
+  models.Schedule:
+    properties:
+      created_at:
+        type: string
+      cron_expression:
+        type: string
+      decision:
+        description: true = continue to dynamic analysis
+        type: boolean
+      id:
+        type: string
+      is_active:
+        type: boolean
+      last_resource_id:
+        description: TaskID or BatchID
+        type: string
+      last_run:
+        type: string
+      last_run_status:
+        description: success, failed, running
+        type: string
+      name:
+        type: string
+      next_run:
+        type: string
+      target:
+        type: string
+      tool:
+        description: 'comma-separated tools: nmap, zap, openvas, etc.'
+        example: nmap,zap,openvas
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
     type: object
   models.Service:
     properties:
@@ -401,6 +439,42 @@ paths:
       tags:
       - Auth
   /batch/{batch_id}:
+    delete:
+      description: Delete a specific batch
+      parameters:
+      - description: Batch ID
+        in: path
+        name: batch_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete Batch
+      tags:
+      - Batch
     get:
       description: Get detailed information about a specific batch including normalized
         risk calculation and scan results
@@ -1049,6 +1123,36 @@ paths:
       summary: Start Nuclei Scan
       tags:
       - Nuclei
+  /nuclei/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
   /nuclei/scan/async:
     post:
       consumes:
@@ -1220,6 +1324,65 @@ paths:
       summary: Start OpenVAS Scan
       tags:
       - OpenVAS
+  /openvas/scan/{task_id}/resume:
+    post:
+      description: Resumes a stopped scan task (Only supported for OpenVAS)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Resume Scan
+      tags:
+      - Scan Control
+  /openvas/scan/{task_id}/stop:
+    post:
+      description: Stops a running or pending scan task by task ID (works for all
+        scanners)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Stop Scan
+      tags:
+      - Scan Control
   /openvas/task/{taskId}/status:
     get:
       consumes:
@@ -1269,6 +1432,134 @@ paths:
       summary: Get OpenVAS Version
       tags:
       - OpenVAS
+  /scan/{task_id}/resume:
+    post:
+      description: Resumes a stopped scan task (Only supported for OpenVAS)
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ScanTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Resume Scan
+      tags:
+      - Scan Control
+  /schedule:
+    get:
+      description: Get all scheduled scan tasks
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: List Schedules
+      tags:
+      - Scheduler
+    post:
+      consumes:
+      - application/json
+      description: Create a new scheduled scan task
+      parameters:
+      - description: Schedule details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.Schedule'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Create Schedule
+      tags:
+      - Scheduler
+  /schedule/{id}:
+    delete:
+      description: Delete a scheduled scan task
+      parameters:
+      - description: Schedule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete Schedule
+      tags:
+      - Scheduler
+  /schedule/{id}/pause:
+    post:
+      description: Pause a scheduled scan task
+      parameters:
+      - description: Schedule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Pause Schedule
+      tags:
+      - Scheduler
+  /schedule/{id}/resume:
+    post:
+      description: Resume a scheduled scan task
+      parameters:
+      - description: Schedule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Resume Schedule
+      tags:
+      - Scheduler
   /sslyze/scan:
     post:
       consumes:

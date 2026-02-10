@@ -12,7 +12,7 @@ type Schedule struct {
 	ID             string         `json:"id" gorm:"type:char(36);primaryKey"`
 	Name           string         `json:"name" gorm:"type:varchar(255);not null"`
 	Target         string         `json:"target" gorm:"type:varchar(255);not null"`
-	Tool           string         `json:"tool" gorm:"type:varchar(50);not null"` // nmap, zap, etc.
+	Tool           string         `json:"tool" gorm:"type:varchar(255);not null" example:"nmap,zap,openvas"` // comma-separated tools: nmap, zap, openvas, etc.
 	CronExpression string         `json:"cron_expression" gorm:"type:varchar(50);not null"`
 	Decision       bool           `json:"decision" gorm:"default:false"` // true = continue to dynamic analysis
 	IsActive       bool           `json:"is_active" gorm:"default:true"`

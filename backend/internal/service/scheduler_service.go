@@ -6,6 +6,7 @@ import (
 	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,18 +154,11 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 		return
 	}
 
-	// Optional: You might want to update the batch with target/tool info immediately
-	// but currently CreateBatch only takes userID. The scan results will link to it.
-
-	// 2. Create Task
-	taskID := uuid.New().String()
 	// Update Schedule to "Running"
 	now := time.Now()
 	sch.LastRun = &now
 	sch.LastRunStatus = "running"
-	sch.LastResourceID = taskID
-	// sch.NextRun = ??? Cron parser can tell next run? Cron library entry has Next.
-	// I can get it from cron.Entry(id).Next
+
 	if entryID, ok := s.jobs[scheduleID]; ok {
 		entry := s.cron.Entry(entryID)
 		next := entry.Next
@@ -172,83 +166,97 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 	}
 	s.repo.Update(sch)
 
-	// 3. Register Task
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx) // leaks? Need to manage cancellation. task.Cancel handles it.
-
-	task := &models.ScanTask{
-		BatchID:   batchID,
-		TaskID:    taskID,
-		UserID:    sch.UserID,
-		Target:    sch.Target,
-		Tool:      sch.Tool, // Populate Tool
-		Status:    models.StatusPending,
-		Progress:  0,
-		Error:     nil,
-		Result:    []map[string]interface{}{},
-		StartedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Cancel:    cancel,
-	}
-	s.scanManager.Register(task)
-
-	// 4. Run Async
-	go func() {
-		var err error
-		switch sch.Tool {
-		case "nmap":
-			err = RunNmapAsync(ctx, taskID, s.scanManager)
-		case "zap":
-			err = RunZapAsync(ctx, taskID, s.scanManager)
-		case "nuclei":
-			err = RunNucleiAsync(ctx, taskID, s.scanManager)
-		case "ffuf":
-			err = RunFfufAsync(ctx, taskID, s.scanManager)
-		case "sslyze":
-			err = RunSslyzeAsync(ctx, taskID, s.scanManager)
-		case "apk", "mobsf":
-			// Handle APK scan via LifecycleService
-			// sch.Target is expected to be fileID (string)
-			fileID, parseErr := itemToInt(sch.Target)
-			if parseErr != nil {
-				err = fmt.Errorf("invalid target for apk scan (expected fileID): %v", parseErr)
-			} else {
-				// Start MobSF with Decision (autoFrida)
-				// StartMobSF is async but returns error if immediate fail
-				err = s.lifecycle.StartMobSF(uint(fileID), sch.Decision)
-				// Note: RunXXXAsync usually return immediately. StartMobSF also does (spawns goroutine).
-			}
-		default:
-			err = fmt.Errorf("unknown tool: %s", sch.Tool)
+	// 4. Run Async for each tool
+	tools := strings.Split(sch.Tool, ",")
+	// Trim spaces and filter empty
+	var validTools []string
+	for _, t := range tools {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			validTools = append(validTools, t)
 		}
+	}
 
-		// Update Schedule Status
-		status := "success"
-		if err != nil {
-			status = "failed"
-			log.Printf("[SCHEDULER] Scan failed for schedule %s: %v", scheduleID, err)
-		} else {
+	for _, tool := range validTools {
+		// Create Task for each tool
+		scanTaskID := uuid.New().String()
 
-			// Save to DB (ScanResult)
-			// StartScanAsync handler does this. I must duplicate it here.
-			if task, _ := s.scanManager.Get(taskID); task != nil && task.Status == models.StatusCompleted {
-				dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer dbCancel()
-				_, dbErr := s.scanRepo.Insert(dbCtx, &models.ScanResult{
-					BatchID:   task.BatchID,
-					Tool:      sch.Tool,
-					Target:    task.Target,
-					Result:    task.Result,
-					CreatedAt: time.Now().UTC(),
-				})
-				if dbErr != nil {
-					log.Printf("[SCHEDULER] Failed to save result: %v", dbErr)
-					status = "failed_save"
+		// We need to register task in ScanManager
+		taskCtx, taskCancel := context.WithCancel(context.Background())
+
+		task := &models.ScanTask{
+			BatchID:   batchID,
+			TaskID:    scanTaskID,
+			UserID:    sch.UserID,
+			Target:    sch.Target,
+			Tool:      tool,
+			Status:    models.StatusPending,
+			Progress:  0,
+			Error:     nil,
+			Result:    []map[string]interface{}{},
+			StartedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Cancel:    taskCancel,
+		}
+		s.scanManager.Register(task)
+
+		// Update LastResourceID to the latest task
+		sch.LastResourceID = scanTaskID
+		s.repo.Update(sch)
+
+		go func(t string, tID string, ctx context.Context) {
+			var err error
+			log.Printf("[SCHEDULER] Starting tool %s for schedule %s (task %s)", t, scheduleID, tID)
+
+			switch t {
+			case "nmap":
+				err = RunNmapAsync(ctx, tID, s.scanManager)
+			case "zap":
+				err = RunZapAsync(ctx, tID, s.scanManager)
+			case "nuclei":
+				err = RunNucleiAsync(ctx, tID, s.scanManager)
+			case "ffuf":
+				err = RunFfufAsync(ctx, tID, s.scanManager)
+			case "sslyze":
+				err = RunSslyzeAsync(ctx, tID, s.scanManager)
+			case "openvas":
+				openvasSvc := NewOpenVASService()
+				err = RunOpenVASAsync(ctx, tID, s.scanManager, openvasSvc)
+			case "apk", "mobsf":
+				// Handle APK scan via LifecycleService
+				fileID, parseErr := itemToInt(sch.Target)
+				if parseErr != nil {
+					err = fmt.Errorf("invalid target for apk scan (expected fileID): %v", parseErr)
+				} else {
+					err = s.lifecycle.StartMobSF(uint(fileID), sch.Decision)
+				}
+			default:
+				err = fmt.Errorf("unknown tool: %s", t)
+			}
+
+			if err != nil {
+				log.Printf("[SCHEDULER] Scan failed for tool %s schedule %s: %v", t, scheduleID, err)
+			} else {
+				// Save to DB (ScanResult)
+				if task, _ := s.scanManager.Get(tID); task != nil && task.Status == models.StatusCompleted {
+					dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer dbCancel()
+					_, dbErr := s.scanRepo.Insert(dbCtx, &models.ScanResult{
+						BatchID:   task.BatchID,
+						Tool:      t,
+						Target:    task.Target,
+						Result:    task.Result,
+						CreatedAt: time.Now().UTC(),
+					})
+					if dbErr != nil {
+						log.Printf("[SCHEDULER] Failed to save result: %v", dbErr)
+					}
 				}
 			}
-		}
+		}(tool, scanTaskID, taskCtx)
+	}
 
-		sch.LastRunStatus = status
-		s.repo.Update(sch)
-	}()
+	// Update Schedule Status to "success" (launched)
+	sch.LastRunStatus = "success"
+	s.repo.Update(sch)
 }

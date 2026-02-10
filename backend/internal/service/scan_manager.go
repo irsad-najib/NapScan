@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -44,7 +45,7 @@ func (sm *ScanManager) Get(taskID string) (*models.ScanTask, error) {
 func (sm *ScanManager) UpdateProgress(taskID string, progress int, status models.ScanStatus) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	task, ok := sm.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -73,7 +74,7 @@ func (sm *ScanManager) UpdateProgress(taskID string, progress int, status models
 func (sm *ScanManager) Fail(taskID string, err error) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	task, ok := sm.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -95,7 +96,7 @@ func (sm *ScanManager) Fail(taskID string, err error) error {
 func (sm *ScanManager) Complete(taskID string, result interface{}) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	task, ok := sm.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -117,7 +118,7 @@ func (sm *ScanManager) Complete(taskID string, result interface{}) error {
 		if b, err := json.Marshal(result); err == nil {
 			task.ResultRaw = json.RawMessage(b)
 		}
-		
+
 		// ALSO populate Result so GetReport works!
 		task.Result = result
 	}
@@ -132,7 +133,7 @@ func (sm *ScanManager) Complete(taskID string, result interface{}) error {
 func (sm *ScanManager) Stop(taskID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	task, ok := sm.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -153,6 +154,34 @@ func (sm *ScanManager) Stop(taskID string) error {
 	return nil
 }
 
+// UpdateExternalID updates the external ID of a scan task (e.g., OpenVAS ID)
+func (sm *ScanManager) UpdateExternalID(taskID string, externalID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	task, ok := sm.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	task.ExternalID = externalID
+	task.UpdatedAt = time.Now()
+	return nil
+}
+
+// UpdateCancel updates the cancel function for a task (used when resuming)
+func (sm *ScanManager) UpdateCancel(taskID string, cancel context.CancelFunc) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	task, ok := sm.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	task.Cancel = cancel
+	return nil
+}
+
 // Delete removes a task from the manager (for cleanup)
 func (sm *ScanManager) Delete(taskID string) {
 	sm.mu.Lock()
@@ -164,7 +193,7 @@ func (sm *ScanManager) Delete(taskID string) {
 func (sm *ScanManager) List() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	
+
 	ids := make([]string, 0, len(sm.tasks))
 	for id := range sm.tasks {
 		ids = append(ids, id)
