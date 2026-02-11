@@ -151,7 +151,7 @@ const loadDeletedBatchesFromStorage = (): Set<string> => {
     } catch (e) {
         console.error('[ScanContext] Failed to load deleted batches from sessionStorage:', e);
     }
-    return new Set(); tes
+    return new Set();
 };
 
 const saveDeletedBatchesToStorage = (ids: Set<string>) => {
@@ -237,12 +237,13 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     }, [deletedBatchIds]); // Depend on deletedBatchIds so callback updates when it changes
 
     // Initial load from backend
-    useEffect(() => {
-        syncScansFromBatchHistory();
-        // Optional: Poll occasionally for new scheduled scans
-        const interval = setInterval(syncScansFromBatchHistory, 10000);
-        return () => clearInterval(interval);
-    }, [syncScansFromBatchHistory]);
+    // Initial load from backend - DISABLED to make Scans page ephemeral per user request
+    // useEffect(() => {
+    //     syncScansFromBatchHistory();
+    //     // Optional: Poll occasionally for new scheduled scans
+    //     const interval = setInterval(syncScansFromBatchHistory, 10000);
+    //     return () => clearInterval(interval);
+    // }, [syncScansFromBatchHistory]);
 
     // --- Save scans to localStorage whenever they change ---
     useEffect(() => {

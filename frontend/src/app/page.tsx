@@ -5,6 +5,7 @@ import Link from "next/link";
 import { request, batchApi, BatchItem } from "@/services/api";
 import { Sidebar, Header } from "@/components/layout";
 import { BatchDetailModal } from "@/components/scans/BatchDetailModal";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -12,6 +13,7 @@ export default function Home() {
   const [batches, setBatches] = useState<BatchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -242,7 +244,9 @@ export default function Home() {
                       </span>
                     </span>
                   </div>
-                  <button className="h-10 px-4 bg-white dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-700 dark:text-slate-200 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center gap-2 font-medium">
+                  <button 
+                  onClick={() => router.push("/reports")}
+                  className="h-10 px-4 bg-white dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-700 dark:text-slate-200 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center gap-2 font-medium">
                     <span className="material-symbols-outlined text-[18px]">
                       download
                     </span>

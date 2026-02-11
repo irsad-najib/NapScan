@@ -27,7 +27,6 @@ export default function SettingsPage() {
 
     // General Settings
     // Theme is now managed by ThemeContext
-    const [language, setLanguage] = useState("en");
     const [autoSave, setAutoSave] = useState(true);
 
     // Notification Settings
@@ -39,9 +38,6 @@ export default function SettingsPage() {
     // Load settings from localStorage on mount
     useEffect(() => {
         // Load other settings
-        const storedLanguage = localStorage.getItem("napscan-language");
-        if (storedLanguage) setLanguage(storedLanguage);
-
         const storedAutoSave = localStorage.getItem("napscan-autosave");
         if (storedAutoSave !== null) setAutoSave(storedAutoSave === "true");
 
@@ -65,7 +61,6 @@ export default function SettingsPage() {
     const handleSave = () => {
         // Save all settings to localStorage
         localStorage.setItem("napscan-theme", theme);
-        localStorage.setItem("napscan-language", language);
         localStorage.setItem("napscan-autosave", String(autoSave));
         localStorage.setItem("napscan-email-notifications", String(emailNotifications));
         localStorage.setItem("napscan-notify-scan-complete", String(scanComplete));
@@ -139,28 +134,6 @@ export default function SettingsPage() {
                 </p>
             </div>
 
-            {/* Language */}
-            <div>
-                <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-3">
-                    Language
-                </label>
-                <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                    <option value="en">English</option>
-                    <option value="id">Bahasa Indonesia</option>
-                    <option value="es">Español</option>
-                    <option value="fr">Français</option>
-                    <option value="de">Deutsch</option>
-                    <option value="ja">日本語</option>
-                </select>
-                <p className="text-xs text-slate-500 mt-2">
-                    Select your preferred language for the interface
-                </p>
-            </div>
-
             {/* Auto Save */}
             {renderToggle(autoSave, setAutoSave, "Auto-save Scans", "Automatically save scan results when completed")}
         </div>
@@ -230,15 +203,6 @@ export default function SettingsPage() {
 
             {/* Account Actions */}
             <div className="space-y-3">
-                <button className="w-full flex items-center gap-3 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-left transition-colors">
-                    <span className="material-symbols-outlined text-slate-500">key</span>
-                    <div className="flex-1">
-                        <p className="font-semibold text-slate-900 dark:text-white text-sm">API Keys</p>
-                        <p className="text-xs text-slate-500">Manage your API access tokens</p>
-                    </div>
-                    <span className="material-symbols-outlined text-slate-400">chevron_right</span>
-                </button>
-
                 <button className="w-full flex items-center gap-3 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-left transition-colors">
                     <span className="material-symbols-outlined text-slate-500">history</span>
                     <div className="flex-1">
