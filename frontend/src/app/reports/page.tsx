@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { useScan, ScanVulnerability } from "@/context/ScanContext";
 import { Sidebar, Header } from "@/components/layout";
-import { batchApi } from "@/services/api";
+import { batchApi, BatchItem, BatchDetailResponse, ToolKey } from "@/services/api";
+import { ScanVulnerability } from "@/context/ScanContext";
 
 // Severity priority map (higher value = more severe)
 const SEVERITY_ORDER: Record<string, number> = {
@@ -17,15 +17,132 @@ const SEVERITY_ORDER: Record<string, number> = {
 
 type SortOrder = "desc" | "asc";
 
+interface DetailedScanView {
+  id: string; // batch_id
+  name: string;
+  target: string;
+  status: string;
+  createdAt: string;
+  vulnerabilities: ScanVulnerability[];
+  tools: Record<string, any>;
+}
+
 export default function ReportsPage() {
-  const { scans } = useScan();
-  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [batches, setBatches] = useState<BatchItem[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(true);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+
+  // Detailed scan data for preview
+  const [selectedScan, setSelectedScan] = useState<DetailedScanView | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
   const [showPreview, setShowPreview] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "html">("pdf");
   const [vulnSortOrder, setVulnSortOrder] = useState<SortOrder>("desc");
   const [isExporting, setIsExporting] = useState(false);
 
-  const selectedScan = scans.find(s => s.id === selectedScanId);
+  // 1. Fetch Batch List on Mount
+  useEffect(() => {
+    const fetchBatches = async () => {
+      try {
+        const res = await batchApi.list();
+        if (res.ok && res.data) {
+          setBatches(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch reports list:", err);
+      } finally {
+        setLoadingBatches(false);
+      }
+    };
+    fetchBatches();
+  }, []);
+
+  // 2. Fetch Detail when Selection Changes
+  useEffect(() => {
+    if (!selectedBatchId) {
+      setSelectedScan(null);
+      return;
+    }
+
+    const fetchDetail = async () => {
+      setLoadingPreview(true);
+      // Reset preview state slightly to show loading if desired, 
+      // but keeping old data while loading new one might be better UX? 
+      // Let's clear it to avoid confusion.
+      setSelectedScan(null);
+
+      try {
+        const res = await batchApi.get(selectedBatchId);
+        if (res.ok && res.data) {
+          const batch = res.data;
+          const vulnerabilities: ScanVulnerability[] = [];
+          const tools: Record<string, any> = {};
+
+          // --- MAPPING LOGIC (Adapted from BatchDetailModal) ---
+          const validSeverities = ["Critical", "High", "Medium", "Low", "Info"];
+          const normalizeSeverity = (sev: string): "Critical" | "High" | "Medium" | "Low" | "Info" => {
+            if (!sev) return "Info";
+            const titleCase = sev.charAt(0).toUpperCase() + sev.slice(1).toLowerCase();
+            if (validSeverities.includes(titleCase)) {
+              return titleCase as "Critical" | "High" | "Medium" | "Low" | "Info";
+            }
+            return "Info";
+          };
+
+          const riskDetail = (batch as any).risk_details || batch.risk_detail || [];
+
+          riskDetail.forEach((risk: any) => {
+            let toolName = risk.scanner;
+            if (toolName === "owasp-zap") toolName = "zap";
+            tools[toolName] = true; // Mark tool as present
+
+            // Flatten findings
+            if (risk.findings && Array.isArray(risk.findings)) {
+              risk.findings.forEach((finding: any) => {
+                const isStringFinding = typeof finding === 'string';
+                vulnerabilities.push({
+                  id: `${toolName}-${Math.random().toString(36).substr(2, 9)}`,
+                  tool: toolName as ToolKey,
+                  severity: normalizeSeverity(isStringFinding ? risk.normalized_severity : (finding.severity || risk.normalized_severity)),
+                  name: isStringFinding ? finding : (finding.name || finding.title || risk.description),
+                  description: isStringFinding ? finding : (finding.description || risk.description),
+                  affectedAsset: isStringFinding ? "N/A" : (finding.location || "N/A"),
+                });
+              });
+            }
+            // Summary vulnerability if no findings
+            if ((!risk.findings || risk.findings.length === 0) && (risk.score > 0 || risk.normalized_severity === "INFO")) {
+              vulnerabilities.push({
+                id: `${toolName}-summary`,
+                tool: toolName as ToolKey,
+                severity: normalizeSeverity(risk.normalized_severity),
+                name: risk.description,
+                description: risk.description,
+                affectedAsset: "Batch Summary",
+              });
+            }
+          });
+
+          setSelectedScan({
+            id: batch.batch_id,
+            name: `Scan ${new Date(batch.created_at).toLocaleDateString()}`, // Generate name
+            target: batch.target,
+            status: batch.status,
+            createdAt: batch.created_at,
+            vulnerabilities,
+            tools
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch batch detail:", err);
+      } finally {
+        setLoadingPreview(false);
+      }
+    };
+    fetchDetail();
+  }, [selectedBatchId]);
+
 
   // Sort vulnerabilities by severity
   const sortedVulnerabilities = useMemo(() => {
@@ -46,18 +163,12 @@ export default function ReportsPage() {
   };
 
   const handleExport = async () => {
-    if (!selectedScan) return;
+    if (!selectedBatchId || !selectedScan) return;
 
     try {
       setIsExporting(true);
 
-      if (!selectedScan.batchId) {
-        alert("Report not available for this scan (missing batch ID). Please run a new scan.");
-        setIsExporting(false);
-        return;
-      }
-
-      const res = await batchApi.report(selectedScan.batchId);
+      const res = await batchApi.report(selectedBatchId);
 
       if (!res.ok) {
         alert(`Failed to download report: ${res.message || "Unknown error"}`);
@@ -84,6 +195,16 @@ export default function ReportsPage() {
       alert(`Export failed: ${message}`);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const getRiskColor = (level?: string) => {
+    switch (level?.toLowerCase()) {
+      case 'critical': return 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-800';
+      case 'high': return 'text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400 border-orange-200 dark:border-orange-800';
+      case 'medium': return 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800';
+      case 'low': return 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400 border-blue-200 dark:border-blue-800';
+      default: return 'text-slate-600 bg-slate-50 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700';
     }
   };
 
@@ -123,47 +244,54 @@ export default function ReportsPage() {
                     </p>
                   </div>
 
-                  <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                    {scans.length === 0 ? (
+                  <div className="divide-y divide-slate-200 dark:divide-slate-700 max-h-[600px] overflow-y-auto">
+                    {loadingBatches ? (
+                      <div className="p-8 text-center text-slate-500 flex flex-col items-center">
+                        <span className="material-symbols-outlined animate-spin mb-2">sync</span>
+                        Loading history...
+                      </div>
+                    ) : batches.length === 0 ? (
                       <div className="p-8 text-center text-slate-500">
-                        No scans available. Run a scan first.
+                        No scan history found. Run a scan first
                       </div>
                     ) : (
-                      scans.map((scan) => (
+                      batches.map((batch) => (
                         <div
-                          key={scan.id}
+                          key={batch.batch_id}
                           onClick={() => {
-                            setSelectedScanId(scan.id);
+                            setSelectedBatchId(batch.batch_id);
                             setShowPreview(false);
                           }}
-                          className={`p-4 cursor-pointer transition-all ${selectedScanId === scan.id
+                          className={`p-4 cursor-pointer transition-all ${selectedBatchId === batch.batch_id
                             ? "bg-blue-50 dark:bg-blue-500/10 border-l-4 border-blue-500"
-                            : "hover:bg-slate-50 dark:hover:bg-slate-700/20"
+                            : "hover:bg-slate-50 dark:hover:bg-slate-700/20 border-l-4 border-transparent"
                             }`}>
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
                               <h4 className="font-bold text-slate-900 dark:text-white">
-                                {scan.name}
+                                {batch.target}
                               </h4>
                               <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                                {scan.target} • {formatDate(scan.createdAt)}
+                                {formatDate(batch.timestamp)}
                               </p>
                               <div className="flex items-center gap-2 mt-2">
                                 <span
-                                  className={`px-2 py-1 rounded text-xs font-bold ${scan.status === "completed"
-                                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                                    : scan.status === "running"
-                                      ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
-                                      : "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300"
+                                  className={`px-2 py-1 rounded text-xs font-bold ${["completed", "finished", "success", "complete"].includes(batch.status.toLowerCase())
+                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                      : ["processing", "running", "scanning", "pending"].includes(batch.status.toLowerCase())
+                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
+                                        : "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300"
                                     }`}>
-                                  {scan.status}
+                                  {batch.status}
                                 </span>
-                                <span className="text-xs text-slate-500">
-                                  {scan.vulnerabilities.length} vulnerabilities
-                                </span>
+                                {batch.risk_level && (
+                                  <span className={`px-2 py-1 rounded text-xs font-bold border ${getRiskColor(batch.risk_level)}`}>
+                                    {batch.risk_level} Risk
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            {selectedScanId === scan.id && (
+                            {selectedBatchId === batch.batch_id && (
                               <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">
                                 check_circle
                               </span>
@@ -183,14 +311,19 @@ export default function ReportsPage() {
                     Export Options
                   </h3>
 
-                  {!selectedScan ? (
+                  {!selectedBatchId ? (
                     <div className="text-center py-8 text-slate-500">
                       <span className="material-symbols-outlined text-4xl mb-2 block">
                         description
                       </span>
                       <p className="text-sm">Select a scan to export</p>
                     </div>
-                  ) : (
+                  ) : loadingPreview ? (
+                    <div className="text-center py-8 text-slate-500 flex flex-col items-center">
+                      <span className="material-symbols-outlined animate-spin mb-2">sync</span>
+                      <span>Loading details...</span>
+                    </div>
+                  ) : selectedScan ? (
                     <div className="flex flex-col gap-4">
                       {/* Format Selection */}
                       <div>
@@ -241,10 +374,10 @@ export default function ReportsPage() {
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-slate-600 dark:text-slate-400">
-                              Scan:
+                              Target:
                             </span>
                             <span className="font-semibold text-slate-900 dark:text-white">
-                              {selectedScan.name}
+                              {selectedScan.target}
                             </span>
                           </div>
                           <div className="flex justify-between">
@@ -266,6 +399,8 @@ export default function ReportsPage() {
                         </div>
                       </div>
                     </div>
+                  ) : (
+                    <div className="text-center text-red-500">Failed to load details</div>
                   )}
                 </div>
               </div>
