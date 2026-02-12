@@ -126,13 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser(me);
       } else {
-        // No valid cookie session; keep token-based session if it exists.
-        const t = getStoredToken();
-        const u = getStoredUser();
-        if (!(t && u)) {
-          clearAuthData();
-          setUser(null);
-        }
+        // Validation failed (invalid token/cookie). Force logout.
+        clearAuthData();
+        setUser(null);
       }
       setLoading(false);
     })();

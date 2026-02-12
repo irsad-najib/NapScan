@@ -4,9 +4,12 @@ import { api } from "@/services/api/http";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export interface User {
+  id?: string;
   email: string;
   name: string;
   picture: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AuthResponse {

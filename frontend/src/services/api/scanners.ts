@@ -297,6 +297,13 @@ export const batchApi = {
       responseType: "blob",
     }),
 
+  preview: async (batchId: string): Promise<ApiResult<Blob>> =>
+    request<Blob>({
+      method: "GET",
+      url: `/api/batch/${batchId}/report/preview`,
+      responseType: "blob",
+    }),
+
   delete: async (batchId: string): Promise<ApiResult<void>> =>
     request<void>({
       method: "DELETE",

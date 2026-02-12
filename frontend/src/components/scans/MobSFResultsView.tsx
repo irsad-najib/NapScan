@@ -282,6 +282,22 @@ export function MobSFResultsView({
                                         {effectiveMobsfVulns.length}
                                     </span>
                                 </button>
+
+                                {(showFrida || effectiveFridaVulns.length > 0) && (
+                                    <button
+                                        onClick={() => setActiveSection("frida")}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all ${activeSection === "frida"
+                                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                            }`}
+                                    >
+                                        <span className="material-symbols-outlined text-lg">bug_report</span>
+                                        <span>Frida Dynamic Analysis</span>
+                                        <span className="bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs px-2 py-0.5 rounded-full">
+                                            {effectiveFridaVulns.length}
+                                        </span>
+                                    </button>
+                                )}
                             </div>
                         )}
 
@@ -365,7 +381,42 @@ export function MobSFResultsView({
                                     </div>
                                 </div>
                                 <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {filteredAndSortedVulns.length === 0 ? (
+                                    {(toolData.status === 'running') && filteredAndSortedVulns.length === 0 ? (
+                                        // Scan in Progress State
+                                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 to-white dark:from-slate-900 dark:to-slate-800 p-12 text-center border border-slate-200 dark:border-slate-800 group">
+                                            {/* Background Decor */}
+                                            <div className="absolute top-0 left-0 w-full h-full overflow-hidden opacity-50 pointer-events-none">
+                                                <div className="absolute top-10 right-10 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl animate-pulse"></div>
+                                                <div className="absolute bottom-10 left-10 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl animate-pulse delay-700"></div>
+                                            </div>
+
+                                            {/* Icon wrapper with glow effect */}
+                                            <div className="relative mx-auto w-24 h-24 mb-6">
+                                                <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl animate-pulse"></div>
+                                                <div className="relative w-full h-full bg-gradient-to-br from-white to-blue-50 dark:from-slate-800 dark:to-slate-900 rounded-full flex items-center justify-center border-2 border-blue-100 dark:border-blue-900 shadow-xl">
+                                                    <span className="material-symbols-outlined text-5xl text-blue-500 dark:text-blue-400 drop-shadow-sm animate-bounce-slow">
+                                                        search
+                                                    </span>
+                                                </div>
+
+                                                {/* Orbiting particles */}
+                                                <div className="absolute inset-0 animate-spin-slow">
+                                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-400 rounded-full opacity-60"></div>
+                                                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-cyan-400 rounded-full opacity-40"></div>
+                                                </div>
+                                            </div>
+
+                                            {/* Text content */}
+                                            <div className="relative z-10 space-y-3">
+                                                <h3 className="text-2xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+                                                    Scan in Progress
+                                                </h3>
+                                                <p className="text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed text-base">
+                                                    We are currently analyzing the target. Please wait while the scan completes.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ) : filteredAndSortedVulns.length === 0 ? (
                                         // All Clear / Empty State
                                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                                             <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4">

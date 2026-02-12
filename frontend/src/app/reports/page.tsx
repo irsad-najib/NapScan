@@ -36,7 +36,11 @@ export default function ReportsPage() {
   const [selectedScan, setSelectedScan] = useState<DetailedScanView | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
+  // PDF Preview State
   const [showPreview, setShowPreview] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
   const [exportFormat, setExportFormat] = useState<"pdf" | "html">("pdf");
   const [vulnSortOrder, setVulnSortOrder] = useState<SortOrder>("desc");
   const [isExporting, setIsExporting] = useState(false);
@@ -60,6 +64,10 @@ export default function ReportsPage() {
 
   // 2. Fetch Detail when Selection Changes
   useEffect(() => {
+    // Reset preview state whenever selection changes
+    setPdfBlobUrl(null);
+    setShowPreview(false);
+
     if (!selectedBatchId) {
       setSelectedScan(null);
       return;
@@ -142,6 +150,46 @@ export default function ReportsPage() {
     };
     fetchDetail();
   }, [selectedBatchId]);
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+    };
+  }, [pdfBlobUrl]);
+
+  const handleTogglePreview = async () => {
+    if (showPreview) {
+      setShowPreview(false);
+      return;
+    }
+
+    if (!selectedBatchId) return;
+
+    try {
+      setIsPreviewLoading(true);
+      setShowPreview(true);
+
+      if (!pdfBlobUrl) {
+        const res = await batchApi.preview(selectedBatchId);
+        if (res.ok && res.data) {
+          const url = URL.createObjectURL(res.data);
+          setPdfBlobUrl(url);
+        } else {
+          console.error("Failed to fetch preview:", res.message);
+          alert("Failed to load preview");
+          setShowPreview(false);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching preview:", err);
+      setShowPreview(false);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
 
 
   // Sort vulnerabilities by severity
@@ -277,10 +325,10 @@ export default function ReportsPage() {
                               <div className="flex items-center gap-2 mt-2">
                                 <span
                                   className={`px-2 py-1 rounded text-xs font-bold ${["completed", "finished", "success", "complete"].includes(batch.status.toLowerCase())
-                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                                      : ["processing", "running", "scanning", "pending"].includes(batch.status.toLowerCase())
-                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
-                                        : "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300"
+                                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                    : ["processing", "running", "scanning", "pending"].includes(batch.status.toLowerCase())
+                                      ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
+                                      : "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300"
                                     }`}>
                                   {batch.status}
                                 </span>
@@ -345,12 +393,17 @@ export default function ReportsPage() {
 
                       {/* Preview Button */}
                       <button
-                        onClick={() => setShowPreview(!showPreview)}
-                        className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-bold py-3 px-4 rounded-xl transition-all">
-                        <span className="material-symbols-outlined">
-                          {showPreview ? "visibility_off" : "visibility"}
-                        </span>
-                        {showPreview ? "Hide Preview" : "Show Preview"}
+                        onClick={handleTogglePreview}
+                        disabled={isPreviewLoading}
+                        className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-bold py-3 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                        {isPreviewLoading ? (
+                          <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                        ) : (
+                          <span className="material-symbols-outlined">
+                            {showPreview ? "visibility_off" : "visibility"}
+                          </span>
+                        )}
+                        {isPreviewLoading ? "Loading..." : showPreview ? "Hide Preview" : "Show Preview"}
                       </button>
 
                       {/* Export Button */}
@@ -421,57 +474,19 @@ export default function ReportsPage() {
                 </div>
 
                 {/* Preview Content */}
-                <div className="prose dark:prose-invert max-w-none">
-                  <h1>{selectedScan.name}</h1>
-                  <p className="text-slate-600 dark:text-slate-400">
-                    Target: {selectedScan.target} | Date: {formatDate(selectedScan.createdAt)}
-                  </p>
-
-                  <h2>Executive Summary</h2>
-                  <p>
-                    This security scan was conducted on {formatDate(selectedScan.createdAt)} targeting{" "}
-                    <strong>{selectedScan.target}</strong>. The scan identified{" "}
-                    <strong>{selectedScan.vulnerabilities.length}</strong> potential security issues.
-                  </p>
-
-                  <h2>Scan Tools Used</h2>
-                  <ul>
-                    {Object.keys(selectedScan.tools).map((tool) => (
-                      <li key={tool}>{tool.toUpperCase()}</li>
-                    ))}
-                  </ul>
-
-                  <div className="flex items-center justify-between mt-8 mb-4">
-                    <h2 className="m-0">Vulnerabilities Found</h2>
-                    <button
-                      onClick={() => setVulnSortOrder(vulnSortOrder === "desc" ? "asc" : "desc")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                      title={vulnSortOrder === "desc" ? "Showing: Highest severity first" : "Showing: Lowest severity first"}
-                    >
-                      <span className="material-symbols-outlined text-sm">
-                        {vulnSortOrder === "desc" ? "arrow_downward" : "arrow_upward"}
-                      </span>
-                      <span>Severity {vulnSortOrder === "desc" ? "↓" : "↑"}</span>
-                    </button>
-                  </div>
-                  {sortedVulnerabilities.length === 0 ? (
-                    <p>No vulnerabilities detected.</p>
+                <div className="w-full h-[800px] bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
+                  {pdfBlobUrl ? (
+                    <iframe
+                      src={pdfBlobUrl}
+                      className="w-full h-full"
+                      title="Report Preview"
+                    />
                   ) : (
-                    <div className="space-y-4">
-                      {sortedVulnerabilities.map((vuln) => (
-                        <div
-                          key={vuln.id}
-                          className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg">
-                          <h3 className="text-lg font-bold">{vuln.name}</h3>
-                          <p className="text-sm">
-                            <strong>Severity:</strong> {vuln.severity}
-                          </p>
-                          <p className="text-sm">
-                            <strong>Tool:</strong> {vuln.tool}
-                          </p>
-                          <p className="mt-2">{vuln.description}</p>
-                        </div>
-                      ))}
+                    <div className="w-full h-full flex items-center justify-center text-slate-500">
+                      <div className="flex flex-col items-center">
+                        <span className="material-symbols-outlined text-4xl mb-2 animate-spin">sync</span>
+                        <p>Loading PDF Preview...</p>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { useAuth } from "@/context/AuthContext";
+import { LoginButton, UserMenu } from "@/components/auth";
 
 const navItems = [
     { label: "Dashboard", icon: "dashboard", href: "/" },
@@ -18,6 +20,7 @@ import { useLayout } from "@/context/LayoutContext";
 export default function Sidebar() {
     const pathname = usePathname();
     const { isSidebarOpen, closeSidebar } = useLayout();
+    const { isAuthenticated, loading } = useAuth();
 
     const isActive = (href: string) => {
         if (href === "/") return pathname === "/";
@@ -104,16 +107,19 @@ export default function Sidebar() {
                         </nav>
                     </div>
 
-                    {/* Bottom Section: Help & User Profile */}
+                    {/* Bottom Section: User Profile / Sign In */}
                     <div className="flex flex-col gap-2">
-
-                        {/* Upgrade Plan Button */}
-                        <button className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-500/20 transition-all duration-200 hover:shadow-blue-500/30 mt-2">
-                            <span className="material-symbols-outlined text-lg">
-                                rocket_launch
-                            </span>
-                            Upgrade Plan
-                        </button>
+                        {loading ? (
+                            <div className="flex items-center justify-center px-4 py-4">
+                                <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
+                            </div>
+                        ) : isAuthenticated ? (
+                            <UserMenu />
+                        ) : (
+                            <div className="px-2 py-2">
+                                <LoginButton />
+                            </div>
+                        )}
                     </div>
                 </div>
             </aside>

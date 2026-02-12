@@ -201,7 +201,7 @@ export default function SettingsPage() {
                 </div>
             </div>
 
-            {/* Account Actions */}
+            {/* Account Actions
             <div className="space-y-3">
                 <button className="w-full flex items-center gap-3 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-left transition-colors">
                     <span className="material-symbols-outlined text-slate-500">history</span>
@@ -220,7 +220,7 @@ export default function SettingsPage() {
                     </div>
                     <span className="material-symbols-outlined text-slate-400">chevron_right</span>
                 </button>
-            </div>
+            </div> */}
 
             {/* Danger Zone */}
             <div className="p-4 bg-red-50 dark:bg-red-500/10 rounded-xl border border-red-200 dark:border-red-500/30">

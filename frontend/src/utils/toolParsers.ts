@@ -1266,13 +1266,40 @@ export function parseFridaResults(rawResult: any): ScanVulnerability[] {
             });
         }
 
+        // Capability Snapshot Analysis
+        const capabilityEvent = events.find((e: any) => e.event === "capability_snapshot");
+        if (capabilityEvent?.data) {
+            const caps = capabilityEvent.data;
+            const detectedCaps = [];
+            if (caps.anti_debug_api) detectedCaps.push("Anti-Debug API");
+            if (caps.conscrypt) detectedCaps.push("Conscrypt (SSL)");
+            if (caps.crypto) detectedCaps.push("Crypto API");
+            if (caps.okhttp) detectedCaps.push("OkHttp");
+            if (caps.webview) detectedCaps.push("WebView");
+
+            if (detectedCaps.length > 0) {
+                vulnerabilities.push({
+                    id: `frida-caps-${vulnIdx++}`,
+                    name: "Runtime Capabilities Detected",
+                    severity: "Info",
+                    description: `Frida detected the following runtime capabilities: ${detectedCaps.join(", ")}. These APIs are present and potentially active.`,
+                    tool: "frida",
+                    affectedAsset: packageName,
+                });
+            }
+        }
+
         // Overall Dynamic Analysis Summary
-        if (loadedModules.length > 0) {
+        const summaryEvent = events.find((e: any) => e.event === "scan_summary");
+        if (summaryEvent?.data || loadedModules.length > 0) {
+            const summaryData = summaryEvent?.data || {};
+            const mode = summaryData.mode || "unknown";
+
             vulnerabilities.push({
                 id: `frida-summary-${vulnIdx++}`,
-                name: "Dynamic Analysis Summary",
+                name: "Dynamic Analysis Complete",
                 severity: "Info",
-                description: `Frida engine v${engineVersion} successfully attached and loaded ${loadedModules.length} modules: ${loadedModules.join(", ")}. Total hooks installed: ${Array.from(installedHooks.values()).flat().length}.`,
+                description: `Frida engine v${engineVersion} attached successfully.${loadedModules.length > 0 ? ` Loaded ${loadedModules.length} modules.` : ""} Mode: ${mode}. Hooks active: ${Array.from(installedHooks.values()).flat().length}.`,
                 tool: "frida",
                 affectedAsset: packageName,
             });
