@@ -196,7 +196,8 @@ export default function SettingsPage() {
                         <p className="text-sm text-slate-600 dark:text-slate-400">{user?.email || "Not signed in"}</p>
                     </div>
                     <span className="px-3 py-1 bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 rounded-full text-xs font-bold">
-                        Pro Plan
+                        Free
+                         Plan
                     </span>
                 </div>
             </div>

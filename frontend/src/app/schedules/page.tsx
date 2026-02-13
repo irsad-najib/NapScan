@@ -5,17 +5,29 @@ import Sidebar from "@/components/layout/Sidebar";
 import Header from "@/components/layout/Header";
 import ScheduleList from "@/components/schedules/ScheduleList";
 import CreateScheduleDialog from "@/components/schedules/CreateScheduleDialog";
+import { AuthRequiredDialog } from "@/components/common/AuthRequiredDialog";
 import { useSchedule } from "@/context/ScheduleContext";
+import { useAuth } from "@/context/AuthContext";
 
 export default function SchedulesPage() {
     const { refreshSchedules } = useSchedule();
+    const { isAuthenticated } = useAuth();
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [showAuthDialog, setShowAuthDialog] = useState(false);
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
         await refreshSchedules();
         setIsRefreshing(false);
+    };
+
+    const handleCreateClick = () => {
+        if (!isAuthenticated) {
+            setShowAuthDialog(true);
+            return;
+        }
+        setIsCreateDialogOpen(true);
     };
 
     return (
@@ -47,7 +59,7 @@ export default function SchedulesPage() {
                                     <span className="material-symbols-outlined">refresh</span>
                                 </button>
                                 <button
-                                    onClick={() => setIsCreateDialogOpen(true)}
+                                    onClick={handleCreateClick}
                                     className="flex items-center justify-center gap-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-blue-600/30 transition-all transform hover:scale-105 active:scale-95 shrink-0 h-12 whitespace-nowrap"
                                 >
                                     <span className="material-symbols-outlined text-lg">add</span>
@@ -62,10 +74,15 @@ export default function SchedulesPage() {
                 </main>
             </div>
 
-            {/* Dialog */}
+            {/* Dialogs */}
             <CreateScheduleDialog
                 isOpen={isCreateDialogOpen}
                 onClose={() => setIsCreateDialogOpen(false)}
+            />
+
+            <AuthRequiredDialog
+                isOpen={showAuthDialog}
+                onClose={() => setShowAuthDialog(false)}
             />
         </div>
     );
