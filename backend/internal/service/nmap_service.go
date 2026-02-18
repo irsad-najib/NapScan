@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"log"
+	"napscan-be/pkg/logger"
 	"os/exec"
 	"strings"
 	"sync"
@@ -41,7 +41,7 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	}
 
 	target := task.Target
-	log.Printf("[NMAP_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+	logger.Info("[NMAP_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
 
 	// Update to running
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
@@ -82,7 +82,7 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		select {
 		case <-ctx.Done():
 			// Context cancelled - kill the process
-			log.Printf("[NMAP_ASYNC] Context cancelled for task=%s, killing process", taskID)
+			logger.Warn("[NMAP_ASYNC] Context cancelled for task=%s, killing process", taskID)
 			if cmd.Process != nil {
 				cmd.Process.Kill()
 			}
@@ -101,7 +101,7 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 					currentProgress = 90
 				}
 				manager.UpdateProgress(taskID, currentProgress, models.StatusRunning)
-				log.Printf("[NMAP_ASYNC] Progress update: %d%%", currentProgress)
+				logger.Info("[NMAP_ASYNC] Progress update: %d%%", currentProgress)
 			}
 		}
 	}
@@ -109,13 +109,13 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// Check if scan failed
 	if scanErr != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
-		log.Printf("[NMAP_ASYNC] Scan failed: %v, stderr: %s", scanErr, stderrStr)
-		
+		logger.Error("[NMAP_ASYNC] Scan failed: %v, stderr: %s", scanErr, stderrStr)
+
 		finalErr := scanErr
 		if stderrStr != "" {
 			finalErr = fmt.Errorf("%w: %s", scanErr, stderrStr)
 		}
-		
+
 		manager.Fail(taskID, finalErr)
 		return finalErr
 	}
@@ -125,7 +125,7 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	var result models.NmapRun
 	if err := xml.Unmarshal(stdout.Bytes(), &result); err != nil {
-		log.Printf("[NMAP_ASYNC] Failed to parse XML: %v", err)
+		logger.Error("[NMAP_ASYNC] Failed to parse XML: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to parse nmap output: %w", err))
 		return err
 	}
@@ -140,7 +140,7 @@ func RunNmapAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	// Complete the task
 	manager.Complete(taskID, resultMap)
-	log.Printf("[NMAP_ASYNC] Scan completed successfully for task=%s", taskID)
+	logger.Info("[NMAP_ASYNC] Scan completed successfully for task=%s", taskID)
 
 	return nil
 }
@@ -153,7 +153,7 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 	}
 
 	target := task.Target
-	log.Printf("[NMAP_PARALLEL] Starting parallel scan for task=%s target=%s", taskID, target)
+	logger.Info("[NMAP_PARALLEL] Starting parallel scan for task=%s target=%s", taskID, target)
 
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
 
@@ -166,44 +166,44 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 	// TCP Scan
 	go func() {
 		defer wg.Done()
-		log.Printf("[NMAP_PARALLEL] Starting TCP scan")
-		
+		logger.Info("[NMAP_PARALLEL] Starting TCP scan")
+
 		args := []string{"-sV", "-n", "-T4", "-oX", "-", target}
 		result, err := executeSingleNmapScan(ctx, args)
-		
+
 		tcpChan <- ServiceScanResult{Result: result, Err: err}
-		
+
 		if err != nil {
-			log.Printf("[NMAP_PARALLEL] TCP scan failed: %v", err)
+			logger.Error("[NMAP_PARALLEL] TCP scan failed: %v", err)
 		} else {
-			log.Printf("[NMAP_PARALLEL] TCP scan completed")
+			logger.Info("[NMAP_PARALLEL] TCP scan completed")
 		}
 	}()
 
 	// UDP Scan
 	go func() {
 		defer wg.Done()
-		log.Printf("[NMAP_PARALLEL] Starting UDP scan")
-		
+		logger.Info("[NMAP_PARALLEL] Starting UDP scan")
+
 		args := []string{"-sU", "-n", "-T4", "-p", "53,67,68,69,123,161,500,1900,4500", "-oX", "-", target}
 		result, err := executeSingleNmapScan(ctx, args)
-		
+
 		udpChan <- ServiceScanResult{Result: result, Err: err}
-		
+
 		if err != nil {
-			log.Printf("[NMAP_PARALLEL] UDP scan failed: %v", err)
+			logger.Error("[NMAP_PARALLEL] UDP scan failed: %v", err)
 		} else {
-			log.Printf("[NMAP_PARALLEL] UDP scan completed")
+			logger.Info("[NMAP_PARALLEL] UDP scan completed")
 		}
 	}()
 
 	// Progress monitoring
 	progressTicker := time.NewTicker(3 * time.Second)
 	defer progressTicker.Stop()
-	
+
 	currentProgress := 10
 	scansDone := 0
-	
+
 	doneChan := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -214,13 +214,13 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 	for scansDone < 2 {
 		select {
 		case <-ctx.Done():
-			log.Printf("[NMAP_PARALLEL] Context cancelled, stopping scans")
+			logger.Warn("[NMAP_PARALLEL] Context cancelled, stopping scans")
 			manager.UpdateProgress(taskID, currentProgress, models.StatusStopped)
 			return ctx.Err()
-			
+
 		case <-doneChan:
 			scansDone = 2
-			
+
 		case <-progressTicker.C:
 			if currentProgress < 85 {
 				currentProgress += 15
@@ -247,12 +247,12 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 
 	manager.UpdateProgress(taskID, 90, models.StatusRunning)
 
-	log.Printf("[NMAP_DEBUG] TCP Result Type: %T, UDP Result Type: %T", tcpRes.Result, udpRes.Result)
-	
+	logger.Debug("[NMAP_DEBUG] TCP Result Type: %T, UDP Result Type: %T", tcpRes.Result, udpRes.Result)
+
 	// Convert results to ensure they aren't nil/empty
 	tcpVal := tcpRes.Result
 	udpVal := udpRes.Result
-	
+
 	// Combine results using specific keys to debug nesting
 	combinedResult := map[string]interface{}{
 		"tcp": tcpVal,
@@ -261,11 +261,11 @@ func RunNmapParallelAsync(ctx context.Context, taskID string, manager *ScanManag
 
 	// Logging debug info (marshal just to see it in logs)
 	if b, err := json.Marshal(combinedResult); err == nil {
-		log.Printf("[NMAP_DEBUG] Combined Result Preview: %s", string(b))
+		logger.Debug("[NMAP_DEBUG] Combined Result Preview: %s", string(b))
 	}
 
 	manager.Complete(taskID, combinedResult)
-	log.Printf("[NMAP_PARALLEL] Parallel scan completed successfully for task=%s", taskID)
+	logger.Info("[NMAP_PARALLEL] Parallel scan completed successfully for task=%s", taskID)
 
 	return nil
 }
@@ -286,11 +286,11 @@ func executeSingleNmapScan(ctx context.Context, args []string) (models.NmapRun, 
 		return models.NmapRun{}, err
 	}
 
-	log.Printf("[NMAP_DEBUG] Raw XML Output (Length: %d): %s", len(stdout.Bytes()), stdout.String())
-	
+	logger.Debug("[NMAP_DEBUG] Raw XML Output (Length: %d): %s", len(stdout.Bytes()), stdout.String())
+
 	var result models.NmapRun
 	if err := xml.Unmarshal(stdout.Bytes(), &result); err != nil {
-		log.Printf("[NMAP_DEBUG] Failed to unmarshal XML: %v", err)
+		logger.Error("[NMAP_DEBUG] Failed to unmarshal XML: %v", err)
 		return models.NmapRun{}, err
 	}
 
@@ -305,7 +305,7 @@ func (s *NmapService) ExecuteScan(target string, scanType string, args ...string
 }
 
 func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, error) {
-	log.Printf("[NMAP_SERVICE] Starting parallel scan on target=%s", target)
+	logger.Info("[NMAP_SERVICE] Starting parallel scan on target=%s", target)
 	var wg sync.WaitGroup
 	tcpChan := make(chan ServiceScanResult, 1)
 	udpChan := make(chan ServiceScanResult, 1)
@@ -314,24 +314,24 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 
 	go func() {
 		defer wg.Done()
-		log.Printf("[NMAP_SERVICE] Starting TCP scan")
+		logger.Info("[NMAP_SERVICE] Starting TCP scan")
 		result, err := s.ExecuteScan(target, "-sV")
 		if err != nil {
-			log.Printf("[NMAP_SERVICE] TCP scan failed: %v", err)
+			logger.Error("[NMAP_SERVICE] TCP scan failed: %v", err)
 		} else {
-			log.Printf("[NMAP_SERVICE] TCP scan completed")
+			logger.Info("[NMAP_SERVICE] TCP scan completed")
 		}
 		tcpChan <- ServiceScanResult{Result: result, Err: err}
 	}()
 
 	go func() {
 		defer wg.Done()
-		log.Printf("[NMAP_SERVICE] Starting UDP scan")
+		logger.Info("[NMAP_SERVICE] Starting UDP scan")
 		result, err := s.ExecuteScan(target, "-sU", "-p", "53,67,68,69,123,161,500,1900,4500")
 		if err != nil {
-			log.Printf("[NMAP_SERVICE] UDP scan failed: %v", err)
+			logger.Error("[NMAP_SERVICE] UDP scan failed: %v", err)
 		} else {
-			log.Printf("[NMAP_SERVICE] UDP scan completed")
+			logger.Info("[NMAP_SERVICE] UDP scan completed")
 		}
 		udpChan <- ServiceScanResult{Result: result, Err: err}
 	}()
@@ -344,18 +344,18 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 	udpRes := <-udpChan
 
 	if tcpRes.Err != nil {
-		log.Printf("[NMAP_SERVICE] Parallel scan failed - TCP error: %v", tcpRes.Err)
+		logger.Error("[NMAP_SERVICE] Parallel scan failed - TCP error: %v", tcpRes.Err)
 		return nil, fmt.Errorf("TCP scan error: %w", tcpRes.Err)
 	}
 
 	if udpRes.Err != nil {
-		log.Printf("[NMAP_SERVICE] Parallel scan failed - UDP error: %v", udpRes.Err)
+		logger.Error("[NMAP_SERVICE] Parallel scan failed - UDP error: %v", udpRes.Err)
 		return nil, fmt.Errorf("UDP scan error: %w", udpRes.Err)
 	}
 
 	// Parse results back to NmapRun with strict type checks
 	var tcpResult, udpResult models.NmapRun
-	
+
 	if res, ok := tcpRes.Result.(models.NmapRun); ok {
 		tcpResult = res
 	}
@@ -363,7 +363,7 @@ func (s *NmapService) RunParallelScan(target string) (*CombinedScanResponse, err
 		udpResult = res
 	}
 
-	log.Printf("[NMAP_SERVICE] Parallel scan completed successfully")
+	logger.Info("[NMAP_SERVICE] Parallel scan completed successfully")
 	return &CombinedScanResponse{
 		TCP: &tcpResult,
 		UDP: &udpResult,

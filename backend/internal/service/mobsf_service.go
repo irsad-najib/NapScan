@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
+	"napscan-be/pkg/logger"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,7 +49,7 @@ func (s *MobSFService) logf(format string, args ...any) {
 	if !s.debugEnabled() {
 		return
 	}
-	log.Printf("[mobsf] "+format, args...)
+	logger.Info("[mobsf] "+format, args...)
 }
 
 func (s *MobSFService) setAuthHeaders(req *http.Request) {

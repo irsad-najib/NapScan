@@ -32,6 +32,7 @@ Backend API untuk NapScan - Security Scanning & Analysis Platform
 - Security recommendations
 
 [📖 Batch Analysis Documentation](docs/BATCH_ANALYSIS.md)
+[🛠️ Developer Guide (Setup & Architecture)](docs/DEVELOPMENT.md)
 
 ## Quick Start
 
@@ -289,8 +290,6 @@ sudo apt-get install nmap
 ```
 
 ## License
-
-MIT
 
 ## Contributing
 

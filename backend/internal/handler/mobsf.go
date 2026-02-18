@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"log"
+	"napscan-be/pkg/logger"
 	"os"
 	"strings"
 	"time"
@@ -42,38 +42,38 @@ func NewMobSFHandler(scanRepo repository.ScanResultRepository, batchService *ser
 // @Failure 500 {object} response.Response
 // @Router /mobsf/upload [post]
 func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
-	log.Printf("[MOBSF] Received upload request")
+	logger.Info("[MOBSF] Received upload request")
 	// Get the file from the request
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		log.Printf("[MOBSF] Failed to get file from request: %v", err)
+		logger.Error("[MOBSF] Failed to get file from request: %v", err)
 		return response.BadRequest(c, "Failed to get file from request", err)
 	}
-	log.Printf("Temp file: %+v", fileHeader)
+	logger.Info("Temp file: %+v", fileHeader)
 
 	// Get batch_id from form data
 	batchID := c.FormValue("batch_id")
 	if batchID == "" {
-		log.Printf("[MOBSF] Missing batch_id")
+		logger.Warn("[MOBSF] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[MOBSF] Validating batch ownership for batch_id=%s", batchID)
+	logger.Info("[MOBSF] Validating batch ownership for batch_id=%s", batchID)
 	if err := h.batchService.ValidateBatchOwnership(c, batchID); err != nil {
-		log.Printf("[MOBSF] Batch ownership validation failed: %v", err)
+		logger.Warn("[MOBSF] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	// Open the uploaded file
 	file, err := fileHeader.Open()
 	if err != nil {
-		log.Printf("[MOBSF] Failed to open uploaded file: %v", err)
+		logger.Error("[MOBSF] Failed to open uploaded file: %v", err)
 		return response.InternalServerError(c, "Failed to open uploaded file", err)
 	}
 	defer file.Close()
 
-	log.Printf("[MOBSF] Starting upload for file=%s", fileHeader.Filename)
+	logger.Info("[MOBSF] Starting upload for file=%s", fileHeader.Filename)
 
 	// Create uploaded file record via LifecycleService
 	// Note: We need to pass a reader that we can read. `file` is already open.
@@ -105,21 +105,21 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 	// Helper to calc hash
 	hash, err := calculateHash(file)
 	if err != nil {
-		log.Printf("[MOBSF] Failed to calculate hash: %v", err)
+		logger.Error("[MOBSF] Failed to calculate hash: %v", err)
 		return response.InternalServerError(c, "Failed to calculate file hash", err)
 	}
 	if _, err := file.Seek(0, 0); err != nil {
-		log.Printf("[MOBSF] Failed to seek file: %v", err)
+		logger.Error("[MOBSF] Failed to seek file: %v", err)
 		return response.InternalServerError(c, "Failed to reset file pointer", err)
 	}
 
 	uploadedFile, err := h.lifecycle.Upload(batchID, fileHeader.Filename, file, fileHeader.Size, hash)
 	if err != nil {
-		log.Printf("[MOBSF] Lifecycle Upload failed: %v", err)
+		logger.Error("[MOBSF] Lifecycle Upload failed: %v", err)
 		return response.InternalServerError(c, "Failed to process upload", err)
 	}
 
-	log.Printf("[MOBSF] Lifecycle Upload completed, id=%d hash=%s", uploadedFile.ID, uploadedFile.Hash)
+	logger.Info("[MOBSF] Lifecycle Upload completed, id=%d hash=%s", uploadedFile.ID, uploadedFile.Hash)
 
 	// Trigger MobSF Scan Async
 	h.lifecycle.StartMobSF(uploadedFile.ID, false)
@@ -132,7 +132,7 @@ func (h *MobSFHandler) UploadMobSFFile(c *fiber.Ctx) error {
 		"status":    models.FileStatusMobSFRunning,
 	}
 
-	log.Printf("[MOBSF] Upload request completed successfully")
+	logger.Info("[MOBSF] Upload request completed successfully")
 	return response.Success(c, "File uploaded and scan started", payload)
 }
 
@@ -158,32 +158,32 @@ func calculateHash(r io.Reader) (string, error) {
 // @Failure 500 {object} response.Response
 // @Router /mobsf/scan [post]
 func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
-	log.Printf("[MOBSF] Received scan request")
+	logger.Info("[MOBSF] Received scan request")
 	var req models.MobSFScanRequest
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[MOBSF] Failed to parse request body: %v", err)
+		logger.Error("[MOBSF] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[MOBSF] Missing batch_id")
+		logger.Warn("[MOBSF] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[MOBSF] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Info("[MOBSF] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[MOBSF] Batch ownership validation failed: %v", err)
+		logger.Warn("[MOBSF] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	hash := strings.TrimSpace(req.Hash)
 	if hash == "" {
-		log.Printf("[MOBSF] Missing hash")
+		logger.Warn("[MOBSF] Missing hash")
 		return response.BadRequest(c, "hash is required", nil)
 	}
 	if err := validateMobSFHash(hash); err != nil {
-		log.Printf("[MOBSF] Invalid hash: %v", err)
+		logger.Warn("[MOBSF] Invalid hash: %v", err)
 		return response.BadRequest(c, "invalid hash", err)
 	}
 
@@ -199,19 +199,19 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 	}
 
 	if isMobSFDebug() {
-		log.Printf("[mobsf] scan start hash=%s scan_type=%s file_name=%s", info.Hash, info.ScanType, info.FileName)
+		logger.Debug("[mobsf] scan start hash=%s scan_type=%s file_name=%s", info.Hash, info.ScanType, info.FileName)
 	}
 
-	log.Printf("[MOBSF] Starting scan for hash=%s", info.Hash)
+	logger.Info("[MOBSF] Starting scan for hash=%s", info.Hash)
 	scanRaw, err := mobsf.Scan(ctx, info)
 	if err != nil {
 		if isMobSFDebug() {
-			log.Printf("[mobsf] scan error: %v", err)
+			logger.Error("[mobsf] scan error: %v", err)
 		}
-		log.Printf("[MOBSF] Scan failed: %v", err)
+		logger.Error("[MOBSF] Scan failed: %v", err)
 		return response.Error(c, fiber.StatusBadGateway, "MobSF scan failed", err.Error())
 	}
-	log.Printf("[MOBSF] Scan completed, fetching report...")
+	logger.Info("[MOBSF] Scan completed, fetching report...")
 
 	// Some MobSF setups might need a brief moment to build report.
 	var reportRaw map[string]interface{}
@@ -232,14 +232,14 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 		}
 	}
 	if lastErr != nil {
-		log.Printf("[MOBSF] Failed to get report: %v", lastErr)
+		logger.Error("[MOBSF] Failed to get report: %v", lastErr)
 		return response.Error(c, fiber.StatusBadGateway, "MobSF report_json failed", lastErr.Error())
 	}
-	log.Printf("[MOBSF] Report retrieved successfully")
+	logger.Info("[MOBSF] Report retrieved successfully")
 
 	compact := isTruthy(c.Query("compact"))
 	if compact {
-		log.Printf("[MOBSF] Building compact summary")
+		logger.Info("[MOBSF] Building compact summary")
 		summary := service.BuildMobSFSummary(info, scanRaw, reportRaw)
 		payload := fiber.Map{
 			"hash":      info.Hash,
@@ -260,13 +260,13 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 				CreatedAt: time.Now().UTC(),
 			})
 			if dbErr != nil {
-				log.Printf("[MOBSF] Failed to save to database: %v", dbErr)
+				logger.Error("[MOBSF] Failed to save to database: %v", dbErr)
 				return response.InternalServerError(c, "Failed to save scan result", dbErr)
 			}
-			log.Printf("[MOBSF] Database insert success")
+			logger.Info("[MOBSF] Database insert success")
 		}
 
-		log.Printf("[MOBSF] Compact scan request completed successfully")
+		logger.Info("[MOBSF] Compact scan request completed successfully")
 		return response.Success(c, "MobSF scan completed", payload)
 	}
 
@@ -290,13 +290,13 @@ func (h *MobSFHandler) StartMobSFScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[MOBSF] Failed to save to database: %v", dbErr)
+			logger.Error("[MOBSF] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[MOBSF] Database insert success")
+		logger.Info("[MOBSF] Database insert success")
 	}
 
-	log.Printf("[MOBSF] Full scan request completed successfully")
+	logger.Info("[MOBSF] Full scan request completed successfully")
 	return response.Success(c, "MobSF scan completed", payload)
 }
 

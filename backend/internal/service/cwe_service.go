@@ -1,7 +1,7 @@
 package service
 
 import (
-	"log"
+	"napscan-be/pkg/logger"
 	"time"
 
 	"napscan-be/internal/models"
@@ -37,7 +37,7 @@ func (s *CWEService) SeedCommonCWEs() error {
 		cwe.CreatedAt = time.Now()
 		// FirstOrCreate
 		if err := s.db.FirstOrCreate(&cwe, models.CWEDefinition{CWEID: cwe.CWEID}).Error; err != nil {
-			log.Printf("[CWEService] Failed to seed %s: %v", cwe.CWEID, err)
+			logger.Error("[CWEService] Failed to seed %s: %v", cwe.CWEID, err)
 			return err
 		}
 	}

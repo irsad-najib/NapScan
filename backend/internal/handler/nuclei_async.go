@@ -3,12 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
@@ -103,7 +103,7 @@ func (ts *TaskStore) cleanup() {
 	now := time.Now()
 	for id, task := range ts.tasks {
 		if now.Sub(task.UpdatedAt) > ts.ttl {
-			log.Printf("[NUCLEI_TASK] Cleaning up expired task: %s", id)
+			logger.Info("[NUCLEI_TASK] Cleaning up expired task: %s", id)
 			delete(ts.tasks, id)
 		}
 	}
@@ -122,7 +122,7 @@ func (ts *TaskStore) cleanup() {
 // @Failure 500 {object} response.Response
 // @Router /nuclei/scan/async [post]
 func (h *NucleiHandler) StartScanAsync(c *fiber.Ctx) error {
-	log.Printf("[NUCLEI_ASYNC] Received async scan request")
+	logger.Info("[NUCLEI_ASYNC] Received async scan request")
 
 	var req struct {
 		Target  string `json:"target"`
@@ -130,38 +130,38 @@ func (h *NucleiHandler) StartScanAsync(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[NUCLEI_ASYNC] Failed to parse request body: %v", err)
+		logger.Error("[NUCLEI_ASYNC] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[NUCLEI_ASYNC] Missing batch_id")
+		logger.Warn("[NUCLEI_ASYNC] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[NUCLEI_ASYNC] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Info("[NUCLEI_ASYNC] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[NUCLEI_ASYNC] Batch ownership validation failed: %v", err)
+		logger.Warn("[NUCLEI_ASYNC] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	req.Target = strings.TrimSpace(req.Target)
 	if req.Target == "" {
-		log.Printf("[NUCLEI_ASYNC] Missing target")
+		logger.Warn("[NUCLEI_ASYNC] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
 	// Get user ID
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[NUCLEI_ASYNC] User not authenticated")
+		logger.Warn("[NUCLEI_ASYNC] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	// Create task
 	task := nucleiTaskStore.Create(userID, req.Target, req.BatchID)
-	log.Printf("[NUCLEI_ASYNC] Created task: %s for target=%s", task.TaskID, req.Target)
+	logger.Info("[NUCLEI_ASYNC] Created task: %s for target=%s", task.TaskID, req.Target)
 
 	// Run scan in background
 	go h.runAsyncScan(task)
@@ -204,7 +204,7 @@ func (h *NucleiHandler) GetTaskStatus(c *fiber.Ctx) error {
 	}
 
 	if task.UserID != userID {
-		log.Printf("[NUCLEI_ASYNC] Access denied: user=%s tried to access task=%s owned by %s",
+		logger.Warn("[NUCLEI_ASYNC] Access denied: user=%s tried to access task=%s owned by %s",
 			userID, taskID, task.UserID)
 		return response.Error(c, fiber.StatusForbidden, "Access denied", nil)
 	}
@@ -277,7 +277,7 @@ func (h *NucleiHandler) GetTaskResult(c *fiber.Ctx) error {
 	var payload fiber.Map
 
 	if isCompact {
-		log.Printf("[NUCLEI_ASYNC] Building compact summary for task=%s", taskID)
+		logger.Info("[NUCLEI_ASYNC] Building compact summary for task=%s", taskID)
 		summary := buildNucleiSummary(task.Result)
 		payload = fiber.Map{
 			"task_id":  task.TaskID,
@@ -313,7 +313,7 @@ func (h *NucleiHandler) GetTaskResult(c *fiber.Ctx) error {
 
 // runAsyncScan executes the scan in background
 func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
-	log.Printf("[NUCLEI_ASYNC] Starting background scan for task=%s target=%s",
+	logger.Info("[NUCLEI_ASYNC] Starting background scan for task=%s target=%s",
 		task.TaskID, task.Target)
 
 	// Update status to running
@@ -330,7 +330,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 	results, err := h.service.ExecuteScan(ctx, task.Target)
 
 	if err != nil {
-		log.Printf("[NUCLEI_ASYNC] Scan failed for task=%s: %v", task.TaskID, err)
+		logger.Error("[NUCLEI_ASYNC] Scan failed for task=%s: %v", task.TaskID, err)
 		nucleiTaskStore.Update(task.TaskID, func(t *ScanTask) {
 			t.Status = TaskStatusFailed
 			t.Error = err.Error()
@@ -339,7 +339,7 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 		return
 	}
 
-	log.Printf("[NUCLEI_ASYNC] Scan completed for task=%s with %d findings",
+	logger.Info("[NUCLEI_ASYNC] Scan completed for task=%s with %d findings",
 		task.TaskID, len(results))
 
 	// Update task with results
@@ -370,16 +370,16 @@ func (h *NucleiHandler) runAsyncScan(task *ScanTask) {
 		})
 
 		if dbErr != nil {
-			log.Printf("[NUCLEI_ASYNC] Failed to save to database for task=%s: %v",
+			logger.Error("[NUCLEI_ASYNC] Failed to save to database for task=%s: %v",
 				task.TaskID, dbErr)
 		} else {
-			log.Printf("[NUCLEI_ASYNC] Database insert success for task=%s", task.TaskID)
+			logger.Info("[NUCLEI_ASYNC] Database insert success for task=%s", task.TaskID)
 		}
 	}
 
 	// Log response size
 	if jsonBytes, err := json.Marshal(results); err == nil {
-		log.Printf("[NUCLEI_ASYNC] Result size for task=%s: %d bytes (%.2f KB)",
+		logger.Info("[NUCLEI_ASYNC] Result size for task=%s: %d bytes (%.2f KB)",
 			task.TaskID, len(jsonBytes), float64(len(jsonBytes))/1024)
 	}
 }

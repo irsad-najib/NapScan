@@ -2,8 +2,8 @@
 package handler
 
 import (
-	"log"
 	"napscan-be/internal/service"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
@@ -29,21 +29,21 @@ func NewBatchHandler(s *service.BatchService, r *service.ReportService) *BatchHa
 // @Failure 500 {object} response.Response
 // @Router /batch/create [post]
 func (h *BatchHandler) CreateBatch(c *fiber.Ctx) error {
-	log.Printf("[BATCH] Received create batch request")
+	logger.Info("[BATCH] Received create batch request")
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	log.Printf("[BATCH] Creating batch for user_id=%s", userID)
+	logger.Info("[BATCH] Creating batch for user_id=%s", userID)
 	batchID, err := h.service.CreateBatch(c.Context(), userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to create batch: %v", err)
+		logger.Error("[BATCH] Failed to create batch: %v", err)
 		return response.InternalServerError(c, "Failed to create batch", err)
 	}
 
-	log.Printf("[BATCH] Batch created successfully: batch_id=%s", batchID)
+	logger.Info("[BATCH] Batch created successfully: batch_id=%s", batchID)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"batch_id": batchID,
 	})
@@ -60,21 +60,21 @@ func (h *BatchHandler) CreateBatch(c *fiber.Ctx) error {
 // @Failure 500 {object} response.Response
 // @Router /batch/list [get]
 func (h *BatchHandler) GetUserBatches(c *fiber.Ctx) error {
-	log.Printf("[BATCH] Received get user batches request")
+	logger.Info("[BATCH] Received get user batches request")
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	log.Printf("[BATCH] Fetching batches for user_id=%s", userID)
+	logger.Info("[BATCH] Fetching batches for user_id=%s", userID)
 	batches, err := h.service.GetUserBatches(c.Context(), userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to retrieve batches: %v", err)
+		logger.Error("[BATCH] Failed to retrieve batches: %v", err)
 		return response.InternalServerError(c, "Failed to retrieve batches", err)
 	}
 
-	log.Printf("[BATCH] Retrieved %d batches", len(batches))
+	logger.Info("[BATCH] Retrieved %d batches", len(batches))
 	return c.JSON(batches)
 }
 
@@ -93,17 +93,17 @@ func (h *BatchHandler) GetUserBatches(c *fiber.Ctx) error {
 // @Router /batch/{batch_id} [get]
 func (h *BatchHandler) GetBatchDetail(c *fiber.Ctx) error {
 	batchID := c.Params("batch_id")
-	log.Printf("[BATCH] Received get batch detail request for batch_id=%s", batchID)
+	logger.Info("[BATCH] Received get batch detail request for batch_id=%s", batchID)
 
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	detail, err := h.service.GetBatchDetail(c.Context(), batchID, userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to get batch detail: %v", err)
+		logger.Error("[BATCH] Failed to get batch detail: %v", err)
 		if err.Error() == "batch not found" {
 			return response.NotFound(c, "Batch not found")
 		}
@@ -131,17 +131,17 @@ func (h *BatchHandler) GetBatchDetail(c *fiber.Ctx) error {
 // @Router /batch/{batch_id}/report [get]
 func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
 	batchID := c.Params("batch_id")
-	log.Printf("[BATCH] Received get report request for batch_id=%s", batchID)
+	logger.Info("[BATCH] Received get report request for batch_id=%s", batchID)
 
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	reportData, err := h.service.GetBatchReportData(c.Context(), batchID, userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to get report data: %v", err)
+		logger.Error("[BATCH] Failed to get report data: %v", err)
 		if err.Error() == "batch not found" {
 			return response.NotFound(c, "Batch not found")
 		}
@@ -154,11 +154,11 @@ func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
 	// Generate PDF
 	filePath, err := h.reportService.GeneratePDF(reportData)
 	if err != nil {
-		log.Printf("[BATCH] Failed to generate PDF: %v", err)
+		logger.Error("[BATCH] Failed to generate PDF: %v", err)
 		return response.InternalServerError(c, "Failed to generate report", err)
 	}
 
-	log.Printf("[BATCH_SERVICE] Report generated successfully: %s", filePath)
+	logger.Info("[BATCH_SERVICE] Report generated successfully: %s", filePath)
 	return c.Download(filePath)
 }
 
@@ -177,17 +177,17 @@ func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
 // @Router /batch/{batch_id}/report/preview [get]
 func (h *BatchHandler) PreviewBatchReport(c *fiber.Ctx) error {
 	batchID := c.Params("batch_id")
-	log.Printf("[BATCH] Received preview report request for batch_id=%s", batchID)
+	logger.Info("[BATCH] Received preview report request for batch_id=%s", batchID)
 
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	reportData, err := h.service.GetBatchReportData(c.Context(), batchID, userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to get report data: %v", err)
+		logger.Error("[BATCH] Failed to get report data: %v", err)
 		if err.Error() == "batch not found" {
 			return response.NotFound(c, "Batch not found")
 		}
@@ -200,11 +200,11 @@ func (h *BatchHandler) PreviewBatchReport(c *fiber.Ctx) error {
 	// Generate PDF
 	filePath, err := h.reportService.GeneratePDF(reportData)
 	if err != nil {
-		log.Printf("[BATCH] Failed to generate PDF: %v", err)
+		logger.Error("[BATCH] Failed to generate PDF: %v", err)
 		return response.InternalServerError(c, "Failed to generate report", err)
 	}
 
-	log.Printf("[BATCH_SERVICE] Report generated manually for preview: %s", filePath)
+	logger.Info("[BATCH_SERVICE] Report generated manually for preview: %s", filePath)
 
 	// Set Content-Disposition to inline to display in browser
 	c.Set("Content-Disposition", "inline; filename=report.pdf")
@@ -227,17 +227,17 @@ func (h *BatchHandler) PreviewBatchReport(c *fiber.Ctx) error {
 // @Router /batch/{batch_id} [delete]
 func (h *BatchHandler) DeleteBatch(c *fiber.Ctx) error {
 	batchID := c.Params("batch_id")
-	log.Printf("[BATCH] Received delete request for batch_id=%s", batchID)
+	logger.Info("[BATCH] Received delete request for batch_id=%s", batchID)
 
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH] User not authenticated")
+		logger.Warn("[BATCH] User not authenticated")
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	err := h.service.DeleteBatch(c.Context(), batchID, userID)
 	if err != nil {
-		log.Printf("[BATCH] Failed to delete batch: %v", err)
+		logger.Error("[BATCH] Failed to delete batch: %v", err)
 		if err.Error() == "batch not found" {
 			return response.NotFound(c, "Batch not found")
 		}

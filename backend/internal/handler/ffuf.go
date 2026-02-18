@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"napscan-be/pkg/logger"
 	"time"
 
 	"napscan-be/internal/models"
@@ -43,44 +43,44 @@ func NewFfufHandler(s *service.FfufService, scanRepo repository.ScanResultReposi
 // @Failure 500 {object} response.Response
 // @Router /ffuf/scan [post]
 func (h *FfufHandler) StartScan(c *fiber.Ctx) error {
-	log.Printf("[FFUF] Received scan request")
+	logger.Info("[FFUF] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[FFUF] Failed to parse request body: %v", err)
+		logger.Error("[FFUF] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[FFUF] Missing batch_id")
+		logger.Warn("[FFUF] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[FFUF] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Info("[FFUF] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[FFUF] Batch ownership validation failed: %v", err)
+		logger.Warn("[FFUF] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	if req.Target == "" {
-		log.Printf("[FFUF] Missing target")
+		logger.Warn("[FFUF] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
-	log.Printf("[FFUF] Starting scan on target=%s", req.Target)
+	logger.Info("[FFUF] Starting scan on target=%s", req.Target)
 	ctx, cancel := context.WithTimeout(c.Context(), 120*time.Second)
 	defer cancel()
 
 	result, err := h.service.ExecuteScan(ctx, req.Target)
 	if err != nil {
-		log.Printf("[FFUF] Scan execution failed: %v", err)
+		logger.Error("[FFUF] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "FFUF scan failed", err)
 	}
-	log.Printf("[FFUF] Scan completed successfully")
+	logger.Info("[FFUF] Scan completed successfully")
 
 	if resMap, ok := result.(map[string]interface{}); ok {
 		resMap["batch_id"] = req.BatchID
@@ -97,13 +97,13 @@ func (h *FfufHandler) StartScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[FFUF] Failed to save to database: %v", dbErr)
+			logger.Error("[FFUF] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[FFUF] Database insert success")
+		logger.Info("[FFUF] Database insert success")
 	}
 
-	log.Printf("[FFUF] Request completed successfully")
+	logger.Info("[FFUF] Request completed successfully")
 	return response.Success(c, "Scan completed", result)
 }
 
@@ -120,7 +120,7 @@ func (h *FfufHandler) StartScan(c *fiber.Ctx) error {
 // @Failure 500 {object} response.Response
 // @Router /ffuf/scan/async [post]
 func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
-	log.Printf("[FFUF_ASYNC] Received async scan request")
+	logger.Info("[FFUF_ASYNC] Received async scan request")
 
 	var req struct {
 		Target  string `json:"target"`
@@ -128,7 +128,7 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[FFUF_ASYNC] Failed to parse request body: %v", err)
+		logger.Error("[FFUF_ASYNC] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
@@ -142,7 +142,7 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 
 	// Validate batch ownership
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[FFUF_ASYNC] Batch ownership validation failed: %v", err)
+		logger.Warn("[FFUF_ASYNC] Batch ownership validation failed: %v", err)
 		return err
 	}
 
@@ -178,7 +178,7 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 	go func() {
 		err := service.RunFfufAsync(ctx, taskID, h.scanManager)
 		if err != nil {
-			log.Printf("[FFUF_ASYNC] Scan goroutine error: %v", err)
+			logger.Error("[FFUF_ASYNC] Scan goroutine error: %v", err)
 		}
 
 		// Save to database if completed successfully
@@ -194,15 +194,15 @@ func (h *FfufHandler) StartScanAsync(c *fiber.Ctx) error {
 					CreatedAt: time.Now().UTC(),
 				})
 				if dbErr != nil {
-					log.Printf("[FFUF_ASYNC] Failed to save to database: %v", dbErr)
+					logger.Error("[FFUF_ASYNC] Failed to save to database: %v", dbErr)
 				} else {
-					log.Printf("[FFUF_ASYNC] Database insert success for task=%s", taskID)
+					logger.Info("[FFUF_ASYNC] Database insert success for task=%s", taskID)
 				}
 			}
 		}
 	}()
 
-	log.Printf("[FFUF_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
+	logger.Info("[FFUF_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
 
 	return response.Success(c, "scan started", fiber.Map{
 		"task_id":  taskID,

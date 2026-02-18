@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"napscan-be/pkg/logger"
 	"strings"
 	"time"
 
@@ -87,54 +87,54 @@ func buildNucleiSummary(results []map[string]interface{}) map[string]interface{}
 // @Failure 500 {object} response.Response
 // @Router /nuclei/scan [post]
 func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
-	log.Printf("[NUCLEI] Received scan request")
+	logger.Info("[NUCLEI] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[NUCLEI] Failed to parse request body: %v", err)
+		logger.Error("[NUCLEI] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[NUCLEI] Missing batch_id")
+		logger.Warn("[NUCLEI] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[NUCLEI] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Info("[NUCLEI] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[NUCLEI] Batch ownership validation failed: %v", err)
+		logger.Warn("[NUCLEI] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	req.Target = strings.TrimSpace(req.Target)
 	if req.Target == "" {
-		log.Printf("[NUCLEI] Missing target")
+		logger.Warn("[NUCLEI] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
-	log.Printf("[NUCLEI] Starting scan on target=%s", req.Target)
+	logger.Info("[NUCLEI] Starting scan on target=%s", req.Target)
 	ctx, cancel := context.WithTimeout(c.Context(), 300*time.Second)
 	defer cancel()
 
 	results, err := h.service.ExecuteScan(ctx, req.Target)
 	if err != nil {
-		log.Printf("[NUCLEI] Scan execution failed: %v", err)
+		logger.Error("[NUCLEI] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "Nuclei scan failed", err)
 	}
-	log.Printf("[NUCLEI] Scan completed successfully with %d findings", len(results))
+	logger.Info("[NUCLEI] Scan completed successfully with %d findings", len(results))
 
 	// Check if compact mode is requested (default to true to avoid large responses)
 	compact := c.Query("compact", "true") // Default compact=true
 	isCompact := strings.ToLower(strings.TrimSpace(compact)) == "true"
-	
+
 	var payload fiber.Map
 
 	if isCompact {
-		log.Printf("[NUCLEI] Building compact summary")
+		logger.Info("[NUCLEI] Building compact summary")
 		summary := buildNucleiSummary(results)
 		payload = fiber.Map{
 			"target":   req.Target,
@@ -144,7 +144,7 @@ func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
 		}
 		// Extra check: jika compact summary masih besar, potong findings
 		if findings, ok := summary["findings"].([]map[string]interface{}); ok && len(findings) > 50 {
-			log.Printf("[NUCLEI] Compact summary has %d findings, truncating to 50", len(findings))
+			logger.Warn("[NUCLEI] Compact summary has %d findings, truncating to 50", len(findings))
 			summary["findings"] = findings[:50]
 			summary["total_findings"] = len(results)
 			summary["shown_findings"] = 50
@@ -155,21 +155,21 @@ func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
 		const maxFullResults = 100
 		truncated := false
 		displayResults := results
-		
+
 		if len(results) > maxFullResults {
-			log.Printf("[NUCLEI] Truncating results from %d to %d", len(results), maxFullResults)
+			logger.Warn("[NUCLEI] Truncating results from %d to %d", len(results), maxFullResults)
 			displayResults = results[:maxFullResults]
 			truncated = true
 		}
-		
+
 		payload = fiber.Map{
-			"target":        req.Target,
-			"results":       displayResults,
-			"batch_id":      req.BatchID,
-			"compact":       false,
-			"total_count":   len(results),
+			"target":         req.Target,
+			"results":        displayResults,
+			"batch_id":       req.BatchID,
+			"compact":        false,
+			"total_count":    len(results),
 			"returned_count": len(displayResults),
-			"truncated":     truncated,
+			"truncated":      truncated,
 		}
 	}
 
@@ -184,21 +184,21 @@ func (h *NucleiHandler) StartScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[NUCLEI] Failed to save to database: %v", dbErr)
+			logger.Error("[NUCLEI] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[NUCLEI] Database insert success")
+		logger.Info("[NUCLEI] Database insert success")
 	}
 
 	// Log ukuran response untuk debugging
 	if jsonBytes, err := json.Marshal(payload); err == nil {
-		log.Printf("[NUCLEI] Response size: %d bytes (%.2f KB)", len(jsonBytes), float64(len(jsonBytes))/1024)
+		logger.Info("[NUCLEI] Response size: %d bytes (%.2f KB)", len(jsonBytes), float64(len(jsonBytes))/1024)
 		// Warning jika masih terlalu besar
 		if len(jsonBytes) > 500*1024 { // 500KB
-			log.Printf("[NUCLEI] WARNING: Response size exceeds 500KB, may cause timeout")
+			logger.Warn("[NUCLEI] WARNING: Response size exceeds 500KB, may cause timeout")
 		}
 	}
 
-	log.Printf("[NUCLEI] Request completed successfully")
+	logger.Info("[NUCLEI] Request completed successfully")
 	return response.Success(c, "Scan completed", payload)
 }

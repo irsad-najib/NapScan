@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"napscan-be/pkg/logger"
 	"time"
 
 	"napscan-be/internal/models"
@@ -43,41 +43,41 @@ func NewNmapHandler(s *service.NmapService, scanRepo repository.ScanResultReposi
 // @Failure 500 {object} response.Response
 // @Router /nmap/scan [post]
 func (h *NmapHandler) StartFullScan(c *fiber.Ctx) error {
-	log.Printf("[NMAP] Received scan request")
+	logger.Info("[NMAP] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[NMAP] Failed to parse request body: %v", err)
+		logger.Error("[NMAP] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[NMAP] Missing batch_id")
+		logger.Warn("[NMAP] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[NMAP] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Info("[NMAP] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[NMAP] Batch ownership validation failed: %v", err)
+		logger.Warn("[NMAP] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	if req.Target == "" {
-		log.Printf("[NMAP] Missing target")
+		logger.Warn("[NMAP] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
-	log.Printf("[NMAP] Starting parallel scan on target=%s", req.Target)
+	logger.Info("[NMAP] Starting parallel scan on target=%s", req.Target)
 	result, err := h.service.RunParallelScan(req.Target)
 	if err != nil {
-		log.Printf("[NMAP] Scan execution failed: %v", err)
+		logger.Error("[NMAP] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "Scan failed", err)
 	}
-	log.Printf("[NMAP] Scan completed successfully")
+	logger.Info("[NMAP] Scan completed successfully")
 
 	result.BatchID = req.BatchID
 
@@ -92,13 +92,13 @@ func (h *NmapHandler) StartFullScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[NMAP] Failed to save to database: %v", dbErr)
+			logger.Error("[NMAP] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[NMAP] Database insert success")
+		logger.Info("[NMAP] Database insert success")
 	}
 
-	log.Printf("[NMAP] Request completed successfully")
+	logger.Info("[NMAP] Request completed successfully")
 	return c.Status(fiber.StatusOK).JSON(result)
 }
 
@@ -115,7 +115,7 @@ func (h *NmapHandler) StartFullScan(c *fiber.Ctx) error {
 // @Failure 500 {object} response.Response
 // @Router /nmap/scan/async [post]
 func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
-	log.Printf("[NMAP_ASYNC] Received async scan request")
+	logger.Info("[NMAP_ASYNC] Received async scan request")
 
 	var req struct {
 		Target   string `json:"target"`
@@ -124,7 +124,7 @@ func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[NMAP_ASYNC] Failed to parse request body: %v", err)
+		logger.Error("[NMAP_ASYNC] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
@@ -142,7 +142,7 @@ func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
 
 	// Validate batch ownership
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[NMAP_ASYNC] Batch ownership validation failed: %v", err)
+		logger.Warn("[NMAP_ASYNC] Batch ownership validation failed: %v", err)
 		return err
 	}
 
@@ -184,7 +184,7 @@ func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
 		}
 
 		if err != nil {
-			log.Printf("[NMAP_ASYNC] Scan goroutine error: %v", err)
+			logger.Error("[NMAP_ASYNC] Scan goroutine error: %v", err)
 		}
 
 		// Save to database if completed successfully
@@ -200,15 +200,15 @@ func (h *NmapHandler) StartScanAsync(c *fiber.Ctx) error {
 					CreatedAt: time.Now().UTC(),
 				})
 				if dbErr != nil {
-					log.Printf("[NMAP_ASYNC] Failed to save to database: %v", dbErr)
+					logger.Error("[NMAP_ASYNC] Failed to save to database: %v", dbErr)
 				} else {
-					log.Printf("[NMAP_ASYNC] Database insert success for task=%s", taskID)
+					logger.Info("[NMAP_ASYNC] Database insert success for task=%s", taskID)
 				}
 			}
 		}
 	}()
 
-	log.Printf("[NMAP_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
+	logger.Info("[NMAP_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
 
 	return response.Success(c, "scan started", fiber.Map{
 		"task_id":  taskID,

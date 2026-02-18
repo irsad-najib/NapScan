@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 )
 
 type NucleiService struct {
@@ -33,7 +33,7 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 	}
 
 	target := task.Target
-	log.Printf("[NUCLEI_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+	logger.Info("[NUCLEI_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
 
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
 	manager.UpdateProgress(taskID, 5, models.StatusRunning)
@@ -58,9 +58,9 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 
 	manager.UpdateProgress(taskID, 10, models.StatusRunning)
 
-	log.Printf("[NUCLEI_ASYNC] Starting nuclei process")
+	logger.Info("[NUCLEI_ASYNC] Starting nuclei process")
 	if err := cmd.Start(); err != nil {
-		log.Printf("[NUCLEI_ASYNC] Failed to start nuclei: %v", err)
+		logger.Error("[NUCLEI_ASYNC] Failed to start nuclei: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to start nuclei: %w", err))
 		return err
 	}
@@ -92,7 +92,7 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 	for !scanFinished {
 		select {
 		case <-ctx.Done():
-			log.Printf("[NUCLEI_ASYNC] Context cancelled for task=%s, killing process", taskID)
+			logger.Info("[NUCLEI_ASYNC] Context cancelled for task=%s, killing process", taskID)
 			if cmd.Process != nil {
 				cmd.Process.Kill()
 			}
@@ -133,7 +133,7 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 	}
 
 	if scanErr != nil {
-		log.Printf("[NUCLEI_ASYNC] Scan failed: %v", scanErr)
+		logger.Error("[NUCLEI_ASYNC] Scan failed: %v", scanErr)
 		manager.Fail(taskID, fmt.Errorf("nuclei execution failed: %w", scanErr))
 		return scanErr
 	}
@@ -142,20 +142,20 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
-		log.Printf("[NUCLEI_ASYNC] Failed to read output file: %v", err)
+		logger.Error("[NUCLEI_ASYNC] Failed to read output file: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to read nuclei output: %w", err))
 		return err
 	}
 
 	trimmed := strings.TrimSpace(string(jsonData))
 	if trimmed == "" {
-		log.Printf("[NUCLEI_ASYNC] No vulnerabilities found")
+		logger.Info("[NUCLEI_ASYNC] No vulnerabilities found")
 		manager.Complete(taskID, []map[string]interface{}{})
 		return nil
 	}
 
 	lines := strings.Split(trimmed, "\n")
-	log.Printf("[NUCLEI_ASYNC] Parsing %d result lines", len(lines))
+	logger.Info("[NUCLEI_ASYNC] Parsing %d result lines", len(lines))
 	results := make([]map[string]interface{}, 0, len(lines))
 	var resultsInterface []interface{}
 
@@ -177,14 +177,14 @@ func (s *NucleiService) RunNucleiAsync(ctx context.Context, taskID string, manag
 
 	manager.UpdateProgress(taskID, 95, models.StatusRunning)
 	manager.Complete(taskID, resultsInterface)
-	log.Printf("[NUCLEI_ASYNC] Scan completed successfully for task=%s with %d results", taskID, len(results))
+	logger.Info("[NUCLEI_ASYNC] Scan completed successfully for task=%s with %d results", taskID, len(results))
 
 	return nil
 }
 
 // Legacy ExecuteScan for backward compatibility
 func (s *NucleiService) ExecuteScan(ctx context.Context, target string) ([]map[string]interface{}, error) {
-	log.Printf("[NUCLEI_SERVICE] Starting scan on target=%s", target)
+	logger.Info("[NUCLEI_SERVICE] Starting scan on target=%s", target)
 	tmpFile := filepath.Join(os.TempDir(), "nuclei_"+time.Now().Format("20060102150405")+".jsonl")
 	defer os.Remove(tmpFile)
 
@@ -197,10 +197,10 @@ func (s *NucleiService) ExecuteScan(ctx context.Context, target string) ([]map[s
 		"-nc",
 	)
 
-	log.Printf("[NUCLEI_SERVICE] Executing nuclei command")
+	logger.Info("[NUCLEI_SERVICE] Executing nuclei command")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[NUCLEI_SERVICE] Nuclei execution failed: %v, output: %s", err, string(output))
+		logger.Error("[NUCLEI_SERVICE] Nuclei execution failed: %v, output: %s", err, string(output))
 		return nil, fmt.Errorf("nuclei execution failed: %v, output: %s", err, string(output))
 	}
 

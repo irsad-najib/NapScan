@@ -1,8 +1,8 @@
 package service
 
 import (
-	"log"
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 	"time"
 
 	"gorm.io/gorm"
@@ -38,13 +38,13 @@ func (s *AgentService) Start() {
 			}
 		}
 	}()
-	log.Println("Security Report Agent started...")
+	logger.Info("Security Report Agent started...")
 }
 
 func (s *AgentService) Stop() {
 	s.Ticker.Stop()
 	s.Done <- true
-	log.Println("Security Report Agent stopped.")
+	logger.Info("Security Report Agent stopped.")
 }
 
 func (s *AgentService) processCompletedBatches() {
@@ -54,33 +54,33 @@ func (s *AgentService) processCompletedBatches() {
 	// Assuming 'complete' status means all scans are done
 	err := s.DB.Where("status = ? AND (report_path IS NULL OR report_path = '')", models.BatchStatusComplete).Find(&batches).Error
 	if err != nil {
-		log.Printf("Error processing batches: %v", err)
+		logger.Error("Error processing batches: %v", err)
 		return
 	}
 
 	for _, batch := range batches {
-		log.Printf("Generating report for Batch %s...", batch.BatchID)
-		
+		logger.Info("Generating report for Batch %s...", batch.BatchID)
+
 		// 1. Analyze and Risk Score
 		reportData, err := s.RiskService.AnalyzeBatch(batch.BatchID)
 		if err != nil {
-			log.Printf("Failed to analyze batch %s: %v", batch.BatchID, err)
+			logger.Error("Failed to analyze batch %s: %v", batch.BatchID, err)
 			continue
 		}
 
 		// 2. Generate PDF
 		path, err := s.ReportService.GeneratePDF(reportData)
 		if err != nil {
-			log.Printf("Failed to generate PDF for batch %s: %v", batch.BatchID, err)
+			logger.Error("Failed to generate PDF for batch %s: %v", batch.BatchID, err)
 			continue
 		}
 
 		// 3. Update Batch with Report Path
 		batch.ReportPath = path
 		if err := s.DB.Save(&batch).Error; err != nil {
-			log.Printf("Failed to update batch %s with report path: %v", batch.BatchID, err)
+			logger.Error("Failed to update batch %s with report path: %v", batch.BatchID, err)
 		} else {
-			log.Printf("Report generated successfully for batch %s: %s", batch.BatchID, path)
+			logger.Info("Report generated successfully for batch %s: %s", batch.BatchID, path)
 		}
 	}
 }

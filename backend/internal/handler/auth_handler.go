@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/response"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"napscan-be/pkg/logger"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -28,7 +29,7 @@ func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 }
 
 const (
-	defaultAuthCookieName  = "napscan_access_token"
+	defaultAuthCookieName   = "napscan_access_token"
 	defaultOAuthStateCookie = "napscan_oauth_state"
 )
 
@@ -110,7 +111,7 @@ func redactSetCookieValue(setCookie, cookieName string) string {
 	}
 }
 
-func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {	
+func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
 	// Fast path: simple cookie creation without complex checks
 	cookie := &fiber.Cookie{
 		Name:     authCookieName(),
@@ -118,18 +119,18 @@ func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, jwtToken string) {
 		HTTPOnly: false,
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
-	// Use configured SameSite and Secure settings
+		// Use configured SameSite and Secure settings
 		SameSite: sameSiteMode(),
 		Secure:   isSecureCookie(),
 	}
 
 	// DEBUG: Log cookie details before setting
-	log.Printf("[AUTH_COOKIE] Setting cookie: Name=%s Path=%s Secure=%v SameSite=%s Expires=%v", 
+	logger.Debug("[AUTH_COOKIE] Setting cookie: Name=%s Path=%s Secure=%v SameSite=%s Expires=%v",
 		cookie.Name, cookie.Path, cookie.Secure, cookie.SameSite, cookie.Expires)
-	
+
 	// Set cookie IMMEDIATELY - this is the critical path
 	c.Cookie(cookie)
-	
+
 	// Anti-cache headers
 	c.Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
 	c.Set("Pragma", "no-cache")
@@ -234,9 +235,9 @@ func (s *inMemoryOAuthStateStore) Put(state string, redirectURL string) {
 		CreatedAt:   now,
 		RedirectURL: redirectURL,
 	}
-	
+
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
-		log.Printf("[OAUTH_STATE_DEBUG] Stored state: %s (expires in %v, total_states=%d, redirect=%s)", state[:16]+"...", s.ttl, len(s.m), redirectURL)
+		logger.Debug("[OAUTH_STATE_DEBUG] Stored state: %s (expires in %v, total_states=%d, redirect=%s)", state[:16]+"...", s.ttl, len(s.m), redirectURL)
 	}
 }
 
@@ -248,24 +249,24 @@ func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string, string) {
 
 	data, ok := s.m[state]
 	delete(s.m, state) // single-use regardless of validity
-	
+
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
-		log.Printf("[OAUTH_STATE_DEBUG] Validating state: %s (found=%v, total_states=%d)", state[:16]+"...", ok, len(s.m))
+		logger.Debug("[OAUTH_STATE_DEBUG] Validating state: %s (found=%v, total_states=%d)", state[:16]+"...", ok, len(s.m))
 	}
-	
+
 	if !ok {
 		return false, "state not found (already used, server restarted, or never created)", ""
 	}
-	
+
 	age := now.Sub(data.CreatedAt)
 	if age > s.ttl {
 		return false, fmt.Sprintf("state expired (age=%v, ttl=%v)", age.Round(time.Second), s.ttl), ""
 	}
-	
+
 	if os.Getenv("APP_ENV") == "development" && strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_COOKIE_DEBUG"))) == "true" {
-		log.Printf("[OAUTH_STATE_DEBUG] State valid (age=%v)", age.Round(time.Second))
+		logger.Debug("[OAUTH_STATE_DEBUG] State valid (age=%v)", age.Round(time.Second))
 	}
-	
+
 	return true, "", data.RedirectURL
 }
 
@@ -279,40 +280,40 @@ func (s *inMemoryOAuthStateStore) Consume(state string) (bool, string, string) {
 // @Success 200 {object} models.AuthResponse
 // @Router /auth/google [post]
 func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
-	log.Printf("[AUTH] Received Google ID token login request")
+	logger.Info("[AUTH] Received Google ID token login request")
 	var req models.GoogleAuthRequest
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[AUTH] Failed to parse request body: %v", err)
+		logger.Warn("[AUTH] Failed to parse request body: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
 	if req.IDToken == "" {
-		log.Printf("[AUTH] Missing id_token in request")
+		logger.Warn("[AUTH] Missing id_token in request")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "id_token is required"})
 	}
 
 	// Verify Google Token
-	log.Printf("[AUTH] Verifying Google ID token")
+	logger.Info("[AUTH] Verifying Google ID token")
 	user, err := h.authService.VerifyGoogleToken(c.Context(), req.IDToken)
 	if err != nil {
-		log.Printf("[AUTH] Google token verification failed: %v", err)
+		logger.Error("[AUTH] Google token verification failed: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid Google token: " + err.Error()})
 	}
-	log.Printf("[AUTH] Google token verified for user: %s", user.Email)
+	logger.Info("[AUTH] Google token verified for user: %s", user.Email)
 
 	// Generate JWT
-	log.Printf("[AUTH] Generating JWT for user_id=%s", user.ID)
+	logger.Info("[AUTH] Generating JWT for user_id=%s", user.ID)
 	token, err := h.authService.GenerateJWT(user)
 	if err != nil {
-		log.Printf("[AUTH] Failed to generate JWT: %v", err)
+		logger.Error("[AUTH] Failed to generate JWT: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate session"})
 	}
 
 	h.setAuthCookie(c, token)
-	log.Printf("[AUTH] Auth cookie set successfully")
+	logger.Info("[AUTH] Auth cookie set successfully")
 
 	// UBAH DISINI: Kembalikan token agar frontend bisa menyimpannya di localStorage
-	log.Printf("[AUTH] Login successful for user: %s", user.Email)
+	logger.Info("[AUTH] Login successful for user: %s", user.Email)
 	return c.JSON(models.AuthResponse{
 		AccessToken: token, // DULU: "", SEKARANG: token
 		User:        *user,
@@ -337,9 +338,9 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 	if redirectTO == "" {
 		// Auto-detect from Referer if query param is missing
 		redirectTO = c.Get("Referer")
-		log.Printf("[AUTH_OAUTH_LOGIN] No redirect_to param, using Referer: %q", redirectTO)
+		logger.Info("[AUTH_OAUTH_LOGIN] No redirect_to param, using Referer: %q", redirectTO)
 	} else {
-		log.Printf("[AUTH_OAUTH_LOGIN] Received redirect_to param: %q", redirectTO)
+		logger.Info("[AUTH_OAUTH_LOGIN] Received redirect_to param: %q", redirectTO)
 	}
 
 	// CRITICAL FIX: Fiber/Fasthttp strings are backed by the request buffer which is reused.
@@ -348,12 +349,12 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 	redirectTO = string([]byte(redirectTO))
 
 	// DEBUG: Explicitly log what we are storing
-	log.Printf("[DEBUG_FIX] Storing State: key=%s, value=%q", state, redirectTO)
-	
+	logger.Debug("[DEBUG_FIX] Storing State: key=%s, value=%q", state, redirectTO)
+
 	oauthStateStore.Put(state, redirectTO)
 
 	url := h.authService.GetGoogleLoginURL(state)
-	log.Printf("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s..., will redirect back to: %q)", state[:16], redirectTO)
+	logger.Info("[AUTH_OAUTH_LOGIN] Redirecting to Google OAuth (state=%s..., will redirect back to: %q)", state[:16], redirectTO)
 	return c.Redirect(url)
 }
 
@@ -366,10 +367,10 @@ func (h *AuthHandler) GoogleLoginRedirect(c *fiber.Ctx) error {
 // @Success 200 {object} models.AuthResponse
 // @Router /auth/google/callback [get]
 func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
-	log.Println("[AUTH_OAUTH_CALLBACK] Handling Google callback")
+	logger.Info("[AUTH_OAUTH_CALLBACK] Handling Google callback")
 	overallStart := time.Now()
 	stepStart := time.Now()
-	
+
 	// Skip CORS for this endpoint - it's a browser redirect from Google, not an XHR
 	// This prevents OPTIONS preflight delays
 	c.Set("Access-Control-Allow-Origin", "*")
@@ -377,91 +378,91 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 
 	state := c.Query("state")
 	valid, errMsg, redirectFromState := oauthStateStore.Consume(state)
-	
+
 	// DEBUG: explicit log of what we got back
-	log.Printf("[DEBUG_FIX] Consumed State: key=%s, valid=%v, retrieved_url=%q", state, valid, redirectFromState)
-	
+	logger.Debug("[DEBUG_FIX] Consumed State: key=%s, valid=%v, retrieved_url=%q", state, valid, redirectFromState)
+
 	if !valid {
-		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: State validation failed: %s (state=%s)", errMsg, state[:16]+"...")
+		logger.Error("[AUTH_OAUTH_CALLBACK] ERROR: State validation failed: %s (state=%s)", errMsg, state[:16]+"...")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid or expired state parameter",
+			"error":   "Invalid or expired state parameter",
 			"details": errMsg,
 		})
 	}
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] state_validation=%s", time.Since(stepStart))
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] state_validation=%s", time.Since(stepStart))
 	stepStart = time.Now() // Reset timer for next step
 
 	code := c.Query("code")
 	if code == "" {
-		log.Println("[AUTH_OAUTH_CALLBACK] ERROR: Missing code parameter")
+		logger.Error("[AUTH_OAUTH_CALLBACK] ERROR: Missing code parameter")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing authorization code"})
 	}
 
 	// Exchange authorization code for token and get user info
-	log.Printf("[AUTH_OAUTH_CALLBACK] Starting Google token exchange...")
+	logger.Info("[AUTH_OAUTH_CALLBACK] Starting Google token exchange...")
 	user, err := h.authService.HandleGoogleCallback(c.Context(), code)
 	if err != nil {
-		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: Failed during code exchange: %v", err)
+		logger.Error("[AUTH_OAUTH_CALLBACK] ERROR: Failed during code exchange: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to authenticate with Google",
+			"error":   "Failed to authenticate with Google",
 			"details": err.Error(),
 		})
 	}
 	exchangeDuration := time.Since(stepStart)
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] google_exchange=%s", exchangeDuration)
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] google_exchange=%s", exchangeDuration)
 	if exchangeDuration > 5*time.Second {
-		log.Printf("[AUTH_OAUTH_CALLBACK] ⚠️  WARNING: Google exchange took longer than 5s: %s", exchangeDuration)
+		logger.Warn("[AUTH_OAUTH_CALLBACK] ⚠️  WARNING: Google exchange took longer than 5s: %s", exchangeDuration)
 	}
 	stepStart = time.Now() // Reset timer for next step
 
 	// Generate JWT token
 	jwtToken, err := h.authService.GenerateJWT(user)
 	if err != nil {
-		log.Printf("[AUTH_OAUTH_CALLBACK] ERROR: Failed to generate JWT: %v", err)
+		logger.Error("[AUTH_OAUTH_CALLBACK] ERROR: Failed to generate JWT: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to generate token"})
 	}
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] jwt_generate=%s", time.Since(stepStart))
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] jwt_generate=%s", time.Since(stepStart))
 	stepStart = time.Now() // Reset timer for next step
 
 	// Set token in cookie with anti-cache headers
 	h.setAuthCookie(c, jwtToken)
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] set_cookie=%s", time.Since(stepStart))
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] set_cookie=%s", time.Since(stepStart))
 	stepStart = time.Now()
 
 	// Determine redirect URL with security validation
 	redirectURL := ""
-	
+
 	// First, check if we have a redirect_to from the OAuth state
 	if redirectFromState != "" {
 		redirectFromState = strings.TrimSpace(redirectFromState) // Fix potential whitespace issues
-		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Validating redirect_to from state: %q", redirectFromState)
+		logger.Debug("[AUTH_OAUTH_CALLBACK_DEBUG] Validating redirect_to from state: %q", redirectFromState)
 		if isAllowedRedirectURL(redirectFromState) {
 			redirectURL = redirectFromState
-			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ✅ Using validated redirect_to from state: %q", redirectURL)
+			logger.Debug("[AUTH_OAUTH_CALLBACK_DEBUG] ✅ Using validated redirect_to from state: %q", redirectURL)
 		} else {
-			log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] ⚠️  Rejected redirect_to (not in whitelist or invalid format): %q", redirectFromState)
+			logger.Warn("[AUTH_OAUTH_CALLBACK_DEBUG] ⚠️  Rejected redirect_to (not in whitelist or invalid format): %q", redirectFromState)
 		}
 	} else {
-		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] State consumed but redirect_to was empty")
+		logger.Debug("[AUTH_OAUTH_CALLBACK_DEBUG] State consumed but redirect_to was empty")
 	}
-	
+
 	// Fallback to FRONTEND_URL if no valid redirect_to
 	if redirectURL == "" {
 		redirectURL = strings.TrimSpace(os.Getenv("FRONTEND_URL"))
-		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Using FRONTEND_URL fallback: %q", redirectURL)
+		logger.Debug("[AUTH_OAUTH_CALLBACK_DEBUG] Using FRONTEND_URL fallback: %q", redirectURL)
 	}
-	
+
 	// Final fallback
 	if redirectURL == "" {
 		redirectURL = "http://localhost:3000"
-		log.Printf("[AUTH_OAUTH_CALLBACK_DEBUG] Using hardcoded fallback: %q", redirectURL)
+		logger.Debug("[AUTH_OAUTH_CALLBACK_DEBUG] Using hardcoded fallback: %q", redirectURL)
 	}
-	
-	log.Printf("[AUTH_OAUTH_CALLBACK] ✅ SUCCESS! Redirecting to %s", redirectURL)
+
+	logger.Info("[AUTH_OAUTH_CALLBACK] ✅ SUCCESS! Redirecting to %s", redirectURL)
 	totalDuration := time.Since(overallStart)
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] redirect_prep=%s", time.Since(stepStart))
-	log.Printf("[AUTH_OAUTH_CALLBACK_TIMING] TOTAL_duration=%s", totalDuration)
-	
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] redirect_prep=%s", time.Since(stepStart))
+	logger.Info("[AUTH_OAUTH_CALLBACK_TIMING] TOTAL_duration=%s", totalDuration)
+
 	// Fast 302 redirect - browser follows immediately
 	return c.Redirect(redirectURL, fiber.StatusFound)
 }
@@ -526,16 +527,16 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 // @Success 200 {object} models.User
 // @Router /auth/me [get]
 func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
-    // User ID harusnya sudah di-set oleh AuthMiddleware di c.Locals
-    userID, ok := c.Locals("user_id").(string)
-    if !ok || userID == "" {
-        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
-    }
+	// User ID harusnya sudah di-set oleh AuthMiddleware di c.Locals
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
 
-    user, err := h.authService.GetUserByID(c.Context(), userID)
-    if err != nil {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
-    }
+	user, err := h.authService.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+	}
 
-    return c.JSON(user)
+	return c.JSON(user)
 }

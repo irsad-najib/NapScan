@@ -2,9 +2,9 @@ package handler
 
 import (
 	"context"
-	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/service"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
@@ -40,7 +40,7 @@ func (h *ScanHandler) ResumeScan(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadRequest, "task_id is required", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Resume request for task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Resume request for task_id=%s", taskID)
 
 	task, err := h.scanManager.Get(taskID)
 	if err != nil {
@@ -80,7 +80,7 @@ func (h *ScanHandler) ResumeScan(c *fiber.Ctx) error {
 
 	go func() {
 		if err := service.ResumeOpenVASAsync(newCtx, taskID, h.scanManager, openvasSvc); err != nil {
-			log.Printf("[SCAN_HANDLER] Failed to resume task %s: %v", taskID, err)
+			logger.Error("[SCAN_HANDLER] Failed to resume task %s: %v", taskID, err)
 			h.scanManager.Fail(taskID, err)
 		}
 	}()
@@ -110,24 +110,24 @@ func (h *ScanHandler) StopScan(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadRequest, "task_id is required", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Stop request for task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Stop request for task_id=%s", taskID)
 
 	// Get task first to verify it exists
 	task, err := h.scanManager.Get(taskID)
 	if err != nil {
-		log.Printf("[SCAN_HANDLER] Task not found: %v", err)
+		logger.Warn("[SCAN_HANDLER] Task not found: %v", err)
 		return response.Error(c, fiber.StatusNotFound, "task not found", nil)
 	}
 
 	// Attempt to stop the task
 	if err := h.scanManager.Stop(taskID); err != nil {
-		log.Printf("[SCAN_HANDLER] Failed to stop task: %v", err)
+		logger.Error("[SCAN_HANDLER] Failed to stop task: %v", err)
 		return response.Error(c, fiber.StatusConflict, err.Error(), nil)
 	}
 
 	// Get updated task
 	task, _ = h.scanManager.Get(taskID)
-	log.Printf("[SCAN_HANDLER] Task stopped successfully: task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Task stopped successfully: task_id=%s", taskID)
 
 	return response.Success(c, "scan stopped successfully", task.ToResponse())
 }
@@ -151,15 +151,15 @@ func (h *ScanHandler) GetStatus(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadRequest, "task_id is required", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Status request for task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Status request for task_id=%s", taskID)
 
 	task, err := h.scanManager.Get(taskID)
 	if err != nil {
-		log.Printf("[SCAN_HANDLER] Task not found: %v", err)
+		logger.Warn("[SCAN_HANDLER] Task not found: %v", err)
 		return response.Error(c, fiber.StatusNotFound, "task not found", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Status retrieved: task_id=%s, status=%s, progress=%d%%",
+	logger.Info("[SCAN_HANDLER] Status retrieved: task_id=%s, status=%s, progress=%d%%",
 		taskID, task.Status, task.Progress)
 
 	return response.Success(c, "status retrieved successfully", task.ToResponse())
@@ -185,22 +185,22 @@ func (h *ScanHandler) GetReport(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadRequest, "task_id is required", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Report request for task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Report request for task_id=%s", taskID)
 
 	task, err := h.scanManager.Get(taskID)
 	if err != nil {
-		log.Printf("[SCAN_HANDLER] Task not found: %v", err)
+		logger.Warn("[SCAN_HANDLER] Task not found: %v", err)
 		return response.Error(c, fiber.StatusNotFound, "task not found", nil)
 	}
 
 	// Only allow report access if scan is completed
 	if task.Status != models.StatusCompleted {
-		log.Printf("[SCAN_HANDLER] Report not available: task_id=%s, status=%s", taskID, task.Status)
+		logger.Warn("[SCAN_HANDLER] Report not available: task_id=%s, status=%s", taskID, task.Status)
 		return response.Error(c, fiber.StatusConflict,
 			"report not available: scan is not completed (current status: "+string(task.Status)+")", nil)
 	}
 
-	log.Printf("[SCAN_HANDLER] Report retrieved: task_id=%s", taskID)
+	logger.Info("[SCAN_HANDLER] Report retrieved: task_id=%s", taskID)
 
 	return response.Success(c, "report retrieved successfully", fiber.Map{
 		"task_id": task.TaskID,

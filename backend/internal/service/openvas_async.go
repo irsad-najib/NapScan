@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 	"strings"
 	"time"
 )
@@ -13,14 +13,14 @@ import (
 // This method is added here to avoid modifying openvas_service.go directly,
 // leveraging Go's package-level method definition capabilities.
 func (s *OpenVASService) StopTask(ctx context.Context, taskID string) error {
-	log.Printf("[OPENVAS_ASYNC] Stopping task %s", taskID)
+	logger.Info("[OPENVAS_ASYNC] Stopping task %s", taskID)
 	stopTaskXML := fmt.Sprintf(`<stop_task task_id="%s"/>`, taskID)
 	out, err := s.RunGVMCLI(ctx, stopTaskXML)
 	if err != nil {
-		log.Printf("[OPENVAS_ASYNC] Failed to stop task: %v", err)
+		logger.Error("[OPENVAS_ASYNC] Failed to stop task: %v", err)
 		return fmt.Errorf("failed to stop task: %w, output: %s", err, string(out))
 	}
-	log.Printf("[OPENVAS_ASYNC] Task stop command sent successfully")
+	logger.Info("[OPENVAS_ASYNC] Task stop command sent successfully")
 	return nil
 }
 
@@ -36,13 +36,13 @@ func ResumeOpenVASAsync(ctx context.Context, taskID string, manager *ScanManager
 		return fmt.Errorf("cannot resume: missing OpenVAS Task ID (external_id)")
 	}
 
-	log.Printf("[OPENVAS_ASYNC] Resuming scan for task=%s openvas_id=%s", taskID, openvasTaskID)
+	logger.Info("[OPENVAS_ASYNC] Resuming scan for task=%s openvas_id=%s", taskID, openvasTaskID)
 
 	// Send Resume Command
 	resumeXML := fmt.Sprintf(`<resume_task task_id="%s"/>`, openvasTaskID)
 	out, err := service.RunGVMCLI(ctx, resumeXML)
 	if err != nil {
-		log.Printf("[OPENVAS_ASYNC] Failed to resume task: %v", err)
+		logger.Error("[OPENVAS_ASYNC] Failed to resume task: %v", err)
 		return fmt.Errorf("failed to resume task: %w, output: %s", err, string(out))
 	}
 
@@ -61,14 +61,14 @@ func monitorOpenVASScan(ctx context.Context, taskID string, openvasTaskID string
 		select {
 		case <-ctx.Done():
 			// Context cancelled - Stop the scan
-			log.Printf("[OPENVAS_ASYNC] Context cancelled for task=%s, stopping OpenVAS task %s", taskID, openvasTaskID)
+			logger.Warn("[OPENVAS_ASYNC] Context cancelled for task=%s, stopping OpenVAS task %s", taskID, openvasTaskID)
 
 			// Use a fresh context for the stop command as the parent context is cancelled
 			stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
 			if err := service.StopTask(stopCtx, openvasTaskID); err != nil {
-				log.Printf("[OPENVAS_ASYNC] Error stopping task: %v", err)
+				logger.Error("[OPENVAS_ASYNC] Error stopping task: %v", err)
 			}
 
 			manager.UpdateProgress(taskID, 0, models.StatusStopped)
@@ -78,11 +78,11 @@ func monitorOpenVASScan(ctx context.Context, taskID string, openvasTaskID string
 			// Check status
 			status, err := service.GetTaskStatus(ctx, openvasTaskID)
 			if err != nil {
-				log.Printf("[OPENVAS_ASYNC] Failed to get status: %v", err)
+				logger.Error("[OPENVAS_ASYNC] Failed to get status: %v", err)
 				continue
 			}
 
-			log.Printf("[OPENVAS_ASYNC] Task %s status: %s, progress: %s", openvasTaskID, status.Status, status.Progress)
+			logger.Info("[OPENVAS_ASYNC] Task %s status: %s, progress: %s", openvasTaskID, status.Status, status.Progress)
 
 			// Parse progress
 			progress := 0
@@ -136,7 +136,7 @@ Complete:
 	manager.UpdateProgress(taskID, 95, models.StatusRunning)
 
 	manager.Complete(taskID, report)
-	log.Printf("[OPENVAS_ASYNC] Scan completed successfully for task=%s", taskID)
+	logger.Info("[OPENVAS_ASYNC] Scan completed successfully for task=%s", taskID)
 
 	return nil
 }
@@ -152,7 +152,7 @@ func RunOpenVASAsync(ctx context.Context, taskID string, manager *ScanManager, s
 
 	target := task.Target
 	batchID := task.BatchID
-	log.Printf("[OPENVAS_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+	logger.Info("[OPENVAS_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
 
 	// Update to running
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
@@ -170,7 +170,7 @@ func RunOpenVASAsync(ctx context.Context, taskID string, manager *ScanManager, s
 
 	startResult, err := service.StartScan(ctx, target, batchID)
 	if err != nil {
-		log.Printf("[OPENVAS_ASYNC] Failed to start scan: %v", err)
+		logger.Error("[OPENVAS_ASYNC] Failed to start scan: %v", err)
 		manager.Fail(taskID, err)
 		return err
 	}
@@ -186,7 +186,7 @@ func RunOpenVASAsync(ctx context.Context, taskID string, manager *ScanManager, s
 	// Save External ID
 	manager.UpdateExternalID(taskID, openvasTaskID)
 
-	log.Printf("[OPENVAS_ASYNC] OpenVAS scan started with ID: %s", openvasTaskID)
+	logger.Info("[OPENVAS_ASYNC] OpenVAS scan started with ID: %s", openvasTaskID)
 	manager.UpdateProgress(taskID, 10, models.StatusRunning)
 
 	return monitorOpenVASScan(ctx, taskID, openvasTaskID, manager, service)

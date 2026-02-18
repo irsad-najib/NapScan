@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"napscan-be/pkg/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +30,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	}
 
 	target := task.Target
-	log.Printf("[FFUF_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+	logger.Info("[FFUF_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
 
 	// Update to running
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
@@ -38,7 +38,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// Ensure URL has protocol
 	if !strings.HasPrefix(target, "http") {
 		target = "https://" + target
-		log.Printf("[FFUF_ASYNC] Added https:// prefix, new target=%s", target)
+		logger.Info("[FFUF_ASYNC] Added https:// prefix, new target=%s", target)
 	}
 
 	// Phase 1: Init (0-5%)
@@ -47,7 +47,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// Initialize stealth configuration
 	stealthConfig := NewStealthConfig()
 	randomUA := stealthConfig.GetRandomUserAgent()
-	log.Printf("[FFUF_ASYNC] Using stealth User-Agent: %s", randomUA)
+	logger.Info("[FFUF_ASYNC] Using stealth User-Agent: %s", randomUA)
 
 	// Create temporary file for JSON output
 	tmpFile := filepath.Join(os.TempDir(), "ffuf_"+time.Now().Format("20060102150405")+".json")
@@ -58,7 +58,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	if _, err := os.Stat(wordlistPath); os.IsNotExist(err) {
 		wordlistPath = "../internal/models/wordlist.txt"
 	}
-	log.Printf("[FFUF_ASYNC] Using wordlist: %s", wordlistPath)
+	logger.Info("[FFUF_ASYNC] Using wordlist: %s", wordlistPath)
 
 	// Count lines for progress estimation
 	var wordlistLines int
@@ -72,7 +72,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// Estimate duration: lines / rate (100 req/s)
 	// Add 30s buffer for initialization and timeouts
 	estimatedSeconds := float64(wordlistLines)/100.0 + 30
-	log.Printf("[FFUF_ASYNC] Estimated duration: %.0fs (lines: %d)", estimatedSeconds, wordlistLines)
+	logger.Info("[FFUF_ASYNC] Estimated duration: %.0fs (lines: %d)", estimatedSeconds, wordlistLines)
 	startTime := time.Now()
 
 	// Build ffuf command with stealth parameters
@@ -83,10 +83,10 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-fc", "404,307,301,302,308",
 		"-of", "json",
 		"-o", tmpFile,
-		"-rate", "100",             // Rate limit: 100 requests per second
-		"-p", "0.05-0.1",           // Random delay: 50-100ms between requests
-		"-t", "25",                 // Max 25 concurrent threads
-		"-timeout", "10",           // Connection timeout: 10 seconds
+		"-rate", "100", // Rate limit: 100 requests per second
+		"-p", "0.05-0.1", // Random delay: 50-100ms between requests
+		"-t", "25", // Max 25 concurrent threads
+		"-timeout", "10", // Connection timeout: 10 seconds
 		"-H", "User-Agent: "+randomUA,
 		"-H", "X-Scanner-Origin: ffuf",
 		"-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -95,8 +95,8 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		"-H", "DNT: 1",
 		"-H", "Connection: keep-alive",
 	)
-	
-	log.Printf("[FFUF_ASYNC] Stealth mode enabled: rate=100req/s, delay=50-100ms, threads=25")
+
+	logger.Info("[FFUF_ASYNC] Stealth mode enabled: rate=100req/s, delay=50-100ms, threads=25")
 
 	// Capture stdout/stderr for progress tracking
 	stdout, err := cmd.StdoutPipe()
@@ -104,7 +104,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		manager.Fail(taskID, fmt.Errorf("failed to create stdout pipe: %w", err))
 		return err
 	}
-	
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		manager.Fail(taskID, fmt.Errorf("failed to create stderr pipe: %w", err))
@@ -116,7 +116,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	// Start command
 	if err := cmd.Start(); err != nil {
-		log.Printf("[FFUF_ASYNC] Failed to start ffuf: %v", err)
+		logger.Error("[FFUF_ASYNC] Failed to start ffuf: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to start ffuf: %w", err))
 		return err
 	}
@@ -125,7 +125,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 	// FFUF outputs progress info to stderr, we'll parse it
 	currentProgress := 10
 	stderrLines := make(chan string, 100)
-	
+
 	// Read stderr in goroutine
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -160,7 +160,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 		select {
 		case <-ctx.Done():
 			// Context cancelled - kill the process
-			log.Printf("[FFUF_ASYNC] Context cancelled for task=%s, killing process", taskID)
+			logger.Warn("[FFUF_ASYNC] Context cancelled for task=%s, killing process", taskID)
 			if cmd.Process != nil {
 				cmd.Process.Kill()
 			}
@@ -177,7 +177,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 				continue
 			}
 			lineCount++
-			log.Printf("[FFUF] %s", line)
+			logger.Info("[FFUF] %s", line)
 
 		case <-progressTicker.C:
 			// Smart progress updates based on estimated duration
@@ -186,12 +186,12 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 				// Calculate percentage of estimated time elapsed
 				// We map 0-100% of time to 10-90% of progress
 				timeProgress := (elapsed / estimatedSeconds) * 80.0
-				
+
 				targetProgress := 10 + int(timeProgress)
 				if targetProgress > 90 {
 					targetProgress = 90
 				}
-				
+
 				// Only update if we are moving forward
 				if targetProgress > currentProgress {
 					currentProgress = targetProgress
@@ -203,7 +203,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	// Check if scan failed
 	if scanErr != nil {
-		log.Printf("[FFUF_ASYNC] Scan failed: %v", scanErr)
+		logger.Error("[FFUF_ASYNC] Scan failed: %v", scanErr)
 		manager.Fail(taskID, fmt.Errorf("ffuf execution failed: %w", scanErr))
 		return scanErr
 	}
@@ -213,13 +213,13 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
-		log.Printf("[FFUF_ASYNC] Failed to read output file: %v", err)
+		logger.Error("[FFUF_ASYNC] Failed to read output file: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to read ffuf output: %w", err))
 		return err
 	}
 
 	if len(jsonData) < 10 {
-		log.Printf("[FFUF_ASYNC] Output file too small or empty")
+		logger.Warn("[FFUF_ASYNC] Output file too small or empty")
 		err := fmt.Errorf("ffuf returned empty/invalid output")
 		manager.Fail(taskID, err)
 		return err
@@ -227,7 +227,7 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	// Verify it is valid JSON but don't unmarshal into interface{}
 	if !json.Valid(jsonData) {
-		log.Printf("[FFUF_ASYNC] Invalid JSON output")
+		logger.Error("[FFUF_ASYNC] Invalid JSON output")
 		err := fmt.Errorf("ffuf returned invalid json")
 		manager.Fail(taskID, err)
 		return err
@@ -238,18 +238,18 @@ func RunFfufAsync(ctx context.Context, taskID string, manager *ScanManager) erro
 
 	// Complete the task with RawMessage
 	manager.Complete(taskID, json.RawMessage(jsonData))
-	log.Printf("[FFUF_ASYNC] Scan completed successfully for task=%s", taskID)
+	logger.Info("[FFUF_ASYNC] Scan completed successfully for task=%s", taskID)
 
 	return nil
 }
 
 // Legacy ExecuteScan for backward compatibility
 func (s *FfufService) ExecuteScan(ctx context.Context, target string) (interface{}, error) {
-	log.Printf("[FFUF_SERVICE] Starting scan on target=%s", target)
-	
+	logger.Info("[FFUF_SERVICE] Starting scan on target=%s", target)
+
 	if !strings.HasPrefix(target, "http") {
 		target = "https://" + target
-		log.Printf("[FFUF_SERVICE] Added https:// prefix, new target=%s", target)
+		logger.Info("[FFUF_SERVICE] Added https:// prefix, new target=%s", target)
 	}
 
 	tmpFile := filepath.Join(os.TempDir(), "ffuf_"+time.Now().Format("20060102150405")+".json")
@@ -259,7 +259,7 @@ func (s *FfufService) ExecuteScan(ctx context.Context, target string) (interface
 	if _, err := os.Stat(wordlistPath); os.IsNotExist(err) {
 		wordlistPath = "../internal/models/wordlist.txt"
 	}
-	log.Printf("[FFUF_SERVICE] Using wordlist: %s", wordlistPath)
+	logger.Info("[FFUF_SERVICE] Using wordlist: %s", wordlistPath)
 
 	cmd := exec.CommandContext(ctx,
 		"ffuf",
@@ -271,31 +271,31 @@ func (s *FfufService) ExecuteScan(ctx context.Context, target string) (interface
 		"-s",
 	)
 
-	log.Printf("[FFUF_SERVICE] Executing ffuf command")
+	logger.Info("[FFUF_SERVICE] Executing ffuf command")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[FFUF_SERVICE] FFUF execution failed: %v, output: %s", err, string(output))
+		logger.Error("[FFUF_SERVICE] FFUF execution failed: %v, output: %s", err, string(output))
 		return nil, fmt.Errorf("ffuf execution failed: %v, output: %s", err, string(output))
 	}
-	log.Printf("[FFUF_SERVICE] FFUF execution completed")
+	logger.Info("[FFUF_SERVICE] FFUF execution completed")
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
-		log.Printf("[FFUF_SERVICE] Failed to read output file: %v", err)
+		logger.Error("[FFUF_SERVICE] Failed to read output file: %v", err)
 		return nil, fmt.Errorf("failed to read ffuf output: %w", err)
 	}
 
 	if len(jsonData) < 10 {
-		log.Printf("[FFUF_SERVICE] Output file too small or empty")
+		logger.Warn("[FFUF_SERVICE] Output file too small or empty")
 		return nil, fmt.Errorf("ffuf returned empty/invalid output")
 	}
 
 	var result interface{}
 	if err := json.Unmarshal(jsonData, &result); err != nil {
-		log.Printf("[FFUF_SERVICE] Failed to parse JSON output: %v", err)
+		logger.Error("[FFUF_SERVICE] Failed to parse JSON output: %v", err)
 		return nil, fmt.Errorf("failed to parse ffuf json: %w", err)
 	}
 
-	log.Printf("[FFUF_SERVICE] Scan completed successfully")
+	logger.Info("[FFUF_SERVICE] Scan completed successfully")
 	return result, nil
 }

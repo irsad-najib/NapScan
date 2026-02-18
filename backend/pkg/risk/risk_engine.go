@@ -1,9 +1,9 @@
 package risk
 
 import (
-	"log"
 	"math"
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/parser"
 	"sort"
 	"strings"
@@ -88,7 +88,7 @@ func CalculateBatchRisk(batchID string, scannerDetails []models.ScannerRiskDetai
 	// Classify risk level
 	riskLevel := models.ClassifyRiskLevel(totalScore)
 
-	log.Printf("[RISK_ENGINE] scanners=%d rawTotal=%.2f", len(scannerDetails), totalScore)
+	logger.Debug("[RISK_ENGINE] scanners=%d rawTotal=%.2f", len(scannerDetails), totalScore)
 	return &models.BatchRiskResponse{
 		BatchID:    batchID,
 		RiskScore:  totalScore,

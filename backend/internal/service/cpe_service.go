@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"napscan-be/internal/models"
+	"napscan-be/pkg/logger"
 
 	"gorm.io/gorm"
 )
@@ -113,7 +113,7 @@ func (s *CPEService) ResolveCVEs(ctx context.Context, cpeURI string) ([]models.C
 
 		// Cache it
 		if err := s.db.Save(&cve).Error; err != nil {
-			log.Printf("[CPEService] Failed to cache CVE %s: %v", cve.CVEID, err)
+			logger.Warn("[CPEService] Failed to cache CVE %s: %v", cve.CVEID, err)
 		}
 
 		foundCVEs = append(foundCVEs, cve)

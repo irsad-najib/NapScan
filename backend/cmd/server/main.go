@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,11 +14,12 @@ import (
 	"napscan-be/internal/routes"
 	"napscan-be/internal/service"
 	"napscan-be/pkg/database"
+	"napscan-be/pkg/logger"
 
 	_ "napscan-be/docs" // Uncomment after running swag init
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
+	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	fiberSwagger "github.com/gofiber/swagger"
 	"github.com/joho/godotenv"
@@ -53,19 +53,19 @@ import (
 func main() {
 	// load .env if present
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+		logger.Info("No .env file found")
 	}
 
 	// Initialize MySQL
 	db, err := database.NewMySQL()
 	if err != nil {
-		log.Fatalf("Failed to connect to MySQL: %v", err)
+		logger.Fatal("Failed to connect to MySQL: %v", err)
 	}
-	log.Println("✅ Connected to MySQL successfully")
+	logger.Info("✅ Connected to MySQL successfully")
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Fatalf("Failed to get sql.DB from GORM: %v", err)
+		logger.Fatal("Failed to get sql.DB from GORM: %v", err)
 	}
 
 	// Auto-migrate models
@@ -82,7 +82,7 @@ func main() {
 		&models.DetectedFinding{},
 	)
 	if err != nil {
-		log.Fatalf("Failed to auto-migrate models: %v", err)
+		logger.Fatal("Failed to auto-migrate models: %v", err)
 	}
 
 	// Initialize repositories
@@ -118,12 +118,23 @@ func main() {
 	})
 
 	// Middleware
-	app.Use(logger.New())
+	// app.Use(logger.New())
+
+	// Use custom logger configuration for cleaner output
+	app.Use(fiberLogger.New(fiberLogger.Config{
+		Format:     "[HTTP] ${time} ${status} - ${method} ${path} (${latency})\n",
+		TimeFormat: "15:04:05",
+		TimeZone:   "Local",
+		Output:     os.Stdout,
+	}))
 	app.Use(recover.New())
 	app.Use(middleware.CORSMiddleware())
 
 	// Swagger
-	app.Get("/api/swagger/*", fiberSwagger.New())
+	// Swagger (Enabled only in non-production environments)
+	if os.Getenv("APP_ENV") != "production" {
+		app.Get("/api/swagger/*", fiberSwagger.New())
+	}
 
 	// Auth routes are public and should NOT be under the protected /api group
 	authService := service.NewAuthService(userRepo)
@@ -150,7 +161,7 @@ func main() {
 	// Seed CWEs (async)
 	go func() {
 		if err := cweService.SeedCommonCWEs(); err != nil {
-			log.Printf("Failed to seed CWEs: %v", err)
+			logger.Error("Failed to seed CWEs: %v", err)
 		}
 	}()
 
@@ -229,16 +240,16 @@ func main() {
 
 	go func() {
 		<-quit
-		log.Println("Shutting down server...")
+		logger.Info("Shutting down server...")
 		_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		if err := sqlDB.Close(); err != nil {
-			log.Printf("Error closing MySQL connection: %v", err)
+			logger.Error("Error closing MySQL connection: %v", err)
 		}
 
 		if err := app.Shutdown(); err != nil {
-			log.Printf("Error shutting down server: %v", err)
+			logger.Error("Error shutting down server: %v", err)
 		}
 	}()
 
@@ -247,6 +258,6 @@ func main() {
 		port = "5000"
 	}
 
-	log.Printf("🚀 Server starting on port %s", port)
-	log.Fatal(app.Listen(":" + port))
+	logger.Info("🚀 Server starting on port %s", port)
+	logger.Fatal("%v", app.Listen(":"+port))
 }

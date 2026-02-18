@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"napscan-be/pkg/logger"
 	"strings"
 	"time"
 
@@ -48,7 +48,7 @@ func (s *IntelligenceService) ProcessScanResult(ctx context.Context, scanID, ten
 	for _, finding := range parsed.Findings {
 		_, err := s.ProcessFinding(ctx, scanID, tenantID, finding)
 		if err != nil {
-			log.Printf("[Intelligence] Failed to process finding: %v", err)
+			logger.Error("[Intelligence] Failed to process finding: %v", err)
 			// Continue processing others
 		}
 	}
@@ -88,7 +88,7 @@ func (s *IntelligenceService) ProcessFinding(ctx context.Context, scanID, tenant
 			detected.Title = cveData.CVEID // Use CVE ID as title
 		} else {
 			// Fallback if NVD fetch fails
-			log.Printf("[Intelligence] Failed to fetch CVE %s: %v", refID, err)
+			logger.Warn("[Intelligence] Failed to fetch CVE %s: %v", refID, err)
 			normalized := models.NormalizeSeverity(severityStr)
 			detected.Severity = string(normalized)
 			detected.Title = finding.Title

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"napscan-be/pkg/logger"
 	"net/http"
 	"os"
 	"sync"
@@ -79,7 +79,9 @@ func (s *CVEService) GetCVE(ctx context.Context, cveID string) (*models.CVECache
 	// 3. fetch from API
 	<-s.rateLimit // Respect rate limit
 
-	log.Printf("[CVEService] Fetching %s from NVD", cveID)
+	<-s.rateLimit // Respect rate limit
+
+	logger.Info("[CVEService] Fetching %s from NVD", cveID)
 	cveData, err := s.fetchFromNVD(ctx, cveID)
 	if err != nil {
 		return nil, err
@@ -87,7 +89,7 @@ func (s *CVEService) GetCVE(ctx context.Context, cveID string) (*models.CVECache
 
 	// 4. Save to cache
 	if err := s.db.Create(cveData).Error; err != nil {
-		log.Printf("[CVEService] Failed to cache %s: %v", cveID, err)
+		logger.Warn("[CVEService] Failed to cache %s: %v", cveID, err)
 	}
 
 	return cveData, nil

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
 	"napscan-be/internal/service"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
@@ -45,52 +45,52 @@ func NewZapHandler(s *service.ZapService, scanRepo repository.ScanResultReposito
 // @Failure 500 {object} response.Response
 // @Router /zap/scan [post]
 func (h *ZapHandler) StartScan(c *fiber.Ctx) error {
-	log.Printf("[ZAP] Received scan request")
+	logger.Debug("[ZAP] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[ZAP] Failed to parse request body: %v", err)
+		logger.Error("[ZAP] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[ZAP] Missing batch_id")
+		logger.Warn("[ZAP] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[ZAP] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Debug("[ZAP] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[ZAP] Batch ownership validation failed: %v", err)
+		logger.Warn("[ZAP] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		log.Printf("[ZAP] Missing target")
+		logger.Warn("[ZAP] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 	if !strings.HasPrefix(strings.ToLower(target), "http://") && !strings.HasPrefix(strings.ToLower(target), "https://") {
 		target = "https://" + target
 	}
 	if _, err := url.ParseRequestURI(target); err != nil {
-		log.Printf("[ZAP] Invalid URL: %v", err)
+		logger.Warn("[ZAP] Invalid URL: %v", err)
 		return response.BadRequest(c, "Invalid request URL", err)
 	}
 
-	log.Printf("[ZAP] Starting scan on target=%s", target)
+	logger.Info("[ZAP] Starting scan on target=%s", target)
 	ctx, cancel := context.WithTimeout(c.Context(), 300*time.Second)
 	defer cancel()
 
 	result, err := h.service.ExecuteFullScan(ctx, target)
 	if err != nil {
-		log.Printf("[ZAP] Scan execution failed: %v", err)
+		logger.Error("[ZAP] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "ZAP scan failed", err)
 	}
-	log.Printf("[ZAP] Scan completed successfully")
+	logger.Info("[ZAP] Scan completed successfully")
 
 	result["batch_id"] = req.BatchID
 
@@ -105,13 +105,13 @@ func (h *ZapHandler) StartScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[ZAP] Failed to save to database: %v", dbErr)
+			logger.Error("[ZAP] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[ZAP] Database insert success")
+		logger.Debug("[ZAP] Database insert success")
 	}
 
-	log.Printf("[ZAP] Request completed successfully")
+	logger.Debug("[ZAP] Request completed successfully")
 	return response.Success(c, "ZAP scan completed", result)
 }
 
@@ -128,7 +128,7 @@ func (h *ZapHandler) StartScan(c *fiber.Ctx) error {
 // @Failure 500 {object} response.Response
 // @Router /zap/scan/async [post]
 func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
-	log.Printf("[ZAP_ASYNC] Received async scan request")
+	logger.Debug("[ZAP_ASYNC] Received async scan request")
 
 	var req struct {
 		Target  string `json:"target"`
@@ -136,7 +136,7 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[ZAP_ASYNC] Failed to parse request body: %v", err)
+		logger.Error("[ZAP_ASYNC] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
@@ -156,13 +156,13 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 
 	// Validate URL
 	if _, err := url.ParseRequestURI(target); err != nil {
-		log.Printf("[ZAP_ASYNC] Invalid URL: %v", err)
+		logger.Warn("[ZAP_ASYNC] Invalid URL: %v", err)
 		return response.BadRequest(c, "Invalid request URL", err)
 	}
 
 	// Validate batch ownership
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[ZAP_ASYNC] Batch ownership validation failed: %v", err)
+		logger.Warn("[ZAP_ASYNC] Batch ownership validation failed: %v", err)
 		return err
 	}
 
@@ -198,7 +198,7 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 	go func() {
 		err := service.RunZapAsync(ctx, taskID, h.scanManager)
 		if err != nil {
-			log.Printf("[ZAP_ASYNC] Scan goroutine error: %v", err)
+			logger.Error("[ZAP_ASYNC] Scan goroutine error: %v", err)
 		}
 
 		// Save to database if completed successfully
@@ -214,15 +214,15 @@ func (h *ZapHandler) StartScanAsync(c *fiber.Ctx) error {
 					CreatedAt: time.Now().UTC(),
 				})
 				if dbErr != nil {
-					log.Printf("[ZAP_ASYNC] Failed to save to database: %v", dbErr)
+					logger.Error("[ZAP_ASYNC] Failed to save to database: %v", dbErr)
 				} else {
-					log.Printf("[ZAP_ASYNC] Database insert success for task=%s", taskID)
+					logger.Debug("[ZAP_ASYNC] Database insert success for task=%s", taskID)
 				}
 			}
 		}
 	}()
 
-	log.Printf("[ZAP_ASYNC] Task created: task_id=%s, target=%s", taskID, target)
+	logger.Info("[ZAP_ASYNC] Task created: task_id=%s, target=%s", taskID, target)
 
 	return response.Success(c, "scan started", fiber.Map{
 		"task_id":  taskID,

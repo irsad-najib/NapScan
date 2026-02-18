@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"napscan-be/pkg/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,7 +140,7 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 
 		file, err := s.GetFile(fileID)
 		if err != nil {
-			log.Printf("[LIFECYCLE] Failed to get file %d: %v", fileID, err)
+			logger.Error("[LIFECYCLE] Failed to get file %d: %v", fileID, err)
 			return
 		}
 
@@ -153,7 +153,7 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 		defer f.Close()
 
 		// 1. Upload to MobSF
-		log.Printf("[LIFECYCLE] Uploading file %s to MobSF", file.FileName)
+		logger.Info("[LIFECYCLE] Uploading file %s to MobSF", file.FileName)
 		info, _, err := s.mobsf.Upload(ctx, file.FileName, f)
 		if err != nil {
 			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("MobSF upload failed: %v", err))
@@ -161,7 +161,7 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 		}
 
 		// 2. Scan
-		log.Printf("[LIFECYCLE] Starting MobSF scan for hash %s", info.Hash)
+		logger.Info("[LIFECYCLE] Starting MobSF scan for hash %s", info.Hash)
 		_, err = s.mobsf.Scan(ctx, info)
 		if err != nil {
 			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("MobSF scan failed: %v", err))
@@ -173,7 +173,7 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 		// Use Analyze helper? Actually `Analyze` in mobsf_service.go does upload+scan+report.
 		// But we already did upload+scan step by step?
 		// Let's use ReportJSON directly.
-		log.Printf("[LIFECYCLE] Fetching MobSF report for hash %s", info.Hash)
+		logger.Info("[LIFECYCLE] Fetching MobSF report for hash %s", info.Hash)
 
 		// Simple retry wrapper for report
 		var reportRaw map[string]interface{}
@@ -222,7 +222,7 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 		}
 
 		if err := s.db.Model(&models.UploadedFile{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
-			log.Printf("[LIFECYCLE] Failed to save findings: %v", err)
+			logger.Warn("[LIFECYCLE] Failed to save findings: %v", err)
 		}
 
 		// Save full scan result to scan_results table for consistency with other tools
@@ -236,23 +236,23 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 			}
 
 			if _, err := s.scanRepo.Insert(context.Background(), scanResult); err != nil {
-				log.Printf("[LIFECYCLE] Failed to save MobSF scan result: %v", err)
+				logger.Error("[LIFECYCLE] Failed to save MobSF scan result: %v", err)
 			} else {
-				log.Printf("[LIFECYCLE] MobSF scan result persisted to DB for file %d", fileID)
+				logger.Info("[LIFECYCLE] MobSF scan result persisted to DB for file %d", fileID)
 			}
 		}
 
-		log.Printf("[LIFECYCLE] File %d MobSF scan completed. AutoFrida: %v", fileID, autoFrida)
+		logger.Info("[LIFECYCLE] File %d MobSF scan completed. AutoFrida: %v", fileID, autoFrida)
 
 		// Auto-trigger Frida if requested
 		if autoFrida {
-			log.Printf("[LIFECYCLE] Auto-triggering Frida scan for file %d", fileID)
+			logger.Info("[LIFECYCLE] Auto-triggering Frida scan for file %d", fileID)
 			// Small delay to ensure DB commit visible? Not needed if same connection usually.
 			// But StartFrida reads from DB. Update above happened.
 			// StartFrida requires STATUS to be something?
 			// StartFrida transitions to FridaRunning. It only checks existence.
 			if err := s.StartFrida(fileID); err != nil {
-				log.Printf("[LIFECYCLE] Failed to auto-trigger Frida: %v", err)
+				logger.Error("[LIFECYCLE] Failed to auto-trigger Frida: %v", err)
 				// We should probably mark as Failed, but StartFrida likely did that if it failed early.
 			}
 		}
@@ -263,92 +263,92 @@ func (s *LifecycleService) StartMobSF(fileID uint, autoFrida bool) error {
 
 // StartFrida initiates the Frida dynamic scan
 func (s *LifecycleService) StartFrida(fileID uint) error {
-	log.Printf("[LIFECYCLE] StartFrida called for file %d", fileID)
+	logger.Info("[LIFECYCLE] StartFrida called for file %d", fileID)
 	// Validate before async
 	file, err := s.GetFile(fileID)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("[LIFECYCLE] Starting Frida scan for file %s", file.FileName)
+	logger.Info("[LIFECYCLE] Starting Frida scan for file %s", file.FileName)
 
 	// Sync state update first
 	if err := s.UpdateStatus(fileID, models.FileStatusFridaRunning, ""); err != nil {
 		return err
 	}
 
-	log.Printf("[LIFECYCLE] Frida: Starting scan--2 for file %d", fileID)
+	logger.Info("[LIFECYCLE] Frida: Starting scan--2 for file %d", fileID)
 	go func() {
-		log.Printf("[LIFECYCLE] Frida: Inside goroutine for file %d", fileID)
+		logger.Info("[LIFECYCLE] Frida: Inside goroutine for file %d", fileID)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
 		// Re-fetch file inside goroutine to be safe? or use `file` captured?
 		// `file` is captured by value (copy of struct). Safe.
 
-		log.Printf("[LIFECYCLE] Frida: Parsing findings, Findings length: %d", len(file.Findings))
+		logger.Info("[LIFECYCLE] Frida: Parsing findings, Findings length: %d", len(file.Findings))
 		// Parse findings to get package_name
 		var findings map[string]interface{}
 		if err := json.Unmarshal([]byte(file.Findings), &findings); err != nil {
-			log.Printf("[LIFECYCLE] Frida: Failed to parse findings for file %d: %v", fileID, err)
+			logger.Error("[LIFECYCLE] Frida: Failed to parse findings for file %d: %v", fileID, err)
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing previous scan data")
 			return
 		}
-		log.Printf("[LIFECYCLE] Frida: Successfully parsed findings")
+		logger.Info("[LIFECYCLE] Frida: Successfully parsed findings")
 
 		mobsf, ok := findings["mobsf"].(map[string]interface{})
 		if !ok {
-			log.Printf("[LIFECYCLE] Frida: Missing MobSF data in findings")
+			logger.Warn("[LIFECYCLE] Frida: Missing MobSF data in findings")
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing MobSF data")
 			return
 		}
-		log.Printf("[LIFECYCLE] Frida: Successfully extracted MobSF data")
+		logger.Info("[LIFECYCLE] Frida: Successfully extracted MobSF data")
 
 		// Extract package_name from identity object
 		identity, ok := mobsf["identity"].(map[string]interface{})
 		if !ok {
-			log.Printf("[LIFECYCLE] Frida: Missing identity data in MobSF findings")
+			logger.Warn("[LIFECYCLE] Frida: Missing identity data in MobSF findings")
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Missing identity data")
 			return
 		}
 
 		pkgName := fmt.Sprint(identity["package_name"])
-		log.Printf("[LIFECYCLE] Frida: Extracted package name: %s", pkgName)
+		logger.Info("[LIFECYCLE] Frida: Extracted package name: %s", pkgName)
 		if pkgName == "" || pkgName == "<nil>" {
-			log.Printf("[LIFECYCLE] Frida: Package name is empty or nil")
+			logger.Warn("[LIFECYCLE] Frida: Package name is empty or nil")
 			s.UpdateStatus(fileID, models.FileStatusFailed, "Package name not found")
 			return
 		}
 
 		// Setup deferred uninstall to ensure cleanup happens
 		defer func() {
-			log.Printf("[LIFECYCLE] Uninstalling APK from emulator: %s", pkgName)
+			logger.Info("[LIFECYCLE] Uninstalling APK from emulator: %s", pkgName)
 			uninstallCtx, uninstallCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer uninstallCancel()
 
 			uninstallCmd := exec.CommandContext(uninstallCtx, "adb", "uninstall", pkgName)
 			if output, err := uninstallCmd.CombinedOutput(); err != nil {
-				log.Printf("[LIFECYCLE] Failed to uninstall APK (non-fatal): %v, output: %s", err, string(output))
+				logger.Warn("[LIFECYCLE] Failed to uninstall APK (non-fatal): %v, output: %s", err, string(output))
 			} else {
-				log.Printf("[LIFECYCLE] APK uninstalled successfully")
+				logger.Info("[LIFECYCLE] APK uninstalled successfully")
 			}
 		}()
 
 		// Install APK to emulator before scanning
-		log.Printf("[LIFECYCLE] Installing APK to emulator: %s", file.FilePath)
+		logger.Info("[LIFECYCLE] Installing APK to emulator: %s", file.FilePath)
 		installCtx, installCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer installCancel()
 
 		installCmd := exec.CommandContext(installCtx, "adb", "install", "-r", file.FilePath)
 		installOutput, err := installCmd.CombinedOutput()
 		if err != nil {
-			log.Printf("[LIFECYCLE] Failed to install APK: %v, output: %s", err, string(installOutput))
+			logger.Error("[LIFECYCLE] Failed to install APK: %v, output: %s", err, string(installOutput))
 			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("APK installation failed: %v", err))
 			return
 		}
-		log.Printf("[LIFECYCLE] APK installed successfully")
+		logger.Info("[LIFECYCLE] APK installed successfully")
 
-		log.Printf("[LIFECYCLE] Starting Frida scan for %s (%s)", file.FileName, pkgName)
+		logger.Info("[LIFECYCLE] Starting Frida scan for %s (%s)", file.FileName, pkgName)
 		results, err := s.frida.RunScan(ctx, pkgName)
 		if err != nil {
 			s.UpdateStatus(fileID, models.FileStatusFailed, fmt.Sprintf("Frida scan failed: %v", err))
@@ -366,7 +366,7 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 		}
 
 		if err := s.db.Model(&models.UploadedFile{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
-			log.Printf("[LIFECYCLE] Failed to save Frida findings: %v", err)
+			logger.Warn("[LIFECYCLE] Failed to save Frida findings: %v", err)
 		}
 
 		// Save Frida scan result to scan_results table
@@ -380,13 +380,13 @@ func (s *LifecycleService) StartFrida(fileID uint) error {
 			}
 
 			if _, err := s.scanRepo.Insert(context.Background(), scanResult); err != nil {
-				log.Printf("[LIFECYCLE] Failed to save Frida scan result: %v", err)
+				logger.Error("[LIFECYCLE] Failed to save Frida scan result: %v", err)
 			} else {
-				log.Printf("[LIFECYCLE] Frida scan result persisted to DB for file %d", fileID)
+				logger.Info("[LIFECYCLE] Frida scan result persisted to DB for file %d", fileID)
 			}
 		}
 
-		log.Printf("[LIFECYCLE] Frida scan completed for file %d", fileID)
+		logger.Info("[LIFECYCLE] Frida scan completed for file %d", fileID)
 	}()
 
 	return nil
@@ -413,7 +413,7 @@ func (s *LifecycleService) Cleanup(fileID uint) error {
 	// Remove from disk
 	if file.FilePath != "" {
 		if err := os.Remove(file.FilePath); err != nil && !os.IsNotExist(err) {
-			log.Printf("[LIFECYCLE] Failed to remove file %s: %v", file.FilePath, err)
+			logger.Warn("[LIFECYCLE] Failed to remove file %s: %v", file.FilePath, err)
 			// Continue to update state even if file missing
 		}
 	}
@@ -452,14 +452,14 @@ func (s *LifecycleService) cleanupOldFiles(ttl time.Duration) {
 		threshold).Find(&files).Error
 
 	if err != nil {
-		log.Printf("[LIFECYCLE] Cleanup worker failed to query: %v", err)
+		logger.Error("[LIFECYCLE] Cleanup worker failed to query: %v", err)
 		return
 	}
 
 	for _, f := range files {
-		log.Printf("[LIFECYCLE] Cleaning up expired file %d (%s)", f.ID, f.FileName)
+		logger.Info("[LIFECYCLE] Cleaning up expired file %d (%s)", f.ID, f.FileName)
 		if err := s.Cleanup(f.ID); err != nil {
-			log.Printf("[LIFECYCLE] Failed to cleanup file %d: %v", f.ID, err)
+			logger.Error("[LIFECYCLE] Failed to cleanup file %d: %v", f.ID, err)
 		}
 	}
 }

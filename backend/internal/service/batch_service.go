@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
 	"strconv"
 	"strings"
 
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/risk"
 
 	"github.com/gofiber/fiber/v2"
@@ -35,7 +35,7 @@ func NewBatchService(repo repository.BatchRepository, scanRepo repository.ScanRe
 }
 
 func (s *BatchService) CreateBatch(ctx context.Context, userID string) (string, error) {
-	log.Printf("[BATCH_SERVICE] Creating batch for user_id=%s", userID)
+	logger.Info("[BATCH_SERVICE] Creating batch for user_id=%s", userID)
 	batchID := uuid.New().String()
 	batch := &models.Batch{
 		UserID:  userID,
@@ -44,10 +44,10 @@ func (s *BatchService) CreateBatch(ctx context.Context, userID string) (string, 
 	}
 	err := s.repo.Create(ctx, batch)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to create batch: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to create batch: %v", err)
 		return "", err
 	}
-	log.Printf("[BATCH_SERVICE] Database insert success for batch_id=%s", batchID)
+	logger.Info("[BATCH_SERVICE] Database insert success for batch_id=%s", batchID)
 	return batchID, nil
 }
 
@@ -55,33 +55,33 @@ func (s *BatchService) CreateBatch(ctx context.Context, userID string) (string, 
 func (s *BatchService) ValidateBatchOwnership(c *fiber.Ctx, batchID string) error {
 	userID, ok := c.Locals("user_id").(string)
 	if !ok || userID == "" {
-		log.Printf("[BATCH_SERVICE] Ownership check failed: user_id not found")
+		logger.Warn("[BATCH_SERVICE] Ownership check failed: user_id not found")
 		return fiber.NewError(fiber.StatusUnauthorized, "User not authenticated")
 	}
 
 	batch, err := s.repo.FindByID(c.Context(), batchID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Ownership check failed for batch_id=%s: %v", batchID, err)
+		logger.Error("[BATCH_SERVICE] Ownership check failed for batch_id=%s: %v", batchID, err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Could not verify batch ownership")
 	}
 
 	if batch == nil {
-		log.Printf("[BATCH_SERVICE] Batch not found: batch_id=%s", batchID)
+		logger.Warn("[BATCH_SERVICE] Batch not found: batch_id=%s", batchID)
 		return fiber.NewError(fiber.StatusNotFound, "Batch not found")
 	}
 
 	if batch.UserID != userID {
-		log.Printf("[BATCH_SERVICE] Access denied: user=%s tried to access batch=%s owned by %s", userID, batchID, batch.UserID)
+		logger.Warn("[BATCH_SERVICE] Access denied: user=%s tried to access batch=%s owned by %s", userID, batchID, batch.UserID)
 		return fiber.NewError(fiber.StatusForbidden, "You do not have permission to access this batch")
 	}
 
-	log.Printf("[BATCH_SERVICE] Ownership validated: user=%s batch=%s", userID, batchID)
+	logger.Info("[BATCH_SERVICE] Ownership validated: user=%s batch=%s", userID, batchID)
 	return nil
 }
 
 // DeleteBatch deletes a batch if owned by the user
 func (s *BatchService) DeleteBatch(ctx context.Context, batchID, userID string) error {
-	log.Printf("[BATCH_SERVICE] Deleting batch_id=%s for user_id=%s", batchID, userID)
+	logger.Info("[BATCH_SERVICE] Deleting batch_id=%s for user_id=%s", batchID, userID)
 
 	// Verify ownership first
 	// Note: ValidateBatchOwnership takes *fiber.Ctx which we don't have here directly,
@@ -99,11 +99,11 @@ func (s *BatchService) DeleteBatch(ctx context.Context, batchID, userID string) 
 
 	// Delete
 	if err := s.repo.Delete(ctx, batchID); err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to delete batch: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to delete batch: %v", err)
 		return err
 	}
 
-	log.Printf("[BATCH_SERVICE] Batch deleted successfully")
+	logger.Info("[BATCH_SERVICE] Batch deleted successfully")
 	return nil
 }
 
@@ -121,7 +121,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 	// }
 
 	checkRisk := func(severity string, sourceTool string, detail string) {
-		log.Printf("[RISK_CALC] Checking severity: %s from %s", severity, sourceTool)
+		logger.Info("[RISK_CALC] Checking severity: %s from %s", severity, sourceTool)
 		scanSummaries = append(scanSummaries, fmt.Sprintf("%s: %s (%s)", sourceTool, detail, severity))
 		// Map severity to representative CVSS vector
 		// var vector string
@@ -154,13 +154,13 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 	}
 
 	// 1. Check Uploaded Files
-	log.Printf("[RISK_CALC] Checking %d uploaded files", len(batch.UploadedFiles))
+	logger.Info("[RISK_CALC] Checking %d uploaded files", len(batch.UploadedFiles))
 	for _, file := range batch.UploadedFiles {
 		checkRisk(file.Severity, "uploaded_file", file.FileName)
 	}
 
 	// 2. Check Scan Results
-	log.Printf("[RISK_CALC] Checking %d scan results", len(batch.ScanResults))
+	logger.Info("[RISK_CALC] Checking %d scan results", len(batch.ScanResults))
 	for _, result := range batch.ScanResults {
 		scanSummaries = append(scanSummaries, fmt.Sprintf("Scanned with %s: Target %s", result.Tool, result.Target))
 
@@ -179,7 +179,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 			// If tool gives risk_score directly (0-100), take it but maybe apply modifiers?
 			// For consistency, let's map it back to level if possible, or just use it raw.
 			if toolScore, ok := resMap["risk_score"]; ok {
-				log.Printf("[RISK_CALC] Found explicit tool risk_score: %v", toolScore)
+				logger.Info("[RISK_CALC] Found explicit tool risk_score: %v", toolScore)
 				if sc, ok := toolScore.(float64); ok {
 					scanSummaries = append(scanSummaries, fmt.Sprintf("%s: Found explicit risk score %v", result.Tool, sc))
 					if sc > maxRiskScore {
@@ -201,7 +201,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 							if ports, ok := hostMap["ports"].([]interface{}); ok {
 								scanSummaries = append(scanSummaries, fmt.Sprintf("Nmap: Discovered %d open ports", len(ports)))
 								if len(ports) > 0 {
-									log.Printf("[RISK_CALC] Found %d open ports in Nmap scan", len(ports))
+									logger.Info("[RISK_CALC] Found %d open ports in Nmap scan", len(ports))
 									// Check for high risk ports (e.g., 21, 23, 445, 3389)
 									isHighRiskPort := false
 									var riskyPorts []string
@@ -343,7 +343,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 											name = n
 										}
 
-										log.Printf("[RISK_CALC] OpenVAS Finding: %s (Sev: %f)", name, sevVal)
+										logger.Info("[RISK_CALC] OpenVAS Finding: %s (Sev: %f)", name, sevVal)
 
 										// Calculate risk level from score
 										var level string
@@ -412,7 +412,7 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 				}
 			}
 			if resList == nil {
-				log.Printf("[RISK_CALC] Result for tool %s is not a valid map or list", result.Tool)
+				logger.Info("[RISK_CALC] Result for tool %s is not a valid map or list", result.Tool)
 			}
 		}
 	}
@@ -423,16 +423,16 @@ func (s *BatchService) calculateBatchRisk(batch *models.Batch) (int, interface{}
 		"max_risk_result":  maxRiskResult,
 	}
 
-	log.Printf("[RISK_CALC] Final calculated risk for batch %s: %d", batch.BatchID, int(maxRiskScore))
+	logger.Info("[RISK_CALC] Final calculated risk for batch %s: %d", batch.BatchID, int(maxRiskScore))
 	// Return the combined details instead of just the max result
 	return int(maxRiskScore), responseDetails
 }
 
 func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]models.BatchSummaryResponse, error) {
-	log.Printf("[BATCH_SERVICE] Fetching batches for user_id=%s", userID)
+	logger.Info("[BATCH_SERVICE] Fetching batches for user_id=%s", userID)
 	batches, err := s.repo.FindBatchesByUserID(ctx, userID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to fetch batches: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to fetch batches: %v", err)
 		return nil, err
 	}
 	summaries := make([]models.BatchSummaryResponse, len(batches))
@@ -473,7 +473,7 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 				// User explicitly asked for "correct calculation by batch id"
 				// old method: score, details := s.calculateBatchRisk(batch)
 				// Let's rely on the new one.
-				log.Printf("[BATCH_SERVICE] Failed to calculate normalized risk for batch %s: %v", batch.BatchID, err)
+				logger.Warn("[BATCH_SERVICE] Failed to calculate normalized risk for batch %s: %v", batch.BatchID, err)
 			}
 		}
 
@@ -526,18 +526,18 @@ func (s *BatchService) GetUserBatches(ctx context.Context, userID string) ([]mod
 		}
 	}
 
-	log.Printf("[BATCH_SERVICE] Found %d batches", len(batches))
+	logger.Info("[BATCH_SERVICE] Found %d batches", len(batches))
 	return summaries, nil
 }
 
 // CalculateBatchRiskNormalized calculates risk using the new normalized risk engine
 func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID string) (*models.BatchRiskResponse, error) {
-	log.Printf("[BATCH_SERVICE] Calculating normalized risk for batch_id=%s", batchID)
+	logger.Info("[BATCH_SERVICE] Calculating normalized risk for batch_id=%s", batchID)
 
 	// 1. Fetch all scan results for this batch
 	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
 		return nil, err
 	}
 
@@ -546,7 +546,7 @@ func (s *BatchService) CalculateBatchRiskNormalized(ctx context.Context, batchID
 
 // calculateNormalizedRiskInternal contains the core logic for risk calculation given a set of scan results
 func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResults []models.ScanResult) (*models.BatchRiskResponse, error) {
-	log.Printf("[BATCH_SERVICE] Found %d scan results for batch", len(scanResults))
+	logger.Info("[BATCH_SERVICE] Found %d scan results for batch", len(scanResults))
 
 	// 2. Group scan results by scanner type
 	scannerGroups := make(map[string][]models.ScanResult)
@@ -561,23 +561,23 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 			if err := decoder.Decode(&temp); err == nil {
 				result.Result = temp
 			} else {
-				log.Printf("[BATCH_SERVICE] Failed to decode raw result for parser: %v", err)
+				logger.Warn("[BATCH_SERVICE] Failed to decode raw result for parser: %v", err)
 			}
 		}
 		scannerGroups[result.Tool] = append(scannerGroups[result.Tool], result)
 	}
 
-	log.Printf("[BATCH_SERVICE] Grouped into %d scanner types", len(scannerGroups))
+	logger.Info("[BATCH_SERVICE] Grouped into %d scanner types", len(scannerGroups))
 
 	// 3. Parse and normalize each scanner group
 	var scannerDetails []models.ScannerRiskDetail
 	for scannerType, results := range scannerGroups {
-		log.Printf("[BATCH_SERVICE] Processing scanner: %s with %d results", scannerType, len(results))
+		logger.Info("[BATCH_SERVICE] Processing scanner: %s with %d results", scannerType, len(results))
 
 		// Try to fetch from DetectedFindings first (Persisted Intelligence)
 		storedFindings, err := s.findingRepo.GetByBatchIDAndTool(context.Background(), batchID, scannerType)
 		if err == nil && len(storedFindings) > 0 {
-			log.Printf("[BATCH_SERVICE] Found %d persisted findings for %s", len(storedFindings), scannerType)
+			logger.Info("[BATCH_SERVICE] Found %d persisted findings for %s", len(storedFindings), scannerType)
 
 			normalizedFindings := []string{}
 			highestSeverity := models.SeverityInfo
@@ -606,7 +606,7 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 		// Fallback: Parse raw result if no findings in DB
 		parser := risk.GetParser(scannerType)
 		if parser == nil {
-			log.Printf("[BATCH_SERVICE] No parser found for scanner: %s", scannerType)
+			logger.Warn("[BATCH_SERVICE] No parser found for scanner: %s", scannerType)
 			continue
 		}
 
@@ -641,7 +641,7 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 
 		parsed, err := parser.Parse(resultInterface)
 		if err != nil {
-			log.Printf("[BATCH_SERVICE] Failed to parse %s results: %v", scannerType, err)
+			logger.Error("[BATCH_SERVICE] Failed to parse %s results: %v", scannerType, err)
 			continue
 		}
 
@@ -674,7 +674,7 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 	// 4. Calculate batch risk
 	riskResponse := risk.CalculateBatchRisk(batchID, scannerDetails)
 
-	log.Printf("[BATCH_SERVICE] Calculated risk: score=%.2f, level=%s, scanners=%d",
+	logger.Info("[BATCH_SERVICE] Calculated risk: score=%.2f, level=%s, scanners=%d",
 		riskResponse.RiskScore, riskResponse.RiskLevel, len(riskResponse.RiskDetail))
 
 	return riskResponse, nil
@@ -682,37 +682,37 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 
 // GetBatchDetail retrieves complete batch information including normalized risk
 func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userID string) (*models.BatchDetailResponse, error) {
-	log.Printf("[BATCH_SERVICE] Fetching batch detail for batch_id=%s, user_id=%s", batchID, userID)
+	logger.Info("[BATCH_SERVICE] Fetching batch detail for batch_id=%s, user_id=%s", batchID, userID)
 
 	// 1. Fetch batch
 	batch, err := s.repo.FindByID(ctx, batchID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to fetch batch: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to fetch batch: %v", err)
 		return nil, err
 	}
 
 	if batch == nil {
-		log.Printf("[BATCH_SERVICE] Batch not found: %s", batchID)
+		logger.Warn("[BATCH_SERVICE] Batch not found: %s", batchID)
 		return nil, fmt.Errorf("batch not found")
 	}
 
 	// 2. Verify ownership
 	if batch.UserID != userID {
-		log.Printf("[BATCH_SERVICE] Access denied: user=%s tried to access batch owned by %s", userID, batch.UserID)
+		logger.Warn("[BATCH_SERVICE] Access denied: user=%s tried to access batch owned by %s", userID, batch.UserID)
 		return nil, fmt.Errorf("access denied")
 	}
 
 	// 3. Fetch scan results
 	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
+		logger.Error("[BATCH_SERVICE] Failed to fetch scan results: %v", err)
 		return nil, err
 	}
 
 	// 4. Calculate normalized risk
 	riskResponse, err := s.CalculateBatchRiskNormalized(ctx, batchID)
 	if err != nil {
-		log.Printf("[BATCH_SERVICE] Failed to calculate risk: %v", err)
+		logger.Warn("[BATCH_SERVICE] Failed to calculate risk: %v", err)
 		// Continue with zero risk if calculation fails
 		riskResponse = &models.BatchRiskResponse{
 			BatchID:    batchID,
@@ -792,7 +792,7 @@ func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userI
 		ScanResults: scanSummaries,
 	}
 
-	log.Printf("[BATCH_SERVICE] Batch detail prepared: status=%s, risk_score=%.2f", status, riskResponse.RiskScore)
+	logger.Info("[BATCH_SERVICE] Batch detail prepared: status=%s, risk_score=%.2f", status, riskResponse.RiskScore)
 
 	return response, nil
 }

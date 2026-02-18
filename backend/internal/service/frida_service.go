@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"napscan-be/pkg/logger"
 )
 
 type FridaService struct {
@@ -54,7 +55,7 @@ func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[str
 	// We do NOT write anything, just hold it open until function return
 	defer stdin.Close()
 
-	log.Printf("[FRIDA] Executing: %s %v", "frida", args)
+	logger.Debug("[FRIDA] Executing: %s %v", "frida", args)
 
 	// Use io.Pipe to stream output
 	pr, pw := io.Pipe()
@@ -79,12 +80,12 @@ func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[str
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			log.Printf("[FRIDA] %s", line)
+			logger.Debug("[FRIDA] %s", line)
 			outputBuilder.WriteString(line + "\n")
 		}
 
 		if err := scanner.Err(); err != nil {
-			log.Printf("[FRIDA] Scanner error: %v", err)
+			logger.Error("[FRIDA] Scanner error: %v", err)
 		}
 
 		done <- true
@@ -106,15 +107,15 @@ func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[str
 
 	// Check exit scenarios
 	if scanCtx.Err() == context.DeadlineExceeded {
-		log.Printf("[FRIDA] Scan timed out (expected lifecycle management). Process killed.")
+		logger.Warn("[FRIDA] Scan timed out (expected lifecycle management). Process killed.")
 		err = nil
 	} else if err != nil {
 		// If markers are present, we consider it a partial success (or crash after start)
 		if strings.Contains(output, "[[NAPSCAN_JSON_START]]") {
-			log.Println("[FRIDA] Process finished with error but JSON markers found. proceeding.")
+			logger.Warn("[FRIDA] Process finished with error but JSON markers found. proceeding.")
 			err = nil
 		} else {
-			log.Printf("[FRIDA] Execution unexpectedly failed: %v\nOutput: %s", err, output)
+			logger.Error("[FRIDA] Execution unexpectedly failed: %v\nOutput: %s", err, output)
 			return nil, fmt.Errorf("frida execution failed: %w", err)
 		}
 	}
@@ -145,7 +146,7 @@ func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[str
 
 		var event map[string]interface{}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
-			log.Printf("[FRIDA] Warning: Failed to parse event JSON: %v", err)
+			logger.Warn("[FRIDA] Warning: Failed to parse event JSON: %v", err)
 		} else {
 			events = append(events, event)
 		}
@@ -155,35 +156,8 @@ func (s *FridaService) RunScan(ctx context.Context, packageName string) (map[str
 	}
 
 	if len(events) == 0 {
-		log.Printf("[FRIDA] No valid JSON events found in output.")
+		logger.Warn("[FRIDA] No valid JSON events found in output.")
 		return nil, fmt.Errorf("failed to find valid JSON markers in frida output")
-	}
-
-	for {
-		startIndex := strings.Index(remaining, startMarker)
-		if startIndex == -1 {
-			break
-		}
-
-		// Move cursor right after START marker
-		remaining = remaining[startIndex+len(startMarker):]
-
-		endIndex := strings.Index(remaining, endMarker)
-		if endIndex == -1 {
-			break
-		}
-
-		jsonStr := remaining[:endIndex]
-
-		var event map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
-			log.Printf("[FRIDA] Warning: Failed to parse event JSON: %v", err)
-		} else {
-			events = append(events, event)
-		}
-
-		// Move cursor right after END marker
-		remaining = remaining[endIndex+len(endMarker):]
 	}
 
 	results := map[string]interface{}{
@@ -231,7 +205,7 @@ func (s *FridaService) bundleScript(path string, visited map[string]bool) (strin
 
 		bundled, err := s.bundleScript(fullPath, visited)
 		if err != nil {
-			log.Printf("Warning: failed to bundle %s: %v", fullPath, err)
+			logger.Warn("Warning: failed to bundle %s: %v", fullPath, err)
 			return fmt.Sprintf("// Error loading %s: %v", relPath, err)
 		}
 

@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
 	"napscan-be/internal/service"
+	"napscan-be/pkg/logger"
 	"napscan-be/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
@@ -43,44 +43,44 @@ func NewSslyzeHandler(s *service.SslyzeService, scanRepo repository.ScanResultRe
 // @Failure 500 {object} response.Response
 // @Router /sslyze/scan [post]
 func (h *SslyzeHandler) StartScan(c *fiber.Ctx) error {
-	log.Printf("[SSLYZE] Received scan request")
+	logger.Debug("[SSLYZE] Received scan request")
 	var req struct {
 		Target  string `json:"target"`
 		BatchID string `json:"batch_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[SSLYZE] Failed to parse request body: %v", err)
+		logger.Error("[SSLYZE] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
 	if req.BatchID == "" {
-		log.Printf("[SSLYZE] Missing batch_id")
+		logger.Warn("[SSLYZE] Missing batch_id")
 		return response.BadRequest(c, "batch_id is required", nil)
 	}
 
 	// Enforce batch ownership
-	log.Printf("[SSLYZE] Validating batch ownership for batch_id=%s", req.BatchID)
+	logger.Debug("[SSLYZE] Validating batch ownership for batch_id=%s", req.BatchID)
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[SSLYZE] Batch ownership validation failed: %v", err)
+		logger.Warn("[SSLYZE] Batch ownership validation failed: %v", err)
 		return err
 	}
 
 	if req.Target == "" {
-		log.Printf("[SSLYZE] Missing target")
+		logger.Warn("[SSLYZE] Missing target")
 		return response.BadRequest(c, "Target is required", nil)
 	}
 
-	log.Printf("[SSLYZE] Starting scan on target=%s", req.Target)
+	logger.Info("[SSLYZE] Starting scan on target=%s", req.Target)
 	ctx, cancel := context.WithTimeout(c.Context(), 120*time.Second)
 	defer cancel()
 
 	result, err := h.service.ExecuteScan(ctx, req.Target)
 	if err != nil {
-		log.Printf("[SSLYZE] Scan execution failed: %v", err)
+		logger.Error("[SSLYZE] Scan execution failed: %v", err)
 		return response.InternalServerError(c, "SSLyze scan failed", err)
 	}
-	log.Printf("[SSLYZE] Scan completed successfully")
+	logger.Info("[SSLYZE] Scan completed successfully")
 
 	if h.scanRepo != nil {
 		_, dbErr := h.scanRepo.Insert(ctx, &models.ScanResult{
@@ -91,17 +91,17 @@ func (h *SslyzeHandler) StartScan(c *fiber.Ctx) error {
 			CreatedAt: time.Now().UTC(),
 		})
 		if dbErr != nil {
-			log.Printf("[SSLYZE] Failed to save to database: %v", dbErr)
+			logger.Error("[SSLYZE] Failed to save to database: %v", dbErr)
 			return response.InternalServerError(c, "Failed to save scan result", dbErr)
 		}
-		log.Printf("[SSLYZE] Database insert success")
+		logger.Debug("[SSLYZE] Database insert success")
 	}
 
 	if resMap, ok := result.(map[string]interface{}); ok {
 		resMap["batch_id"] = req.BatchID
 	}
 
-	log.Printf("[SSLYZE] Request completed successfully")
+	logger.Debug("[SSLYZE] Request completed successfully")
 	return response.Success(c, "Scan completed", result)
 }
 
@@ -118,7 +118,7 @@ func (h *SslyzeHandler) StartScan(c *fiber.Ctx) error {
 // @Failure 500 {object} response.Response
 // @Router /sslyze/scan/async [post]
 func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
-	log.Printf("[SSLYZE_ASYNC] Received async scan request")
+	logger.Debug("[SSLYZE_ASYNC] Received async scan request")
 
 	var req struct {
 		Target  string `json:"target"`
@@ -126,7 +126,7 @@ func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("[SSLYZE_ASYNC] Failed to parse request body: %v", err)
+		logger.Error("[SSLYZE_ASYNC] Failed to parse request body: %v", err)
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
@@ -140,7 +140,7 @@ func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
 
 	// Validate batch ownership
 	if err := h.batchService.ValidateBatchOwnership(c, req.BatchID); err != nil {
-		log.Printf("[SSLYZE_ASYNC] Batch ownership validation failed: %v", err)
+		logger.Warn("[SSLYZE_ASYNC] Batch ownership validation failed: %v", err)
 		return err
 	}
 
@@ -176,7 +176,7 @@ func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
 	go func() {
 		err := service.RunSslyzeAsync(ctx, taskID, h.scanManager)
 		if err != nil {
-			log.Printf("[SSLYZE_ASYNC] Scan goroutine error: %v", err)
+			logger.Error("[SSLYZE_ASYNC] Scan goroutine error: %v", err)
 		}
 
 		// Save to database if completed successfully
@@ -192,15 +192,15 @@ func (h *SslyzeHandler) StartScanAsync(c *fiber.Ctx) error {
 					CreatedAt: time.Now().UTC(),
 				})
 				if dbErr != nil {
-					log.Printf("[SSLYZE_ASYNC] Failed to save to database: %v", dbErr)
+					logger.Error("[SSLYZE_ASYNC] Failed to save to database: %v", dbErr)
 				} else {
-					log.Printf("[SSLYZE_ASYNC] Database insert success for task=%s", taskID)
+					logger.Debug("[SSLYZE_ASYNC] Database insert success for task=%s", taskID)
 				}
 			}
 		}
 	}()
 
-	log.Printf("[SSLYZE_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
+	logger.Info("[SSLYZE_ASYNC] Task created: task_id=%s, target=%s", taskID, req.Target)
 
 	return response.Success(c, "scan started", fiber.Map{
 		"task_id":  taskID,

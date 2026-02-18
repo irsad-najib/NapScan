@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"napscan-be/internal/models"
 	"napscan-be/internal/repository"
+	"napscan-be/pkg/logger"
 	"strings"
 	"sync"
 	"time"
@@ -53,16 +53,16 @@ func (s *SchedulerService) Start() {
 	s.cron.Start()
 	schedules, err := s.repo.FindActive()
 	if err != nil {
-		log.Printf("[SCHEDULER] Failed to load schedules: %v", err)
+		logger.Error("[SCHEDULER] Failed to load schedules: %v", err)
 		return
 	}
 
 	for _, sch := range schedules {
 		if err := s.AddJob(&sch); err != nil {
-			log.Printf("[SCHEDULER] Failed to add job for schedule %s: %v", sch.ID, err)
+			logger.Error("[SCHEDULER] Failed to add job for schedule %s: %v", sch.ID, err)
 		}
 	}
-	log.Printf("[SCHEDULER] Started with %d active jobs", len(schedules))
+	logger.Info("[SCHEDULER] Started with %d active jobs", len(schedules))
 }
 
 func (s *SchedulerService) Stop() {
@@ -95,7 +95,7 @@ func (s *SchedulerService) AddJob(schedule *models.Schedule) error {
 	}
 
 	s.jobs[schedule.ID] = entryID
-	log.Printf("[SCHEDULER] Added job for schedule %s (cron: %s)", schedule.ID, schedule.CronExpression)
+	logger.Info("[SCHEDULER] Added job for schedule %s (cron: %s)", schedule.ID, schedule.CronExpression)
 	return nil
 }
 
@@ -160,17 +160,17 @@ func (s *SchedulerService) List(userID string) ([]models.Schedule, error) {
 }
 
 func (s *SchedulerService) TriggerScan(scheduleID string) {
-	log.Printf("[SCHEDULER] Triggering scan for schedule %s", scheduleID)
+	logger.Info("[SCHEDULER] Triggering scan for schedule %s", scheduleID)
 	sch, err := s.repo.FindByID(scheduleID)
 	if err != nil {
-		log.Printf("[SCHEDULER] Failed to find schedule %s: %v", scheduleID, err)
+		logger.Error("[SCHEDULER] Failed to find schedule %s: %v", scheduleID, err)
 		return
 	}
 
 	// 1. Create Batch for this run
 	batchID, err := s.batchService.CreateBatch(context.Background(), sch.UserID)
 	if err != nil {
-		log.Printf("[SCHEDULER] Failed to create batch for schedule %s: %v", scheduleID, err)
+		logger.Error("[SCHEDULER] Failed to create batch for schedule %s: %v", scheduleID, err)
 		return
 	}
 
@@ -226,7 +226,7 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 
 		go func(t string, tID string, ctx context.Context) {
 			var err error
-			log.Printf("[SCHEDULER] Starting tool %s for schedule %s (task %s)", t, scheduleID, tID)
+			logger.Info("[SCHEDULER] Starting tool %s for schedule %s (task %s)", t, scheduleID, tID)
 
 			switch t {
 			case "nmap":
@@ -256,7 +256,7 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 			}
 
 			if err != nil {
-				log.Printf("[SCHEDULER] Scan failed for tool %s schedule %s: %v", t, scheduleID, err)
+				logger.Error("[SCHEDULER] Scan failed for tool %s schedule %s: %v", t, scheduleID, err)
 			} else {
 				// Process Intelligence and Save to DB
 				if task, _ := s.scanManager.Get(tID); task != nil && task.Status == models.StatusCompleted {
@@ -268,7 +268,7 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 						// For APK scans, result might be complex, but ProcessScanResult delegating to parser handles it.
 						// Parser implementations (mobsf, etc) should be robust.
 						if intelErr := s.intelligence.ProcessScanResult(dbCtx, batchID, sch.UserID, t, task.Result); intelErr != nil {
-							log.Printf("[SCHEDULER] Intelligence processing warning for %s: %v", t, intelErr)
+							logger.Warn("[SCHEDULER] Intelligence processing warning for %s: %v", t, intelErr)
 						}
 					}
 
@@ -280,7 +280,7 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 						CreatedAt: time.Now().UTC(),
 					})
 					if dbErr != nil {
-						log.Printf("[SCHEDULER] Failed to save result: %v", dbErr)
+						logger.Error("[SCHEDULER] Failed to save result: %v", dbErr)
 					}
 				}
 			}

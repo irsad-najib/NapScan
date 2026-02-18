@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"napscan-be/pkg/logger"
 	"net/url"
 	"os"
 	"os/exec"
@@ -30,7 +30,7 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	}
 
 	target := task.Target
-	log.Printf("[SSLYZE_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
+	logger.Info("[SSLYZE_ASYNC] Starting async scan for task=%s target=%s", taskID, target)
 
 	// Update to running
 	manager.UpdateProgress(taskID, 0, models.StatusRunning)
@@ -38,7 +38,6 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	// Create temporary file for JSON output
 	tmpFile := filepath.Join(os.TempDir(), "sslyze_"+time.Now().Format("20060102150405")+".json")
 	defer os.Remove(tmpFile)
-
 
 	// Sanitize target
 	cleanTarget := target
@@ -58,7 +57,7 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	// Phase 1: Start scan (0-50%)
 	manager.UpdateProgress(taskID, 10, models.StatusRunning)
 
-	log.Printf("[SSLYZE_ASYNC] Executing sslyze command")
+	logger.Info("[SSLYZE_ASYNC] Executing sslyze command")
 
 	// Run command in background
 	var outputBuffer bytes.Buffer
@@ -77,7 +76,7 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	select {
 	case <-ctx.Done():
 		// Context cancelled - kill the process
-		log.Printf("[SSLYZE_ASYNC] Context cancelled for task=%s, killing process", taskID)
+		logger.Warn("[SSLYZE_ASYNC] Context cancelled for task=%s, killing process", taskID)
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
@@ -87,10 +86,10 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	case err := <-errChan:
 		// Check if file exists and has content regardless of exit code
 		if fileInfo, statErr := os.Stat(tmpFile); statErr == nil && fileInfo.Size() > 0 {
-			log.Printf("[SSLYZE_ASYNC] Process finished with error %v but output file exists. Proceeding...", err)
+			logger.Warn("[SSLYZE_ASYNC] Process finished with error %v but output file exists. Proceeding...", err)
 		} else if err != nil {
-			log.Printf("[SSLYZE_ASYNC] SSLyze execution failed: %v", err)
-			log.Printf("[SSLYZE_ASYNC] Command Output: %s", outputBuffer.String())
+			logger.Error("[SSLYZE_ASYNC] SSLyze execution failed: %v", err)
+			logger.Error("[SSLYZE_ASYNC] Command Output: %s", outputBuffer.String())
 			manager.Fail(taskID, fmt.Errorf("sslyze execution failed: %w, output: %s", err, outputBuffer.String()))
 			return err
 		}
@@ -101,14 +100,14 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 
 	// Check file size / existence before reading
 	if info, err := os.Stat(tmpFile); err != nil || info.Size() == 0 {
-		log.Printf("[SSLYZE_ASYNC] Output file empty or missing. stderr: %s", outputBuffer.String())
+		logger.Error("[SSLYZE_ASYNC] Output file empty or missing. stderr: %s", outputBuffer.String())
 		manager.Fail(taskID, fmt.Errorf("sslyze produced no output. stderr: %s", outputBuffer.String()))
 		return fmt.Errorf("sslyze produced no output")
 	}
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
-		log.Printf("[SSLYZE_ASYNC] Failed to read output file: %v", err)
+		logger.Error("[SSLYZE_ASYNC] Failed to read output file: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to read sslyze output: %w", err))
 		return err
 	}
@@ -117,7 +116,7 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 	decoder := json.NewDecoder(bytes.NewReader(jsonData))
 	decoder.UseNumber()
 	if err := decoder.Decode(&result); err != nil {
-		log.Printf("[SSLYZE_ASYNC] Failed to parse JSON output: %v", err)
+		logger.Error("[SSLYZE_ASYNC] Failed to parse JSON output: %v", err)
 		manager.Fail(taskID, fmt.Errorf("failed to parse sslyze json: %w", err))
 		return err
 	}
@@ -127,7 +126,7 @@ func RunSslyzeAsync(ctx context.Context, taskID string, manager *ScanManager) er
 
 	// Phase 4: Complete (100%)
 	manager.Complete(taskID, result)
-	log.Printf("[SSLYZE_ASYNC] Scan completed successfully for task=%s", taskID)
+	logger.Info("[SSLYZE_ASYNC] Scan completed successfully for task=%s", taskID)
 
 	return nil
 }
@@ -156,7 +155,7 @@ func sanitizeResult(v interface{}) {
 
 // Legacy ExecuteScan for backward compatibility
 func (s *SslyzeService) ExecuteScan(ctx context.Context, target string) (interface{}, error) {
-	log.Printf("[SSLYZE_SERVICE] Starting scan on target=%s", target)
+	logger.Info("[SSLYZE_SERVICE] Starting scan on target=%s", target)
 	tmpFile := filepath.Join(os.TempDir(), "sslyze_"+time.Now().Format("20060102150405")+".json")
 	defer os.Remove(tmpFile)
 
@@ -174,26 +173,26 @@ func (s *SslyzeService) ExecuteScan(ctx context.Context, target string) (interfa
 		cleanTarget,
 	)
 
-	log.Printf("[SSLYZE_SERVICE] Executing sslyze command")
+	logger.Info("[SSLYZE_SERVICE] Executing sslyze command")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[SSLYZE_SERVICE] SSLyze execution failed: %v, output: %s", err, string(output))
+		logger.Error("[SSLYZE_SERVICE] SSLyze execution failed: %v, output: %s", err, string(output))
 		return nil, fmt.Errorf("sslyze execution failed: %v, output: %s", err, string(output))
 	}
-	log.Printf("[SSLYZE_SERVICE] SSLyze execution completed")
+	logger.Info("[SSLYZE_SERVICE] SSLyze execution completed")
 
 	jsonData, err := os.ReadFile(tmpFile)
 	if err != nil {
-		log.Printf("[SSLYZE_SERVICE] Failed to read output file: %v", err)
+		logger.Error("[SSLYZE_SERVICE] Failed to read output file: %v", err)
 		return nil, fmt.Errorf("failed to read sslyze output: %w", err)
 	}
 
 	var result interface{}
 	if err := json.Unmarshal(jsonData, &result); err != nil {
-		log.Printf("[SSLYZE_SERVICE] Failed to parse JSON output: %v", err)
+		logger.Error("[SSLYZE_SERVICE] Failed to parse JSON output: %v", err)
 		return nil, fmt.Errorf("failed to parse sslyze json: %w", err)
 	}
 
-	log.Printf("[SSLYZE_SERVICE] Scan completed successfully")
+	logger.Info("[SSLYZE_SERVICE] Scan completed successfully")
 	return result, nil
 }
