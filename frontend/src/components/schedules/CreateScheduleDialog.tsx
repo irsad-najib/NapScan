@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { CreateScheduleRequest, ToolKey } from "@/services/api";
+import React, { useState, useMemo } from "react";
+import { CreateScheduleRequest, ToolKey, scannersApi } from "@/services/api";
 import { useSchedule } from "@/context/ScheduleContext";
 import cronstrue from "cronstrue";
 
@@ -20,6 +20,18 @@ const TOOLS_CONFIG = [
     { id: "mobsf", label: "MobSF", icon: "android", type: "mobile" },
 ];
 
+type FrequencyType = "once" | "every_2h" | "every_6h" | "every_12h" | "daily" | "weekly" | "monthly";
+
+const FREQUENCY_OPTIONS: { value: FrequencyType; label: string; icon: string; description: string }[] = [
+    { value: "once", label: "Once", icon: "event", description: "Run only once at the specified time" },
+    { value: "every_2h", label: "Every 2 Hours", icon: "timer", description: "Repeat every 2 hours" },
+    { value: "every_6h", label: "Every 6 Hours", icon: "schedule", description: "Repeat every 6 hours (4x/day)" },
+    { value: "every_12h", label: "Every 12 Hours", icon: "hourglass_top", description: "Repeat every 12 hours (2x/day)" },
+    { value: "daily", label: "Daily", icon: "today", description: "Repeat every day at the same time" },
+    { value: "weekly", label: "Weekly", icon: "date_range", description: "Repeat every week on the same day" },
+    { value: "monthly", label: "Monthly", icon: "calendar_month", description: "Repeat every month on the same date" },
+];
+
 export default function CreateScheduleDialog({ isOpen, onClose }: CreateScheduleDialogProps) {
     const { createSchedule } = useSchedule();
 
@@ -32,9 +44,11 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
     // Authorization State
     const [isAuthorized, setIsAuthorized] = useState(false);
 
-    // Schedule Date/Time
+    // Schedule Date/Time & Frequency
     const [scheduleDate, setScheduleDate] = useState("");
     const [scheduleTime, setScheduleTime] = useState("");
+    const [frequency, setFrequency] = useState<FrequencyType>("once");
+    const [isFrequencyOpen, setIsFrequencyOpen] = useState(false);
 
     const [scanName, setScanName] = useState("");
 
@@ -52,10 +66,72 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             setApkFile(e.target.files[0]);
-            // Optional: Set target to filename for display or internal logic if needed
             setTarget(e.target.files[0].name);
         }
     };
+
+    /** Build the cron expression based on frequency + selected date/time */
+    const buildCronExpression = (dateObj: Date, freq: FrequencyType): string => {
+        const min = dateObj.getMinutes();
+        const hour = dateObj.getHours();
+        const dom = dateObj.getDate();
+        const month = dateObj.getMonth() + 1;
+        const dow = dateObj.getDay(); // 0=Sun, 1=Mon, ...
+
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        let cronBody: string;
+
+        switch (freq) {
+            case "once":
+                // Run once: specific min, hour, day of month, month
+                cronBody = `${min} ${hour} ${dom} ${month} *`;
+                break;
+            case "every_2h":
+                // Every 2 hours starting from the selected minute
+                cronBody = `${min} */2 * * *`;
+                break;
+            case "every_6h":
+                // Every 6 hours starting from the selected minute
+                cronBody = `${min} */6 * * *`;
+                break;
+            case "every_12h":
+                // Every 12 hours starting from the selected minute
+                cronBody = `${min} */12 * * *`;
+                break;
+            case "daily":
+                // Every day at the same hour:minute
+                cronBody = `${min} ${hour} * * *`;
+                break;
+            case "weekly":
+                // Every week on the same day-of-week at the same hour:minute
+                cronBody = `${min} ${hour} * * ${dow}`;
+                break;
+            case "monthly":
+                // Every month on the same day-of-month at the same hour:minute
+                cronBody = `${min} ${hour} ${dom} * *`;
+                break;
+            default:
+                cronBody = `${min} ${hour} ${dom} ${month} *`;
+        }
+
+        return `CRON_TZ=${timeZone} ${cronBody}`;
+    };
+
+    /** Live preview of the cron expression */
+    const cronPreview = useMemo(() => {
+        if (!scheduleDate || !scheduleTime) return null;
+        try {
+            const dateObj = new Date(`${scheduleDate}T${scheduleTime}`);
+            if (isNaN(dateObj.getTime())) return null;
+            const full = buildCronExpression(dateObj, frequency);
+            // Extract just the cron part (after CRON_TZ=...)
+            const cronPart = full.split(" ").slice(1).join(" ");
+            return cronstrue.toString(cronPart);
+        } catch {
+            return null;
+        }
+    }, [scheduleDate, scheduleTime, frequency]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -67,7 +143,6 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                 throw new Error("Please select at least one scanner tool.");
             }
 
-            // Validation
             if (scanType === "web" && !target) {
                 throw new Error("Please enter a target URL or Host.");
             }
@@ -78,42 +153,40 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                 throw new Error("Please confirm your authorization to scan this application.");
             }
 
-            // Schedule Logic
             if (!scheduleDate || !scheduleTime) {
                 throw new Error("Please select a date and time for the schedule.");
             }
-
             // Mobile Upload Logic
             let finalTarget = target;
             if (scanType === "mobile" && apkFile) {
                 try {
+                    // Upload the APK file first
+                    const uploadResult = await scannersApi.mobsf.upload(apkFile);
 
-                } catch (e) {
-                    throw e;
+                    if (!uploadResult.ok) {
+                        throw new Error(uploadResult.message || "Failed to upload APK file");
+                    }
+
+                    if (!uploadResult.data.success || !uploadResult.data.data) {
+                        throw new Error(uploadResult.data.message || "Failed to upload APK file");
+                    }
+
+                    // Use the file ID as the target for the schedule
+                    finalTarget = uploadResult.data.data.file_id.toString();
+                    console.log("APK Uploaded, File ID:", finalTarget);
+                } catch (e: any) {
+                    throw new Error(`APK Upload failed: ${e.message}`);
                 }
             }
 
-            // Construct Cron: "Min Hour Dom Month *" (DayOfWeek wildcard)
             const dateObj = new Date(`${scheduleDate}T${scheduleTime}`);
             if (isNaN(dateObj.getTime())) {
                 throw new Error("Invalid Date/Time");
             }
 
-            const min = dateObj.getMinutes();
-            const hour = dateObj.getHours();
-            const dom = dateObj.getDate();
-            const month = dateObj.getMonth() + 1;
+            const cronExpression = buildCronExpression(dateObj, frequency);
+            console.log("Generated Cron:", cronExpression);
 
-            // Get User Timezone
-            const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-            // Prepend CRON_TZ to ensure backend runs it in user's timezone
-            // Example: "CRON_TZ=Asia/Jakarta 45 14 4 2 *"
-            const cronExpression = `CRON_TZ=${timeZone} ${min} ${hour} ${dom} ${month} *`;
-
-            console.log("Generated Cron:", cronExpression); // Debug log
-
-            // Create a single schedule with all tools comma-separated
             const req: CreateScheduleRequest = {
                 name: scanName || `Scheduled Scan`,
                 target: finalTarget,
@@ -130,8 +203,8 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
             setSelectedTools([]);
             setScanName("");
             setScheduleDate("");
-            setScheduleDate("");
             setScheduleTime("");
+            setFrequency("once");
             setIsAuthorized(false);
         } catch (err: any) {
             setError(err.message || "Failed to create schedule");
@@ -143,6 +216,7 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
     if (!isOpen) return null;
 
     const filteredTools = TOOLS_CONFIG.filter(t => t.type === scanType);
+    const selectedFreq = FREQUENCY_OPTIONS.find(f => f.value === frequency)!;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
@@ -294,11 +368,64 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                         </div>
                     </div>
 
+                    {/* Frequency Dropdown */}
+                    <div className="flex flex-col gap-3">
+                        <label className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                            Frequency <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsFrequencyOpen(!isFrequencyOpen)}
+                                className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-900 dark:text-white hover:border-blue-400 dark:hover:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-lg text-blue-500">{selectedFreq.icon}</span>
+                                    <div className="text-left">
+                                        <span className="block font-semibold text-sm">{selectedFreq.label}</span>
+                                        <span className="block text-xs text-slate-500 dark:text-slate-400">{selectedFreq.description}</span>
+                                    </div>
+                                </div>
+                                <span className={`material-symbols-outlined text-lg text-slate-400 transition-transform duration-200 ${isFrequencyOpen ? "rotate-180" : ""}`}>
+                                    expand_more
+                                </span>
+                            </button>
+
+                            {/* Dropdown Menu */}
+                            {isFrequencyOpen && (
+                                <div className="absolute z-20 mt-2 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden animate-fade-in">
+                                    {FREQUENCY_OPTIONS.map((opt) => (
+                                        <button
+                                            type="button"
+                                            key={opt.value}
+                                            onClick={() => { setFrequency(opt.value); setIsFrequencyOpen(false); }}
+                                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${frequency === opt.value
+                                                ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
+                                                : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                                                }`}
+                                        >
+                                            <span className={`material-symbols-outlined text-lg ${frequency === opt.value ? "text-blue-500" : "text-slate-400"}`}>
+                                                {opt.icon}
+                                            </span>
+                                            <div>
+                                                <span className="block font-semibold text-sm">{opt.label}</span>
+                                                <span className="block text-xs opacity-70">{opt.description}</span>
+                                            </div>
+                                            {frequency === opt.value && (
+                                                <span className="material-symbols-outlined text-blue-500 ml-auto text-lg">check</span>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
                     {/* Scheduled Date & Time */}
                     <div className="grid grid-cols-2 gap-4 animate-fade-in">
                         <div>
                             <label className="block text-sm font-bold text-slate-900 dark:text-white mb-2">
-                                Date <span className="text-red-500">*</span>
+                                {frequency === "once" ? "Date" : "Start Date"} <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                                 <input
@@ -306,7 +433,7 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
                                     value={scheduleDate}
                                     onChange={(e) => setScheduleDate(e.target.value)}
-                                    min={new Date().toISOString().split('T')[0]} // Min today
+                                    min={new Date().toISOString().split('T')[0]}
                                     onClick={(e) => e.currentTarget.showPicker()}
                                 />
                             </div>
@@ -326,6 +453,18 @@ export default function CreateScheduleDialog({ isOpen, onClose }: CreateSchedule
                             </div>
                         </div>
                     </div>
+
+                    {/* Cron Preview */}
+                    {cronPreview && (
+                        <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl animate-fade-in">
+                            <span className="material-symbols-outlined text-blue-500 text-lg">info</span>
+                            <div className="text-sm text-blue-700 dark:text-blue-300">
+                                <span className="font-bold">Schedule Preview: </span>
+                                {cronPreview}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Scan Name */}
                     <div className="flex flex-col gap-3">
                         <label className="text-sm font-bold text-slate-900 dark:text-white">

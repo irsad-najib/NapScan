@@ -44,7 +44,7 @@ export default function ScheduleList() {
             id: g.ids[0], // Use first ID as primary key for React list
             allIds: g.ids, // Keep track of all IDs in this group
             combinedTools: Array.from(g.tools)
-        }));
+        })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }, [schedules]);
 
     const handleAction = async (ids: string[], actionName: 'pause' | 'resume' | 'delete') => {
@@ -110,6 +110,20 @@ export default function ScheduleList() {
         try {
             const cleanExpression = expression.replace(/CRON_TZ=[^ ]+ /, "").trim();
             let str = cronstrue.toString(cleanExpression, { use24HourTimeFormat: true });
+
+            // Simplify "At XX minutes past the hour, every YY hours"
+            // to "Every YY hours (at :XX)"
+            const intervalMatch = str.match(/At (\d+) minutes past the hour, every (\d+) hours/);
+            if (intervalMatch) {
+                const [_, minutes, hours] = intervalMatch;
+                str = `Every ${hours} hours (at :${minutes.padStart(2, '0')})`;
+            } else {
+                // If not an hourly interval, remove the generic "At X minutes past the hour"
+                str = str.replace(/At \d+ minutes past the hour, /, "");
+            }
+
+            str = str.charAt(0).toUpperCase() + str.slice(1);
+
             str = str.replace(", on day", " ")
                 .replace(" of the month", "")
                 .replace(", only in", " ")
@@ -167,7 +181,6 @@ export default function ScheduleList() {
                                         <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
                                             <div className="flex flex-col">
                                                 <span className="font-medium text-xs text-wrap">{formatCronDisplay(schedule.cron_expression)}</span>
-                                                <span className="text-[10px] text-slate-400 font-mono">{schedule.cron_expression}</span>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">

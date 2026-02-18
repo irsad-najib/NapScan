@@ -319,7 +319,9 @@ export default function SettingsPage() {
                             <div className="lg:col-span-3">
                                 <div className="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                                     {/* Section Header */}
-                                    <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
+                                    
+                                    
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
                                         <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                                             <span className="material-symbols-outlined">
                                                 {settingsSections.find((s) => s.id === activeSection)?.icon}
