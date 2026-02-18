@@ -2,9 +2,6 @@ package parser
 
 import (
 	"fmt"
-	"napscan-be/internal/models"
-	"sort"
-	"strconv"
 )
 
 type OpenVASParser struct{}
@@ -14,7 +11,6 @@ func NewOpenVASParser() *OpenVASParser {
 }
 
 func (p *OpenVASParser) Parse(rawResult interface{}) (*ParsedResult, error) {
-	highestCVSS := 0.0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -25,13 +21,19 @@ func (p *OpenVASParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		return nil, fmt.Errorf("openvas result is not a map")
 	}
 
-	resultsContainer, ok := resultMap["results"].(map[string]interface{})
-	if !ok {
-		return result, nil
+	// Wrapper check
+	var findings []interface{}
+
+	if resultsContainer, ok := resultMap["results"].(map[string]interface{}); ok {
+		if f, ok := resultsContainer["result"].([]interface{}); ok {
+			findings = f
+		}
+	} else if f, ok := resultMap["result"].([]interface{}); ok {
+		// Sometimes direct
+		findings = f
 	}
 
-	findings, ok := resultsContainer["result"].([]interface{})
-	if !ok {
+	if len(findings) == 0 {
 		return result, nil
 	}
 
@@ -41,115 +43,61 @@ func (p *OpenVASParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 			continue
 		}
 
-		sevStr, _ := fMap["severity"].(string)
-		name, _ := fMap["name"].(string)
-		threat, _ := fMap["threat"].(string)
+		// Fields often in OpenVAS: name, severity (score), threat (High/Medium/Low), host, port, nvts (cve, cwe)
 
-		sevVal, err := strconv.ParseFloat(sevStr, 64)
-		if err != nil {
-			continue
+		_ = getString(fMap, "severity") // "10.0" or similar, ignored for now
+		name, _ := fMap["name"].(string)
+		threat, _ := fMap["threat"].(string) // "High", "Medium"...
+		hostMap, _ := fMap["host"].(map[string]interface{})
+		host := ""
+		if hostMap != nil {
+			host, _ = hostMap["#text"].(string)
 		}
 
-		description := fmt.Sprintf("%s (CVSS: %.1f)", name, sevVal)
+		portMap, _ := fMap["port"].(map[string]interface{})
+		port := ""
+		if portMap != nil {
+			port, _ = portMap["#text"].(string)
+		}
+
+		// Extract CVEs if available (often in nvt block)
+		var refID string
+		if nvt, ok := fMap["nvt"].(map[string]interface{}); ok {
+			if cveWrap, ok := nvt["cve"].(map[string]interface{}); ok {
+				// usually "CVE-2023-XXXX" in #text or similar, depends on parser
+				if id, ok := cveWrap["#text"].(string); ok && id != "NOCVE" {
+					refID = id
+				}
+			} else if cveStr, ok := nvt["cve"].(string); ok && cveStr != "NOCVE" {
+				refID = cveStr
+			}
+		}
+
+		description := name
+		if threat != "" {
+			description = fmt.Sprintf("%s [%s]", name, threat)
+		}
 
 		result.Findings = append(result.Findings, Finding{
-			Severity:    "info", // placeholder
+			Source:      "openvas",
 			Title:       name,
 			Description: description,
-			RawData:     map[string]interface{}{"cvss": sevVal, "threat": threat},
+			Severity:    threat, // Use threat level "High", "Medium" as severity
+			Target:      fmt.Sprintf("%s:%s", host, port),
+			ReferenceID: refID,
+			RawData:     fMap,
+			Service:     "infra",
 		})
-
-		if sevVal > highestCVSS {
-			highestCVSS = sevVal
-		}
 	}
 
-	result.Metadata["highest_cvss"] = highestCVSS
+	result.Metadata["total_findings"] = len(result.Findings)
 
 	return result, nil
 }
 
-func (p *OpenVASParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, error) {
-	detail := &models.ScannerRiskDetail{
-		Scanner:  "openvas",
-		Findings: []string{},
+func getString(m map[string]interface{}, k string) string {
+	if v, ok := m[k].(string); ok {
+		return v
 	}
-
-	highestCVSS := 0.0
-	if v, ok := parsed.Metadata["highest_cvss"].(float64); ok {
-		highestCVSS = v
-	}
-
-	var allFindings []string
-	for _, finding := range parsed.Findings {
-		allFindings = append(allFindings, finding.Description)
-	}
-
-	finalSeverity := models.SeverityInfo
-	switch {
-	case highestCVSS >= 9.0:
-		finalSeverity = models.SeverityCritical
-	case highestCVSS >= 7.0:
-		finalSeverity = models.SeverityHigh
-	case highestCVSS >= 4.0:
-		finalSeverity = models.SeverityMedium
-	case highestCVSS > 0:
-		finalSeverity = models.SeverityLow
-	}
-
-	detail.NormalizedSeverity = finalSeverity
-	detail.Description = "Vulnerabilities identified through OpenVAS scanning"
-
-	sort.Strings(allFindings)
-	detail.Findings = allFindings
-
-	findingCount := float64(len(allFindings))
-	if findingCount == 0 {
-		findingCount = 1
-	}
-
-	detail.Score = highestCVSS*10 + findingCount*2
-	return detail, nil
-}
-
-func (p *OpenVASParser) ParseAndNormalize(rawResults []models.ScanResult) (*models.ScannerRiskDetail, error) {
-	aggregatedFindings := []string{}
-	highestSeverity := models.SeverityInfo
-
-	for _, scanResult := range rawResults {
-		parsed, err := p.Parse(scanResult.Result)
-		if err != nil {
-			continue
-		}
-
-		normalized, err := p.Normalize(parsed)
-		if err != nil {
-			continue
-		}
-
-		if models.GetSeverityScore(normalized.NormalizedSeverity) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized.NormalizedSeverity
-		}
-
-		aggregatedFindings = append(aggregatedFindings, normalized.Findings...)
-	}
-
-	uniqueFindings := removeDuplicates(aggregatedFindings)
-	sort.Strings(uniqueFindings)
-
-	detail := &models.ScannerRiskDetail{
-		Scanner:            "openvas",
-		NormalizedSeverity: highestSeverity,
-		Description:        "Vulnerabilities identified through OpenVAS scanning",
-		Findings:           uniqueFindings,
-	}
-
-	baseScore := models.GetSeverityScore(highestSeverity)
-	findingCount := float64(len(uniqueFindings))
-	if findingCount == 0 {
-		findingCount = 1
-	}
-	detail.Score = baseScore * findingCount
-
-	return detail, nil
+	return ""
 }

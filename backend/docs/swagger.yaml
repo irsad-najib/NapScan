@@ -549,6 +549,43 @@ paths:
       summary: Download Batch Report
       tags:
       - Batch
+  /batch/{batch_id}/report/preview:
+    get:
+      description: Generate a PDF report for a specific batch and view it in browser
+      parameters:
+      - description: Batch ID
+        in: path
+        name: batch_id
+        required: true
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: PDF Content
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Preview Batch Report
+      tags:
+      - Batch
   /batch/create:
     post:
       description: Generate a unique batch ID for the authenticated user

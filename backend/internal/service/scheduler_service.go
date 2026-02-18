@@ -15,14 +15,16 @@ import (
 )
 
 type SchedulerService struct {
-	repo         repository.ScheduleRepository
-	cron         *cron.Cron
-	jobs         map[string]cron.EntryID
-	mu           sync.RWMutex
-	batchService *BatchService // Same package
-	scanManager  *ScanManager  // Same package
-	scanRepo     repository.ScanResultRepository
-	lifecycle    *LifecycleService // Same package
+	repo          repository.ScheduleRepository
+	cron          *cron.Cron
+	jobs          map[string]cron.EntryID
+	mu            sync.RWMutex
+	batchService  *BatchService
+	scanManager   *ScanManager
+	scanRepo      repository.ScanResultRepository
+	lifecycle     *LifecycleService
+	nucleiService *NucleiService
+	intelligence  *IntelligenceService
 }
 
 func NewSchedulerService(
@@ -31,21 +33,24 @@ func NewSchedulerService(
 	scanManager *ScanManager,
 	scanRepo repository.ScanResultRepository,
 	lifecycle *LifecycleService,
+	nucleiService *NucleiService,
+	intelligence *IntelligenceService,
 ) *SchedulerService {
 	return &SchedulerService{
-		repo:         repo,
-		cron:         cron.New(),
-		jobs:         make(map[string]cron.EntryID),
-		batchService: batchService,
-		scanManager:  scanManager,
-		scanRepo:     scanRepo,
-		lifecycle:    lifecycle,
+		repo:          repo,
+		cron:          cron.New(),
+		jobs:          make(map[string]cron.EntryID),
+		batchService:  batchService,
+		scanManager:   scanManager,
+		scanRepo:      scanRepo,
+		lifecycle:     lifecycle,
+		nucleiService: nucleiService,
+		intelligence:  intelligence,
 	}
 }
 
 func (s *SchedulerService) Start() {
 	s.cron.Start()
-	// Load active schedules
 	schedules, err := s.repo.FindActive()
 	if err != nil {
 		log.Printf("[SCHEDULER] Failed to load schedules: %v", err)
@@ -78,7 +83,6 @@ func (s *SchedulerService) AddJob(schedule *models.Schedule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Remove existing if any
 	if entryID, exists := s.jobs[schedule.ID]; exists {
 		s.cron.Remove(entryID)
 	}
@@ -105,11 +109,15 @@ func (s *SchedulerService) RemoveJob(scheduleID string) {
 	}
 }
 
-func (s *SchedulerService) Pause(id string) error {
+func (s *SchedulerService) Pause(id, userID string) error {
 	schedule, err := s.repo.FindByID(id)
 	if err != nil {
 		return err
 	}
+	if schedule.UserID != userID {
+		return fmt.Errorf("unauthorized: schedule does not belong to user")
+	}
+
 	schedule.IsActive = false
 	if err := s.repo.Update(schedule); err != nil {
 		return err
@@ -118,11 +126,15 @@ func (s *SchedulerService) Pause(id string) error {
 	return nil
 }
 
-func (s *SchedulerService) Resume(id string) error {
+func (s *SchedulerService) Resume(id, userID string) error {
 	schedule, err := s.repo.FindByID(id)
 	if err != nil {
 		return err
 	}
+	if schedule.UserID != userID {
+		return fmt.Errorf("unauthorized: schedule does not belong to user")
+	}
+
 	schedule.IsActive = true
 	if err := s.repo.Update(schedule); err != nil {
 		return err
@@ -130,13 +142,21 @@ func (s *SchedulerService) Resume(id string) error {
 	return s.AddJob(schedule)
 }
 
-func (s *SchedulerService) Delete(id string) error {
+func (s *SchedulerService) Delete(id, userID string) error {
+	schedule, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if schedule.UserID != userID {
+		return fmt.Errorf("unauthorized: schedule does not belong to user")
+	}
+
 	s.RemoveJob(id)
 	return s.repo.Delete(id)
 }
 
-func (s *SchedulerService) List() ([]models.Schedule, error) {
-	return s.repo.FindAll()
+func (s *SchedulerService) List(userID string) ([]models.Schedule, error) {
+	return s.repo.FindByUserID(userID)
 }
 
 func (s *SchedulerService) TriggerScan(scheduleID string) {
@@ -214,7 +234,8 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 			case "zap":
 				err = RunZapAsync(ctx, tID, s.scanManager)
 			case "nuclei":
-				err = RunNucleiAsync(ctx, tID, s.scanManager)
+				// Use instance method now
+				err = s.nucleiService.RunNucleiAsync(ctx, tID, s.scanManager, sch.UserID)
 			case "ffuf":
 				err = RunFfufAsync(ctx, tID, s.scanManager)
 			case "sslyze":
@@ -237,10 +258,20 @@ func (s *SchedulerService) TriggerScan(scheduleID string) {
 			if err != nil {
 				log.Printf("[SCHEDULER] Scan failed for tool %s schedule %s: %v", t, scheduleID, err)
 			} else {
-				// Save to DB (ScanResult)
+				// Process Intelligence and Save to DB
 				if task, _ := s.scanManager.Get(tID); task != nil && task.Status == models.StatusCompleted {
 					dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer dbCancel()
+
+					// Intelligence Processing
+					if s.intelligence != nil {
+						// For APK scans, result might be complex, but ProcessScanResult delegating to parser handles it.
+						// Parser implementations (mobsf, etc) should be robust.
+						if intelErr := s.intelligence.ProcessScanResult(dbCtx, batchID, sch.UserID, t, task.Result); intelErr != nil {
+							log.Printf("[SCHEDULER] Intelligence processing warning for %s: %v", t, intelErr)
+						}
+					}
+
 					_, dbErr := s.scanRepo.Insert(dbCtx, &models.ScanResult{
 						BatchID:   task.BatchID,
 						Tool:      t,

@@ -52,7 +52,8 @@ func (h *SchedulerHandler) Create(c *fiber.Ctx) error {
 // @Success 200 {object} response.Response
 // @Router /schedule [get]
 func (h *SchedulerHandler) List(c *fiber.Ctx) error {
-	schedules, err := h.service.List()
+	userID := c.Locals("user_id").(string)
+	schedules, err := h.service.List(userID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to list schedules", err)
 	}
@@ -69,7 +70,8 @@ func (h *SchedulerHandler) List(c *fiber.Ctx) error {
 // @Router /schedule/{id} [delete]
 func (h *SchedulerHandler) Delete(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if err := h.service.Delete(id); err != nil {
+	userID := c.Locals("user_id").(string)
+	if err := h.service.Delete(id, userID); err != nil {
 		return response.InternalServerError(c, "Failed to delete schedule", err)
 	}
 	return response.Success(c, "Schedule deleted successfully", nil)
@@ -85,7 +87,8 @@ func (h *SchedulerHandler) Delete(c *fiber.Ctx) error {
 // @Router /schedule/{id}/pause [post]
 func (h *SchedulerHandler) Pause(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if err := h.service.Pause(id); err != nil {
+	userID := c.Locals("user_id").(string)
+	if err := h.service.Pause(id, userID); err != nil {
 		return response.InternalServerError(c, "Failed to pause schedule", err)
 	}
 	return response.Success(c, "Schedule paused successfully", nil)
@@ -101,7 +104,8 @@ func (h *SchedulerHandler) Pause(c *fiber.Ctx) error {
 // @Router /schedule/{id}/resume [post]
 func (h *SchedulerHandler) Resume(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if err := h.service.Resume(id); err != nil {
+	userID := c.Locals("user_id").(string)
+	if err := h.service.Resume(id, userID); err != nil {
 		return response.InternalServerError(c, "Failed to resume schedule", err)
 	}
 	return response.Success(c, "Schedule resumed successfully", nil)

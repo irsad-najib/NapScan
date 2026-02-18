@@ -1,24 +1,40 @@
 /*
- * NapScan Frida Agent
- * Mode: Passive + Soft Active (Guaranteed Report)
- * Frida 16+ | Android 10+
- * No brute force, no fake input, no state manipulation
+ * NapScan Dominator Engine (Research Grade)
+ * Mode: passive | active | aggressive
+ * High Visibility Instrumentation Framework
  */
 
 (function () {
   "use strict";
 
-  // =========================================================================
-  // CORE MARKER
-  // =========================================================================
+  // =====================================================
+  // CONFIG
+  // =====================================================
+  const CONFIG = {
+    mode: "aggressive", // passive | active | aggressive
+    max_events: 5000,
+    enable_native_hooks: true,
+    enable_intent_probe: true,
+    throttle_native: true,
+  };
+
   const MARKER_START = "[[NAPSCAN_JSON_START]]";
   const MARKER_END = "[[NAPSCAN_JSON_END]]";
 
+  let STATE = {
+    events: 0,
+    modules: {},
+  };
+
   function emit(event, data) {
+    if (STATE.events >= CONFIG.max_events) return;
+    STATE.events++;
+
     console.log(
       MARKER_START +
         JSON.stringify({
-          timestamp: new Date().toISOString(),
+          ts: new Date().toISOString(),
+          mode: CONFIG.mode,
           event,
           data: data || {},
         }) +
@@ -26,276 +42,234 @@
     );
   }
 
-  // =========================================================================
-  // ENGINE BOOT (PASTI KELUAR)
-  // =========================================================================
+  function mark(module) {
+    STATE.modules[module] = true;
+  }
+
   emit("engine_start", {
-    frida_version: Frida.version || "unknown",
-    java_available: Java.available,
+    frida: Frida.version,
     pid: Process.id,
     arch: Process.arch,
   });
 
-  // =========================================================================
-  // ENVIRONMENT SNAPSHOT (PASTI KELUAR)
-  // =========================================================================
-  let env = {
-    platform: Process.platform,
-    pointer_size: Process.pointerSize,
-    module_count: 0,
-  };
-
-  try {
-    env.module_count = Process.enumerateModulesSync().length;
-  } catch (_) {}
-
-  emit("environment_snapshot", env);
-
   if (!Java.available) {
-    emit("scan_summary", {
-      success: true,
-      reason: "java_not_available",
-      confidence: "low",
-    });
+    emit("java_unavailable", {});
     return;
   }
 
-  // =========================================================================
-  // JAVA RUNTIME
-  // =========================================================================
+  // =====================================================
+  // JAVA LAYER
+  // =====================================================
   Java.perform(function () {
-    emit("java_runtime_ready", {});
+    emit("java_ready", {});
 
-    // =========================================================================
-    // APPLICATION ATTACH (PASSIVE – PASTI)
-    // =========================================================================
-    try {
-      const App = Java.use("android.app.Application");
-      const origAttach = App.attach.overload("android.content.Context");
-
-      origAttach.implementation = function (ctx) {
-        emit("application_attached", {
-          package_name: ctx.getPackageName(),
-          class_loader: ctx.getClassLoader().toString(),
+    // -----------------------------------------------
+    // Universal Overload Hooker
+    // -----------------------------------------------
+    function hookAll(clazz, method) {
+      try {
+        clazz[method].overloads.forEach(function (ov) {
+          ov.implementation = function () {
+            mark(clazz.$className);
+            emit("method_call", {
+              class: clazz.$className,
+              method: method,
+            });
+            return ov.apply(this, arguments);
+          };
         });
-        return origAttach.call(this, ctx);
-      };
-    } catch (e) {
-      emit("hook_error", {
-        target: "Application.attach",
-        error: e.toString(),
-      });
+      } catch (_) {}
     }
 
-    // =========================================================================
-    // ACTIVITY LIFECYCLE (PASSIVE – MIN 1x)
-    // =========================================================================
+    // -----------------------------------------------
+    // Lifecycle
+    // -----------------------------------------------
     try {
       const Activity = Java.use("android.app.Activity");
-      const origResume = Activity.onResume.overload();
-
-      origResume.implementation = function () {
-        if (!globalThis.__NAPSCAN_ACTIVITY_RECORDED) {
-          globalThis.__NAPSCAN_ACTIVITY_RECORDED = true;
-          emit("first_activity_resume", {
-            activity: this.getClass().getName(),
-          });
-        }
-        return origResume.call(this);
-      };
-    } catch (e) {
-      emit("hook_error", {
-        target: "Activity.onResume",
-        error: e.toString(),
-      });
-    }
-
-    // =========================================================================
-    // PASSIVE CAPABILITY DETECTION (NO INVOKE)
-    // =========================================================================
-    const capabilities = {};
-
-    function detect(name, key) {
-      try {
-        Java.use(name);
-        capabilities[key] = true;
-      } catch (_) {
-        capabilities[key] = false;
-      }
-    }
-
-    detect("okhttp3.OkHttpClient", "okhttp");
-    detect("android.webkit.WebView", "webview");
-    detect("javax.crypto.Cipher", "crypto");
-    detect("com.android.org.conscrypt.TrustManagerImpl", "conscrypt");
-    detect("android.os.Debug", "anti_debug_api");
-
-    emit("capability_snapshot", capabilities);
-
-    // =========================================================================
-    // AGGRESSIVE BUT SAFE OBSERVATION (BOOT-TIME HOOKS)
-    // =========================================================================
-
-    // ---- APPLICATION.onCreate (PASTI KEPAKAI)
-    try {
-      const App = Java.use("android.app.Application");
-      const origCreate = App.onCreate;
-
-      origCreate.implementation = function () {
-        emit("application_on_create", {});
-        return origCreate.call(this);
-      };
+      hookAll(Activity, "onResume");
     } catch (_) {}
 
-    // ---- OKHTTP CLIENT BUILDER (PASTI DIPANGGIL)
-    if (capabilities.okhttp) {
-      try {
-        const Builder = Java.use("okhttp3.OkHttpClient$Builder");
-        const origBuild = Builder.build;
+    // -----------------------------------------------
+    // Crypto Analyzer
+    // -----------------------------------------------
+    try {
+      const Cipher = Java.use("javax.crypto.Cipher");
+      hookAll(Cipher, "getInstance");
+      hookAll(Cipher, "init");
+      mark("crypto");
+    } catch (_) {}
 
-        origBuild.implementation = function () {
-          if (!globalThis.__NAPSCAN_OKHTTP_BUILD) {
-            globalThis.__NAPSCAN_OKHTTP_BUILD = true;
-            emit("okhttp_client_initialized", {});
-          }
-          return origBuild.call(this);
-        };
-      } catch (_) {}
-    }
-
-    // ---- SSL CONTEXT INIT (TLS SETUP)
+    // -----------------------------------------------
+    // SSL Analyzer
+    // -----------------------------------------------
     try {
       const SSLContext = Java.use("javax.net.ssl.SSLContext");
-      const origInit = SSLContext.init;
+      hookAll(SSLContext, "init");
+      mark("ssl");
+    } catch (_) {}
 
-      origInit.implementation = function () {
-        if (!globalThis.__NAPSCAN_SSL_INIT) {
-          globalThis.__NAPSCAN_SSL_INIT = true;
-          emit("ssl_context_initialized", {});
-        }
-        return origInit.apply(this, arguments);
+    try {
+      const TM = Java.use("com.android.org.conscrypt.TrustManagerImpl");
+
+      TM.checkServerTrusted.implementation = function () {
+        mark("ssl_trust");
+        emit("ssl_validation_invoked", {});
+
+        return this.checkServerTrusted.apply(this, arguments);
       };
     } catch (_) {}
 
-    // ---- CRYPTO INIT (LEBIH SERING KENA DARI getInstance)
-    if (capabilities.crypto) {
-      try {
-        const Cipher = Java.use("javax.crypto.Cipher");
-        const origInit = Cipher.init.overload("int", "java.security.Key");
+    // -----------------------------------------------
+    // OkHttp Monitor
+    // -----------------------------------------------
+    try {
+      const Builder = Java.use("okhttp3.OkHttpClient$Builder");
+      hookAll(Builder, "build");
+      mark("network");
+    } catch (_) {}
 
-        origInit.implementation = function (mode, key) {
-          if (!globalThis.__NAPSCAN_CIPHER_INIT) {
-            globalThis.__NAPSCAN_CIPHER_INIT = true;
-            emit("crypto_cipher_initialized", {
-              mode: mode,
-            });
-          }
-          return origInit.call(this, mode, key);
-        };
-      } catch (_) {}
-    }
+    // -----------------------------------------------
+    // WebView Monitor
+    // -----------------------------------------------
+    try {
+      const WebView = Java.use("android.webkit.WebView");
+      hookAll(WebView, "loadUrl");
+      mark("webview");
+    } catch (_) {}
 
-    // ---- CLASSLOADER OBSERVATION (THROTTLED & SAFE)
+    // -----------------------------------------------
+    // Reflection Exposure
+    // -----------------------------------------------
+    try {
+      const Class = Java.use("java.lang.Class");
+      hookAll(Class, "getDeclaredMethods");
+      hookAll(Class, "getDeclaredFields");
+      mark("reflection");
+    } catch (_) {}
+
+    // -----------------------------------------------
+    // File System Monitoring
+    // -----------------------------------------------
+    try {
+      const FIS = Java.use("java.io.FileInputStream");
+      FIS.$init.overload("java.lang.String").implementation = function (path) {
+        mark("filesystem");
+        emit("file_read", { path: path });
+        return this.$init(path);
+      };
+    } catch (_) {}
+
+    // -----------------------------------------------
+    // SharedPreferences
+    // -----------------------------------------------
+    try {
+      const SP = Java.use("android.app.SharedPreferencesImpl");
+      hookAll(SP, "getString");
+      mark("sharedprefs");
+    } catch (_) {}
+
+    // -----------------------------------------------
+    // SQLite Monitoring
+    // -----------------------------------------------
+    try {
+      const SQLite = Java.use("android.database.sqlite.SQLiteDatabase");
+      hookAll(SQLite, "execSQL");
+      mark("sqlite");
+    } catch (_) {}
+
+    // -----------------------------------------------
+    // ClassLoader Surveillance
+    // -----------------------------------------------
     try {
       const CL = Java.use("java.lang.ClassLoader");
-      const origLoad = CL.loadClass.overload("java.lang.String");
-
-      origLoad.implementation = function (name) {
+      CL.loadClass.overload("java.lang.String").implementation = function (
+        name,
+      ) {
         if (
-          !globalThis.__NAPSCAN_CLASS_OBSERVED &&
-          (name.includes("okhttp") ||
-            name.includes("crypto") ||
-            name.includes("conscrypt"))
+          name.toLowerCase().includes("crypto") ||
+          name.toLowerCase().includes("ssl") ||
+          name.toLowerCase().includes("auth") ||
+          name.toLowerCase().includes("keystore")
         ) {
-          globalThis.__NAPSCAN_CLASS_OBSERVED = true;
-          emit("security_related_class_loaded", {
-            class_name: name,
-          });
+          emit("security_class_loaded", { name });
         }
-        return origLoad.call(this, name);
+
+        return this.loadClass.call(this, name);
       };
     } catch (_) {}
 
-    // =========================================================================
-    // SOFT-ACTIVE OBSERVATION (FIRST HIT ONLY)
-    // =========================================================================
-
-    // ---- CRYPTO
-    if (capabilities.crypto) {
+    // -----------------------------------------------
+    // Intent Probe (Controlled)
+    // -----------------------------------------------
+    if (CONFIG.enable_intent_probe && CONFIG.mode !== "passive") {
       try {
-        const Cipher = Java.use("javax.crypto.Cipher");
-        const origGet = Cipher.getInstance.overload("java.lang.String");
+        const ActivityThread = Java.use("android.app.ActivityThread");
+        const app = ActivityThread.currentApplication();
+        const ctx = app.getApplicationContext();
 
-        origGet.implementation = function (algo) {
-          if (!globalThis.__NAPSCAN_CRYPTO_HIT) {
-            globalThis.__NAPSCAN_CRYPTO_HIT = true;
-            emit("crypto_first_use", { algorithm: algo });
-          }
-          return origGet.call(this, algo);
-        };
-      } catch (_) {}
-    }
-
-    // ---- WEBVIEW
-    if (capabilities.webview) {
-      try {
-        const WebView = Java.use("android.webkit.WebView");
-        const origLoad = WebView.loadUrl.overload("java.lang.String");
-
-        origLoad.implementation = function (url) {
-          if (!globalThis.__NAPSCAN_WEBVIEW_HIT) {
-            globalThis.__NAPSCAN_WEBVIEW_HIT = true;
-            emit("webview_first_load", { url });
-          }
-          return origLoad.call(this, url);
-        };
-      } catch (_) {}
-    }
-
-    // ---- SSL PINNING OBSERVATION (NO BYPASS)
-    if (capabilities.conscrypt) {
-      try {
-        const TM = Java.use("com.android.org.conscrypt.TrustManagerImpl");
-        const origCheck = TM.checkServerTrusted;
-
-        origCheck.implementation = function () {
-          if (!globalThis.__NAPSCAN_SSL_HIT) {
-            globalThis.__NAPSCAN_SSL_HIT = true;
-            emit("ssl_trust_manager_used", {
-              class: TM.$className,
-            });
-          }
-          return origCheck.apply(this, arguments);
-        };
-      } catch (_) {}
-    }
-
-    // ---- ANTI DEBUG OBSERVATION
-    if (capabilities.anti_debug_api) {
-      try {
-        const Debug = Java.use("android.os.Debug");
-        const origDbg = Debug.isDebuggerConnected;
-
-        origDbg.implementation = function () {
-          emit("anti_debug_checked", {
-            api: "isDebuggerConnected",
-          });
-          return origDbg.call(this);
-        };
+        emit("intent_probe_ready", {
+          package: ctx.getPackageName(),
+        });
       } catch (_) {}
     }
   });
 
-  // =========================================================================
-  // FINAL GUARANTEED SUMMARY (PASTI KELUAR)
-  // =========================================================================
+  // =====================================================
+  // NATIVE LAYER
+  // =====================================================
+  if (CONFIG.enable_native_hooks) {
+    try {
+      const openPtr = Module.findExportByName(null, "open");
+      if (openPtr) {
+        Interceptor.attach(openPtr, {
+          onEnter(args) {
+            if (CONFIG.throttle_native && STATE.events > 3000) return;
+            emit("native_open", {
+              path: args[0].readCString(),
+            });
+          },
+        });
+      }
+    } catch (_) {}
+
+    try {
+      const sslWrite = Module.findExportByName("libssl.so", "SSL_write");
+      if (sslWrite) {
+        Interceptor.attach(sslWrite, {
+          onEnter(args) {
+            emit("native_ssl_write", {});
+          },
+        });
+      }
+    } catch (_) {}
+  }
+
+  // =====================================================
+  // MEMORY PATTERN SCAN (PASSIVE)
+  // =====================================================
+  try {
+    Process.enumerateModulesSync().forEach(function (m) {
+      Memory.scan(m.base, m.size, "6170695f6b6579", {
+        onMatch: function (addr) {
+          emit("memory_pattern_possible_api_key", {
+            module: m.name,
+            address: addr.toString(),
+          });
+        },
+        onComplete: function () {},
+      });
+    });
+  } catch (_) {}
+
+  // =====================================================
+  // SUMMARY
+  // =====================================================
   setTimeout(function () {
     emit("scan_summary", {
-      success: true,
-      mode: "passive_plus_soft_active",
-      bruteforce: false,
-      interaction_required: false,
-      confidence: "high",
+      modules_triggered: Object.keys(STATE.modules),
+      total_events: STATE.events,
+      mode: CONFIG.mode,
+      profile: "high_visibility_research",
     });
-  }, 3000);
+  }, 6000);
 })();

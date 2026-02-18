@@ -2,8 +2,6 @@ package parser
 
 import (
 	"fmt"
-	"napscan-be/internal/models"
-	"sort"
 	"strings"
 )
 
@@ -12,15 +10,8 @@ type ZAPParser struct{}
 func NewZAPParser() *ZAPParser {
 	return &ZAPParser{}
 }
-var zapRiskMap = map[string]int{
-	"informational": 10,
-	"low":           30,
-	"medium":        60,
-	"high":          80,
-}
 
 func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
-	highestRisk := 0
 	result := &ParsedResult{
 		Findings: []Finding{},
 		Metadata: make(map[string]interface{}),
@@ -31,13 +22,28 @@ func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		return nil, fmt.Errorf("zap result is not a map")
 	}
 
-	alertsRaw, ok := resultMap["alertsRaw"].(map[string]interface{})
-	if !ok {
-		return result, nil
+	// Wrapper check
+	var alerts []interface{}
+
+	if alertsRaw, ok := resultMap["alertsRaw"].(map[string]interface{}); ok {
+		if a, ok := alertsRaw["alerts"].([]interface{}); ok {
+			alerts = a
+		}
+	} else if _, ok := resultMap["site"].([]interface{}); ok {
+		// XML JSON output sometimes has "site" array with "alerts" inside
+		// ignoring deep nesting for now, strictly following previous logic
+		// if "alertsRaw" structure is expected, we stick to it.
+		// Use fallback if necessary.
 	}
 
-	alerts, ok := alertsRaw["alerts"].([]interface{})
-	if !ok {
+	// Fallback: check if "alerts" is direct key
+	if len(alerts) == 0 {
+		if a, ok := resultMap["alerts"].([]interface{}); ok {
+			alerts = a
+		}
+	}
+
+	if len(alerts) == 0 {
 		return result, nil
 	}
 
@@ -50,115 +56,36 @@ func (p *ZAPParser) Parse(rawResult interface{}) (*ParsedResult, error) {
 		riskStr, _ := alertMap["risk"].(string)
 		alertName, _ := alertMap["alert"].(string)
 		url, _ := alertMap["url"].(string)
+		method, _ := alertMap["method"].(string)
+		desc, _ := alertMap["description"].(string)
+		cweid, _ := alertMap["cweid"].(string)
+		_, _ = alertMap["solution"].(string) // Ignore solution for now
 
+		// Filter user agent fuzzer info
 		if strings.Contains(strings.ToLower(alertName), "user agent fuzzer") &&
 			strings.EqualFold(riskStr, "informational") {
 			continue
 		}
 
-		description := fmt.Sprintf("%s on %s", alertName, url)
-
-		sev := strings.ToLower(riskStr)
+		// Map CWE if available
+		refID := ""
+		if cweid != "" && cweid != "-1" {
+			refID = "CWE-" + cweid
+		}
 
 		result.Findings = append(result.Findings, Finding{
-			Severity:    "info", // placeholder
+			Source:      "owasp-zap",
 			Title:       alertName,
-			Description: description,
+			Description: desc,
+			Severity:    riskStr,
 			Target:      url,
+			Method:      method,
+			ReferenceID: refID,
 			RawData:     alertMap,
+			Service:     "webapp",
 		})
-
-		if risk, ok := zapRiskMap[sev]; ok {
-			if risk > highestRisk {
-				highestRisk = risk
-			}
-		}
 	}
 
-	result.Metadata["highest_risk"] = highestRisk
+	result.Metadata["total_findings"] = len(result.Findings)
 	return result, nil
-}
-
-func (p *ZAPParser) Normalize(parsed *ParsedResult) (*models.ScannerRiskDetail, error) {
-	detail := &models.ScannerRiskDetail{
-		Scanner:  "owasp-zap",
-		Findings: []string{},
-	}
-
-	highestRisk := 0
-	if v, ok := parsed.Metadata["highest_risk"].(int); ok {
-		highestRisk = v
-	}
-
-	var allFindings []string
-	for _, finding := range parsed.Findings {
-		allFindings = append(allFindings, finding.Description)
-	}
-
-	finalSeverity := models.SeverityInfo
-	switch {
-	case highestRisk >= 75:
-		finalSeverity = models.SeverityHigh
-	case highestRisk >= 50:
-		finalSeverity = models.SeverityMedium
-	case highestRisk >= 30:
-		finalSeverity = models.SeverityLow
-	}
-
-	detail.NormalizedSeverity = finalSeverity
-	detail.Description = "Web application security issues detected by OWASP ZAP"
-
-	sort.Strings(allFindings)
-	detail.Findings = allFindings
-
-	findingCount := float64(len(allFindings))
-	if findingCount == 0 {
-		findingCount = 1
-	}
-
-	
-	detail.Score = float64(highestRisk)*10 + findingCount*2
-	return detail, nil
-}
-
-func (p *ZAPParser) ParseAndNormalize(rawResults []models.ScanResult) (*models.ScannerRiskDetail, error) {
-	aggregatedFindings := []string{}
-	highestSeverity := models.SeverityInfo
-
-	for _, scanResult := range rawResults {
-		parsed, err := p.Parse(scanResult.Result)
-		if err != nil {
-			continue
-		}
-
-		normalized, err := p.Normalize(parsed)
-		if err != nil {
-			continue
-		}
-
-		if models.GetSeverityScore(normalized.NormalizedSeverity) > models.GetSeverityScore(highestSeverity) {
-			highestSeverity = normalized.NormalizedSeverity
-		}
-
-		aggregatedFindings = append(aggregatedFindings, normalized.Findings...)
-	}
-
-	uniqueFindings := removeDuplicates(aggregatedFindings)
-	sort.Strings(uniqueFindings)
-
-	detail := &models.ScannerRiskDetail{
-		Scanner:            "owasp-zap",
-		NormalizedSeverity: highestSeverity,
-		Description:        "Web application security issues detected by OWASP ZAP",
-		Findings:           uniqueFindings,
-	}
-
-	baseScore := models.GetSeverityScore(highestSeverity)
-	findingCount := float64(len(uniqueFindings))
-	if findingCount == 0 {
-		findingCount = 1
-	}
-	detail.Score = baseScore * findingCount
-
-	return detail, nil
 }

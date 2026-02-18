@@ -11,7 +11,6 @@ import (
 	"napscan-be/internal/repository"
 	"strconv"
 	"strings"
-	"time"
 
 	"napscan-be/pkg/risk"
 
@@ -20,14 +19,18 @@ import (
 )
 
 type BatchService struct {
-	repo     repository.BatchRepository
-	scanRepo repository.ScanResultRepository
+	repo        repository.BatchRepository
+	scanRepo    repository.ScanResultRepository
+	findingRepo repository.FindingRepository
+	riskService *RiskService
 }
 
-func NewBatchService(repo repository.BatchRepository, scanRepo repository.ScanResultRepository) *BatchService {
+func NewBatchService(repo repository.BatchRepository, scanRepo repository.ScanResultRepository, findingRepo repository.FindingRepository, riskService *RiskService) *BatchService {
 	return &BatchService{
-		repo:     repo,
-		scanRepo: scanRepo,
+		repo:        repo,
+		scanRepo:    scanRepo,
+		findingRepo: findingRepo,
+		riskService: riskService,
 	}
 }
 
@@ -571,19 +574,101 @@ func (s *BatchService) calculateNormalizedRiskInternal(batchID string, scanResul
 	for scannerType, results := range scannerGroups {
 		log.Printf("[BATCH_SERVICE] Processing scanner: %s with %d results", scannerType, len(results))
 
+		// Try to fetch from DetectedFindings first (Persisted Intelligence)
+		storedFindings, err := s.findingRepo.GetByBatchIDAndTool(context.Background(), batchID, scannerType)
+		if err == nil && len(storedFindings) > 0 {
+			log.Printf("[BATCH_SERVICE] Found %d persisted findings for %s", len(storedFindings), scannerType)
+
+			normalizedFindings := []string{}
+			highestSeverity := models.SeverityInfo
+
+			for _, f := range storedFindings {
+				// Use persisted finding data
+				normalizedFindings = append(normalizedFindings, fmt.Sprintf("%s: %s", f.Title, f.Description))
+
+				// Calculate max severity
+				norm := models.NormalizeSeverity(f.Severity)
+				if models.GetSeverityScore(norm) > models.GetSeverityScore(highestSeverity) {
+					highestSeverity = norm
+				}
+			}
+
+			detail := models.ScannerRiskDetail{
+				Scanner:            scannerType,
+				NormalizedSeverity: highestSeverity,
+				Findings:           normalizedFindings,
+				Score:              models.GetSeverityScore(highestSeverity) * 10,
+			}
+			scannerDetails = append(scannerDetails, detail)
+			continue
+		}
+
+		// Fallback: Parse raw result if no findings in DB
 		parser := risk.GetParser(scannerType)
 		if parser == nil {
 			log.Printf("[BATCH_SERVICE] No parser found for scanner: %s", scannerType)
 			continue
 		}
 
-		detail, err := parser.ParseAndNormalize(results)
+		// (Logic for finding raw result in 'results' slice)
+		// Usually results has multiple ScanResults if chunked, but most tools have 1 ScanResult per tool per batch
+		// except maybe if parallel tasks ran? Scheduler runs 1 task per tool per schedule.
+		// So results[0] should be enough?
+		// But let's combine if multiple.
+
+		// For simplicity, we just parse the first non-empty result for now in fallback mode.
+		// Or creating a merged raw result.
+
+		if len(results) == 0 {
+			continue
+		}
+
+		// Use the first result's Result/ResultRaw
+		res := results[0]
+
+		// Decode raw result
+		var resultInterface interface{}
+		if res.Result != nil {
+			resultInterface = res.Result
+		} else if len(res.ResultRaw) > 0 {
+			var temp interface{}
+			dec := json.NewDecoder(bytes.NewReader(res.ResultRaw))
+			dec.UseNumber()
+			if err := dec.Decode(&temp); err == nil {
+				resultInterface = temp
+			}
+		}
+
+		parsed, err := parser.Parse(resultInterface)
 		if err != nil {
 			log.Printf("[BATCH_SERVICE] Failed to parse %s results: %v", scannerType, err)
 			continue
 		}
 
-		scannerDetails = append(scannerDetails, *detail)
+		// Normalize findings manually since ParseAndNormalize is removed
+		normalizedFindings := []string{}
+		highestSeverity := models.SeverityInfo
+
+		for _, finding := range parsed.Findings {
+			// Append description/title to findings list
+			normalizedFindings = append(normalizedFindings, fmt.Sprintf("%s: %s", finding.Title, finding.Description))
+
+			// Check severity
+			rawSev := finding.Severity
+			norm := models.NormalizeSeverity(rawSev)
+			if models.GetSeverityScore(norm) > models.GetSeverityScore(highestSeverity) {
+				highestSeverity = norm
+			}
+		}
+
+		detail := models.ScannerRiskDetail{
+			Scanner:            scannerType,
+			NormalizedSeverity: highestSeverity,
+			Findings:           normalizedFindings,
+			Score:              models.GetSeverityScore(highestSeverity) * 10, // Rough estimate
+		}
+
+		scannerDetails = append(scannerDetails, detail)
 	}
 
 	// 4. Calculate batch risk
@@ -639,45 +724,6 @@ func (s *BatchService) GetBatchDetail(ctx context.Context, batchID string, userI
 	if riskResponse.RiskDetail == nil {
 		riskResponse.RiskDetail = []models.ScannerRiskDetail{}
 	}
-
-	// for _, res := range scanResults {
-
-	// 	parser := risk.GetParser(res.Tool)
-	// 	if parser == nil {
-	// 		continue
-	// 	}
-
-	// 	var raw interface{}
-	// 	if res.Result != nil {
-	// 		raw = res.Result
-	// 	} else if len(res.ResultRaw) > 0 {
-	// 		var tmp interface{}
-	// 		dec := json.NewDecoder(bytes.NewReader(res.ResultRaw))
-	// 		dec.UseNumber()
-	// 		if err := dec.Decode(&tmp); err == nil {
-	// 			raw = tmp
-	// 		}
-	// 	}
-
-	// 	if raw == nil {
-	// 		continue
-	// 	}
-
-	// 	parsed, err := parser.Parse(raw)
-	// 	if err != nil {
-	// 		continue
-	// 	}
-
-	// 	normalized, err := parser.Normalize(parsed)
-	// 	if err != nil {
-	// 		continue
-	// 	}
-
-	// 	riskResponse.RiskDetail = append(
-	// 		riskResponse.RiskDetail,
-	// 		*normalized,
-	// 	)
-	// }
 
 	// 5. Determine target
 	target := "Unknown"
@@ -1007,7 +1053,7 @@ func (s *BatchService) GetBatchReportData(
 	userID string,
 ) (*models.ReportData, error) {
 
-	// 1. Fetch batch
+	// 1. Fetch batch for access control
 	batch, err := s.repo.FindByID(ctx, batchID)
 	if err != nil {
 		return nil, err
@@ -1018,225 +1064,8 @@ func (s *BatchService) GetBatchReportData(
 	if batch.UserID != userID {
 		return nil, fmt.Errorf("access denied")
 	}
-
-	// 2. Fetch scan results
-	scanResults, err := s.scanRepo.FindByBatchID(ctx, batchID)
-	if err != nil {
-		return nil, err
-	}
-
-	// [NEW] 2a. Inject Mobile Scans (APK) from AnalysisResultRaw
-	// If AnalysisResultRaw exists, we check for MobSF/Frida results and treat them as ScanResults
-	if len(batch.AnalysisResultRaw) > 0 {
-		var analysisMap map[string]interface{}
-		decoder := json.NewDecoder(bytes.NewReader(batch.AnalysisResultRaw))
-		decoder.UseNumber()
-		if err := decoder.Decode(&analysisMap); err == nil {
-
-			// Determine Target Name (APK Filename)
-			target := "MobileApp.apk" // Fallback
-			if len(batch.UploadedFiles) > 0 {
-				target = batch.UploadedFiles[0].FileName
-			}
-
-			// Check MobSF
-			if mobsf, ok := analysisMap["mobsf"]; ok {
-				log.Printf("[REPORT] Found MobSF data (key-wrapped) in batch %s", batchID)
-				scanResults = append(scanResults, models.ScanResult{
-					BatchID:   batchID,
-					Tool:      "mobsf",
-					Target:    target,
-					Result:    mobsf,
-					CreatedAt: batch.CreatedAt,
-				})
-			} else if _, ok := analysisMap["security_score"]; ok {
-				// Fallback: If no "mobsf" key but has "security_score", assume the whole map is MobSF
-				log.Printf("[REPORT] Found MobSF data (direct-map) in batch %s", batchID)
-				scanResults = append(scanResults, models.ScanResult{
-					BatchID:   batchID,
-					Tool:      "mobsf",
-					Target:    target,
-					Result:    analysisMap,
-					CreatedAt: batch.CreatedAt,
-				})
-			}
-
-			// Check Frida
-			if frida, ok := analysisMap["frida"]; ok {
-				log.Printf("[REPORT] Found Frida data (key-wrapped) in batch %s", batchID)
-				scanResults = append(scanResults, models.ScanResult{
-					BatchID:   batchID,
-					Tool:      "frida",
-					Target:    target,
-					Result:    frida,
-					CreatedAt: batch.CreatedAt,
-				})
-			} else if _, ok := analysisMap["logs"]; ok {
-				// Fallback: If no "frida" key but has "logs" (array), assume the whole map is Frida
-				// But rely on 'status' + 'logs' combination to be safe?
-				// FridaParser looks for "logs" and "status".
-				log.Printf("[REPORT] Found Frida data (direct-map) in batch %s", batchID)
-				scanResults = append(scanResults, models.ScanResult{
-					BatchID:   batchID,
-					Tool:      "frida",
-					Target:    target,
-					Result:    analysisMap,
-					CreatedAt: batch.CreatedAt,
-				})
-			}
-		}
-	}
-
-	// 3. Calculate normalized risk using ALL scan results (Network + APK)
-	// We use internal method to avoid refetching from DB which would miss our virtual fields
-	riskResponse, err := s.calculateNormalizedRiskInternal(batchID, scanResults)
-	if err != nil {
-		riskResponse = &models.BatchRiskResponse{
-			RiskScore:  0,
-			RiskLevel:  models.SeverityInfo,
-			RiskDetail: []models.ScannerRiskDetail{},
-		}
-	}
-
-	//-----------------------------------------
-	// 4. BUILD VULNERABILITIES FROM NORMALIZED
-	//-----------------------------------------
-
-	var vulnerabilities []models.UnifiedVulnerability
-	scannersUsed := []string{}
-	seenScanner := map[string]bool{}
-
-	critical := 0
-	high := 0
-	medium := 0
-	low := 0
-	info := 0
-
-	for _, res := range scanResults {
-
-		if !seenScanner[res.Tool] {
-			scannersUsed = append(scannersUsed, res.Tool)
-			seenScanner[res.Tool] = true
-		}
-
-		// Decode raw result
-		var resultInterface interface{}
-		if res.Result != nil {
-			resultInterface = res.Result
-		} else if len(res.ResultRaw) > 0 {
-			var temp interface{}
-			dec := json.NewDecoder(bytes.NewReader(res.ResultRaw))
-			dec.UseNumber()
-			if err := dec.Decode(&temp); err == nil {
-				resultInterface = temp
-			}
-		}
-
-		parser := risk.GetParser(res.Tool)
-		if parser == nil {
-			continue
-		}
-
-		parsed, err := parser.Parse(resultInterface)
-		if err != nil || parsed == nil {
-			continue
-		}
-
-		normalized, err := parser.Normalize(parsed)
-		if err != nil || normalized == nil {
-			continue
-		}
-
-		sev := strings.ToUpper(string(normalized.NormalizedSeverity))
-
-		for _, desc := range normalized.Findings {
-
-			switch sev {
-			case "CRITICAL":
-				critical++
-			case "HIGH":
-				high++
-			case "MEDIUM":
-				medium++
-			case "LOW":
-				low++
-			case "INFO":
-				info++
-			}
-
-			vulnerabilities = append(vulnerabilities, models.UnifiedVulnerability{
-				Title:            desc,
-				Description:      desc,
-				Severity:         sev,
-				AffectedEndpoint: res.Target,
-				Scanner:          res.Tool,
-				ToolRefID:        res.ID,
-			})
-		}
-	}
-
-	log.Printf("REPORT: collected %d vulnerabilities", len(vulnerabilities))
-
-	//-----------------------------------------
-	// 5. TARGET
-	//-----------------------------------------
-
-	target := "Unknown"
-	if len(batch.UploadedFiles) > 0 {
-		target = batch.UploadedFiles[0].FileName
-	} else if len(scanResults) > 0 {
-		target = scanResults[0].Target
-	}
-
-	//-----------------------------------------
-	// 6. RISK SUMMARY
-	//-----------------------------------------
-
-	riskSummary := models.RiskSummary{
-		TotalVulnerabilities: len(vulnerabilities),
-		CriticalCount:        critical,
-		HighCount:            high,
-		MediumCount:          medium,
-		LowCount:             low,
-		InfoCount:            info,
-		OverallRiskScore:     riskResponse.RiskScore,
-		RiskLevel:            string(riskResponse.RiskLevel),
-	}
-
-	//-----------------------------------------
-	// 7. EXECUTIVE SUMMARY
-	//-----------------------------------------
-
-	execSummary := fmt.Sprintf(
-		"Security assessment was performed against target '%s'.\n"+
-			"A total of %d vulnerabilities were identified using %d scanners.\n"+
-			"Overall risk level is %s (Score: %.1f/100).\n"+
-			"Critical: %d, High: %d, Medium: %d, Low: %d.",
-		target,
-		len(vulnerabilities),
-		len(scannersUsed),
-		riskResponse.RiskLevel,
-		riskResponse.RiskScore,
-		critical,
-		high,
-		medium,
-		low,
-	)
-
-	//-----------------------------------------
-	// 8. RETURN REPORT DATA
-	//-----------------------------------------
-
-	return &models.ReportData{
-		BatchID:          batch.BatchID,
-		GeneratedAt:      time.Now(),
-		TargetInfo:       target,
-		RiskSummary:      riskSummary,
-		Vulnerabilities:  vulnerabilities,
-		ScannersUsed:     scannersUsed,
-		ScanDuration:     time.Since(batch.CreatedAt).String(),
-		ExecutiveSummary: execSummary,
-	}, nil
+	// 2. Delegate to RiskService
+	return s.riskService.AnalyzeBatch(batchID)
 }
 
 func guessCVSSFromSeverity(sev string) float64 {

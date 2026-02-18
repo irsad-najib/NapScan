@@ -12,5 +12,6 @@ func BatchRoutes(router fiber.Router, h *handler.BatchHandler) {
 	router.Get("/batch/list", h.GetUserBatches)
 	router.Get("/batch/:batch_id", h.GetBatchDetail)
 	router.Get("/batch/:batch_id/report", h.GetBatchReport)
+	router.Get("/batch/:batch_id/report/preview", h.PreviewBatchReport)
 	router.Delete("/batch/:batch_id", h.DeleteBatch)
 }

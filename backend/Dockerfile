@@ -1,16 +1,31 @@
-FROM golang:latest
+FROM golang:1.25.2
 
 # Node.js and frida-compile are no longer needed
 
 
 # Install tools (nmap, ffuf, zap, sslyze, nuclei, gvm-tools)
-RUN apt-get update && apt-get install -y     nmap     ffuf     curl     bash     ca-certificates     python3     python3-pip     pipx     openjdk-21-jre  adb  xz-utils && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    nmap \
+    ffuf \
+    curl \
+    bash \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    pipx \
+    default-jre \
+    android-tools-adb \
+    xz-utils \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
 
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin
 
 # Install SSLyze and Frida via pipx
-RUN pipx install sslyze frida-tools frida-tools
+RUN pipx install sslyze  && pipx install frida-tools
 
 # Create a non-root user used specifically for gvm-cli (gvm-tools forbids root)
 RUN useradd -m -s /bin/bash napscan
@@ -20,7 +35,7 @@ RUN useradd -m -s /bin/bash napscan
 RUN pipx install gvm-tools
 
 # Install Nuclei
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.2.9
 
 # Install Swag for generating API docs
 RUN go install github.com/swaggo/swag/cmd/swag@v1.16.3

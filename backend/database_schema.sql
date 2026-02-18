@@ -103,4 +103,112 @@ CREATE TABLE `uploaded_files` (
   KEY `idx_uploaded_files_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------
+-- Table structure for cwe_definitions
+-- Source: backend/internal/models/cwe.go
+-- ----------------------------
+DROP TABLE IF EXISTS `cwe_definitions`;
+CREATE TABLE `cwe_definitions` (
+  `cwe_id` varchar(64) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `description` text,
+  `abstraction` varchar(64) DEFAULT NULL,
+  `status` varchar(32) DEFAULT NULL,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`cwe_id`),
+  KEY `idx_cwe_definitions_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------
+-- Table structure for cve_cache
+-- Source: backend/internal/models/cve.go
+-- ----------------------------
+DROP TABLE IF EXISTS `cve_cache`;
+CREATE TABLE `cve_cache` (
+  `cve_id` varchar(64) NOT NULL,
+  `cwe_id` varchar(64) DEFAULT NULL,
+  `cvss_score` decimal(4,1) DEFAULT NULL,
+  `cvss_vector` varchar(255) DEFAULT NULL,
+  `severity` varchar(32) DEFAULT NULL,
+  `description` text,
+  `published_at` datetime(3) DEFAULT NULL,
+  `last_synced` datetime(3) DEFAULT NULL,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`cve_id`),
+  KEY `idx_cve_cache_cwe_id` (`cwe_id`),
+  KEY `idx_cve_cache_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------
+-- Table structure for cpe_definitions
+-- Source: backend/internal/models/cpe.go
+-- ----------------------------
+DROP TABLE IF EXISTS `cpe_definitions`;
+CREATE TABLE `cpe_definitions` (
+  `cpe_uri` varchar(255) NOT NULL,
+  `vendor` varchar(128) DEFAULT NULL,
+  `product` varchar(128) DEFAULT NULL,
+  `version` varchar(64) DEFAULT NULL,
+  `part` char(1) DEFAULT NULL,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`cpe_uri`),
+  KEY `idx_cpe_definitions_vendor` (`vendor`),
+  KEY `idx_cpe_definitions_product` (`product`),
+  KEY `idx_cpe_definitions_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------
+-- Table structure for vulnerability_profiles
+-- Source: backend/internal/models/finding.go
+-- ----------------------------
+DROP TABLE IF EXISTS `vulnerability_profiles`;
+CREATE TABLE `vulnerability_profiles` (
+  `internal_code` varchar(128) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `cwe_id` varchar(64) DEFAULT NULL,
+  `default_cvss_vector` varchar(255) DEFAULT NULL,
+  `default_cvss_score` decimal(4,1) DEFAULT NULL,
+  `severity` varchar(32) DEFAULT NULL,
+  `description` text,
+  `recommendation` text,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`internal_code`),
+  KEY `idx_vulnerability_profiles_cwe_id` (`cwe_id`),
+  KEY `idx_vulnerability_profiles_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------
+-- Table structure for detected_findings
+-- Source: backend/internal/models/finding.go
+-- ----------------------------
+DROP TABLE IF EXISTS `detected_findings`;
+CREATE TABLE `detected_findings` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `scan_id` varchar(191) DEFAULT NULL,
+  `tenant_id` varchar(191) DEFAULT NULL,
+  `vuln_type` varchar(32) DEFAULT NULL,
+  `reference_id` varchar(255) DEFAULT NULL,
+  `cvss_score` decimal(4,1) DEFAULT NULL,
+  `cvss_vector` varchar(255) DEFAULT NULL,
+  `severity` varchar(32) DEFAULT NULL,
+  `raw_data` longtext,
+  `created_at` datetime(3) DEFAULT NULL,
+  `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_detected_findings_scan_id` (`scan_id`),
+  KEY `idx_detected_findings_tenant_id` (`tenant_id`),
+  KEY `idx_detected_findings_vuln_type` (`vuln_type`),
+  KEY `idx_detected_findings_reference_id` (`reference_id`),
+  KEY `idx_detected_findings_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

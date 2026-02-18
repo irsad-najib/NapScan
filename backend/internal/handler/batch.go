@@ -162,6 +162,56 @@ func (h *BatchHandler) GetBatchReport(c *fiber.Ctx) error {
 	return c.Download(filePath)
 }
 
+// PreviewBatchReport generates and streams a PDF report for the batch (inline)
+// @Summary Preview Batch Report
+// @Description Generate a PDF report for a specific batch and view it in browser
+// @Tags Batch
+// @Security BearerAuth
+// @Produce application/pdf
+// @Param batch_id path string true "Batch ID"
+// @Success 200 {string} string "PDF Content"
+// @Failure 401 {object} response.Response
+// @Failure 403 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /batch/{batch_id}/report/preview [get]
+func (h *BatchHandler) PreviewBatchReport(c *fiber.Ctx) error {
+	batchID := c.Params("batch_id")
+	log.Printf("[BATCH] Received preview report request for batch_id=%s", batchID)
+
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		log.Printf("[BATCH] User not authenticated")
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	reportData, err := h.service.GetBatchReportData(c.Context(), batchID, userID)
+	if err != nil {
+		log.Printf("[BATCH] Failed to get report data: %v", err)
+		if err.Error() == "batch not found" {
+			return response.NotFound(c, "Batch not found")
+		}
+		if err.Error() == "access denied" {
+			return response.Forbidden(c, "You do not have permission to access this batch")
+		}
+		return response.InternalServerError(c, "Failed to get report data", err)
+	}
+
+	// Generate PDF
+	filePath, err := h.reportService.GeneratePDF(reportData)
+	if err != nil {
+		log.Printf("[BATCH] Failed to generate PDF: %v", err)
+		return response.InternalServerError(c, "Failed to generate report", err)
+	}
+
+	log.Printf("[BATCH_SERVICE] Report generated manually for preview: %s", filePath)
+
+	// Set Content-Disposition to inline to display in browser
+	c.Set("Content-Disposition", "inline; filename=report.pdf")
+	c.Set("Content-Type", "application/pdf")
+	return c.SendFile(filePath)
+}
+
 // DeleteBatch removes a batch and its associated data
 // @Summary Delete Batch
 // @Description Delete a specific batch

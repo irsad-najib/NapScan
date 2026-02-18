@@ -69,7 +69,18 @@ func main() {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.User{}, &models.Batch{}, &models.ScanResult{}, &models.UploadedFile{}, &models.Schedule{})
+	err = db.AutoMigrate(
+		&models.User{},
+		&models.Batch{},
+		&models.ScanResult{},
+		&models.UploadedFile{},
+		&models.Schedule{},
+		&models.CVECache{},
+		&models.CWEDefinition{},
+		&models.CPEDefinition{},
+		&models.VulnerabilityProfile{},
+		&models.DetectedFinding{},
+	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate models: %v", err)
 	}
@@ -79,6 +90,7 @@ func main() {
 	scanResultRepo := repository.NewGormScanResultRepository(db)
 	batchRepo := repository.NewGormBatchRepository(db)
 	scheduleRepo := repository.NewGormScheduleRepository(db)
+	findingRepo := repository.NewGormFindingRepository(db)
 
 	app := fiber.New(fiber.Config{
 		// Set BodyLimit to 100MB for large file uploads (APKs, etc.)
@@ -128,13 +140,28 @@ func main() {
 	api.Use(middleware.AuthMiddleware())
 
 	// Services
+	cveService := service.NewCVEService(db)
+	cpeService := service.NewCPEService(db)
+	cweService := service.NewCWEService(db)
+	cvssService := service.NewCVSSService()
+
+	intelligenceService := service.NewIntelligenceService(db, cveService, cpeService, cweService, cvssService)
+
+	// Seed CWEs (async)
+	go func() {
+		if err := cweService.SeedCommonCWEs(); err != nil {
+			log.Printf("Failed to seed CWEs: %v", err)
+		}
+	}()
+
 	nmapService := service.NewNmapService()
-	nucleiService := service.NewNucleiService()
+	nucleiService := service.NewNucleiService(intelligenceService)
 	zapService := service.NewZapService()
 	ffufService := service.NewFfufService()
 	openvasService := service.NewOpenVASService()
 	sslyzeService := service.NewSslyzeService()
-	batchService := service.NewBatchService(batchRepo, scanResultRepo)
+	riskService := service.NewRiskService(db, findingRepo)
+	batchService := service.NewBatchService(batchRepo, scanResultRepo, findingRepo, riskService)
 	lifecycleService := service.NewLifecycleService(db, scanResultRepo)
 	reportService := service.NewReportService()
 
@@ -142,7 +169,7 @@ func main() {
 	scanManager := service.NewScanManager()
 
 	// Initialize Scheduler Service
-	schedulerService := service.NewSchedulerService(scheduleRepo, batchService, scanManager, scanResultRepo, lifecycleService)
+	schedulerService := service.NewSchedulerService(scheduleRepo, batchService, scanManager, scanResultRepo, lifecycleService, nucleiService, intelligenceService)
 	schedulerService.Start()
 	defer schedulerService.Stop()
 
