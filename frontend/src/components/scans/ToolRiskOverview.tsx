@@ -18,6 +18,10 @@ export function ToolRiskOverview({ vulnerabilities }: ToolRiskOverviewProps) {
 
     const total = vulnerabilities.length;
 
+    // Check if we only have info/low risks to show a less scary label
+    // If we have issues but 0 critical/high/medium/low, then they are all Info (or unknown/other which we treat as info/safe)
+    const isOnlyInfo = total > 0 && counts.critical === 0 && counts.high === 0 && counts.medium === 0 && counts.low === 0;
+
     // Calculate percentages for bar (prevent div by zero)
     const getPercent = (count: number) => total > 0 ? (count / total) * 100 : 0;
 
@@ -26,7 +30,7 @@ export function ToolRiskOverview({ vulnerabilities }: ToolRiskOverviewProps) {
             <div className="flex items-center justify-between mb-6">
                 <h4 className="font-bold text-slate-900 dark:text-white">Risks Overview</h4>
                 <span className="text-xs font-semibold text-slate-500 uppercase">
-                    {total} Total Issues
+                    {total} {isOnlyInfo ? "Info" : "Total Issues"}
                 </span>
             </div>
 
