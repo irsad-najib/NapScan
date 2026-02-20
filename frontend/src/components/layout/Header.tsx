@@ -9,12 +9,16 @@ interface HeaderProps {
   title?: string;
   showSearch?: boolean;
   searchPlaceholder?: string;
+  onSearch?: (query: string) => void;
+  searchValue?: string;
 }
 
 export default function Header({
   title,
   showSearch = true,
   searchPlaceholder = "Search...",
+  onSearch,
+  searchValue,
 }: HeaderProps) {
   const { user, isAuthenticated, loading: authLoading, loginWithPopup, logout } = useAuth();
   const { toggleSidebar } = useLayout();
@@ -58,6 +62,8 @@ export default function Header({
             className="bg-transparent border-none text-sm text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:ring-0 w-full ml-3 h-6 font-medium"
             placeholder={searchPlaceholder}
             type="text"
+            value={searchValue}
+            onChange={(e) => onSearch?.(e.target.value)}
           />
         </div>
       ) : title ? (

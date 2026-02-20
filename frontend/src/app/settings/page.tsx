@@ -71,68 +71,85 @@ export default function SettingsPage() {
         setTimeout(() => setSaveMessage(null), 3000);
     };
 
+    const [searchQuery, setSearchQuery] = useState("");
+
     const renderToggle = (
         enabled: boolean,
         onChange: (val: boolean) => void,
         label: string,
         description?: string
-    ) => (
-        <div className="flex items-center justify-between py-4 border-b border-slate-200 dark:border-slate-700/50 last:border-b-0">
-            <div className="flex-1 pr-4">
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">{label}</p>
-                {description && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{description}</p>
-                )}
-            </div>
-            <button
-                onClick={() => onChange(!enabled)}
-                className={`relative w-12 h-6 rounded-full transition-all duration-200 ${enabled
-                    ? "bg-gradient-to-r from-blue-600 to-cyan-500"
-                    : "bg-slate-300 dark:bg-slate-600"
-                    }`}
-            >
-                <span
-                    className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all duration-200 ${enabled ? "left-7" : "left-1"
+    ) => {
+        if (searchQuery &&
+            !label.toLowerCase().includes(searchQuery.toLowerCase()) &&
+            !description?.toLowerCase().includes(searchQuery.toLowerCase())) {
+            return null;
+        }
+
+        return (
+            <div className="flex items-center justify-between py-4 border-b border-slate-200 dark:border-slate-700/50 last:border-b-0">
+                <div className="flex-1 pr-4">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{label}</p>
+                    {description && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{description}</p>
+                    )}
+                </div>
+                <button
+                    onClick={() => onChange(!enabled)}
+                    className={`relative w-12 h-6 rounded-full transition-all duration-200 ${enabled
+                        ? "bg-gradient-to-r from-blue-600 to-cyan-500"
+                        : "bg-slate-300 dark:bg-slate-600"
                         }`}
-                />
-            </button>
-        </div>
-    );
+                >
+                    <span
+                        className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all duration-200 ${enabled ? "left-7" : "left-1"
+                            }`}
+                    />
+                </button>
+            </div>
+        );
+    };
 
     const renderGeneralSettings = () => (
         <div className="space-y-6">
             {/* Theme */}
-            <div>
-                <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-3">
-                    Theme
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                    {(["light", "dark", "system"] as ThemeOption[]).map((option) => (
-                        <button
-                            key={option}
-                            onClick={() => handleThemeChange(option)}
-                            className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${theme === option
-                                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-                                : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
-                                }`}
-                        >
-                            <span className={`material-symbols-outlined text-2xl ${theme === option ? "text-blue-600 dark:text-blue-400" : "text-slate-500"
-                                }`}>
-                                {option === "light" ? "light_mode" : option === "dark" ? "dark_mode" : "contrast"}
-                            </span>
-                            <span className={`text-sm font-semibold capitalize ${theme === option ? "text-blue-600 dark:text-blue-400" : "text-slate-600 dark:text-slate-400"
-                                }`}>
-                                {option}
-                            </span>
-                        </button>
-                    ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">
-                    {theme === "system" && "Automatically switches based on your system preference"}
-                    {theme === "light" && "Light mode - easier on the eyes in bright environments"}
-                    {theme === "dark" && "Dark mode - reduces eye strain in low-light environments"}
-                </p>
-            </div>
+            {(!searchQuery ||
+                "theme".includes(searchQuery.toLowerCase()) ||
+                "light mode".includes(searchQuery.toLowerCase()) ||
+                "dark mode".includes(searchQuery.toLowerCase()) ||
+                "system".includes(searchQuery.toLowerCase())
+            ) && (
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-3">
+                            Theme
+                        </label>
+                        <div className="grid grid-cols-3 gap-3">
+                            {(["light", "dark", "system"] as ThemeOption[]).map((option) => (
+                                <button
+                                    key={option}
+                                    onClick={() => handleThemeChange(option)}
+                                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${theme === option
+                                        ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
+                                        : "border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600"
+                                        }`}
+                                >
+                                    <span className={`material-symbols-outlined text-2xl ${theme === option ? "text-blue-600 dark:text-blue-400" : "text-slate-500"
+                                        }`}>
+                                        {option === "light" ? "light_mode" : option === "dark" ? "dark_mode" : "contrast"}
+                                    </span>
+                                    <span className={`text-sm font-semibold capitalize ${theme === option ? "text-blue-600 dark:text-blue-400" : "text-slate-600 dark:text-slate-400"
+                                        }`}>
+                                        {option}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">
+                            {theme === "system" && "Automatically switches based on your system preference"}
+                            {theme === "light" && "Light mode - easier on the eyes in bright environments"}
+                            {theme === "dark" && "Dark mode - reduces eye strain in low-light environments"}
+                        </p>
+                    </div>
+                )}
 
             {/* Auto Save */}
             {renderToggle(autoSave, setAutoSave, "Auto-save Scans", "Automatically save scan results when completed")}
@@ -197,7 +214,7 @@ export default function SettingsPage() {
                     </div>
                     <span className="px-3 py-1 bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 rounded-full text-xs font-bold">
                         Free
-                         Plan
+                        Plan
                     </span>
                 </div>
             </div>
@@ -269,7 +286,11 @@ export default function SettingsPage() {
             {/* Main Layout */}
             <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
                 {/* Top Navigation */}
-                <Header searchPlaceholder="Search settings..." />
+                <Header
+                    searchPlaceholder="Search settings..."
+                    searchValue={searchQuery}
+                    onSearch={setSearchQuery}
+                />
 
                 {/* Main Content */}
                 <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
@@ -319,8 +340,8 @@ export default function SettingsPage() {
                             <div className="lg:col-span-3">
                                 <div className="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                                     {/* Section Header */}
-                                    
-                                    
+
+
                                     <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
                                         <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                                             <span className="material-symbols-outlined">

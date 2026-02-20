@@ -113,23 +113,24 @@ export default function Home() {
   };
 
   const filteredBatches = batches.filter(batch => {
-    if (statusFilter === "All Statuses") return true;
-
-    const status = batch.status.toLowerCase();
-
-    if (statusFilter === "Processing") {
-      return ["processing", "running", "scanning", "pending"].includes(status);
+    // 1. Status Filter
+    let satisfiesStatus = true;
+    if (statusFilter !== "All Statuses") {
+      const status = batch.status.toLowerCase();
+      if (statusFilter === "Processing") {
+        satisfiesStatus = ["processing", "running", "scanning", "pending"].includes(status);
+      } else if (statusFilter === "Completed") {
+        satisfiesStatus = ["completed", "finished", "success", "complete"].includes(status);
+      } else if (statusFilter === "Failed") {
+        satisfiesStatus = status === "failed";
+      }
     }
 
-    if (statusFilter === "Completed") {
-      return ["completed", "finished", "success", "complete"].includes(status);
-    }
+    // 2. Search Filter
+    const satisfiesSearch = !searchQuery ||
+      batch.target.toLowerCase().includes(searchQuery.toLowerCase());
 
-    if (statusFilter === "Failed") {
-      return status === "failed";
-    }
-
-    return true;
+    return satisfiesStatus && satisfiesSearch;
   });
 
   const getRiskColor = (riskLevel: string | null) => {
@@ -165,7 +166,11 @@ export default function Home() {
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
         {/* Top Navigation */}
-        <Header searchPlaceholder="Search targets..." />
+        <Header
+          searchPlaceholder="Search targets..."
+          searchValue={searchQuery}
+          onSearch={setSearchQuery}
+        />
 
         {/* Main Content Scroll Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
@@ -244,9 +249,9 @@ export default function Home() {
                       </span>
                     </span>
                   </div>
-                  <button 
-                  onClick={() => router.push("/reports")}
-                  className="h-10 px-4 bg-white dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-700 dark:text-slate-200 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center gap-2 font-medium">
+                  <button
+                    onClick={() => router.push("/reports")}
+                    className="h-10 px-4 bg-white dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-700 dark:text-slate-200 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center gap-2 font-medium">
                     <span className="material-symbols-outlined text-[18px]">
                       download
                     </span>

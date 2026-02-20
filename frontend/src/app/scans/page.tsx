@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import React, { useState } from "react";
 import { ToolKey } from "@/services/api";
 import { useScan } from "@/context/ScanContext";
 import { useSchedule } from "@/context/ScheduleContext";
@@ -38,6 +38,7 @@ export default function ScansPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Scan type: web or apk
   const [scanType, setScanType] = useState<"web" | "apk">("web");
@@ -340,6 +341,18 @@ export default function ScansPage() {
     setExpandedScanId(expandedScanId === scanId ? null : scanId);
   };
 
+
+
+  const filteredScans = scans.filter((scan) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      scan.name.toLowerCase().includes(query) ||
+      scan.target.toLowerCase().includes(query) ||
+      Object.keys(scan.tools || {}).some((tool) => tool.toLowerCase().includes(query))
+    );
+  });
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-slate-950">
       {/* Sidebar */}
@@ -348,7 +361,11 @@ export default function ScansPage() {
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
         {/* Top Navigation */}
-        <Header searchPlaceholder="Search scans..." />
+        <Header
+          searchPlaceholder="Search scans..."
+          searchValue={searchQuery}
+          onSearch={setSearchQuery}
+        />
 
         {/* Main Content Scroll Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
@@ -853,17 +870,16 @@ export default function ScansPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                      {scans.length === 0 ? (
+                      {filteredScans.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="text-center py-8 text-slate-500">
-                            No scans found. Start a new scan above.
+                            {searchQuery ? "No scans found matching your search." : "No scans found. Start a new scan above."}
                           </td>
                         </tr>
                       ) : (
-                        scans.map((scan) => (
-                          <>
+                        filteredScans.map((scan) => (
+                          <React.Fragment key={scan.id}>
                             <tr
-                              key={scan.id}
                               className={`group hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors duration-150 cursor-pointer ${expandedScanId === scan.id ? "bg-slate-50 dark:bg-slate-700/30" : ""
                                 }`}
                               onClick={() => toggleScanExpand(scan.id)}
@@ -934,7 +950,7 @@ export default function ScansPage() {
                                 </td>
                               </tr>
                             )}
-                          </>
+                          </React.Fragment>
                         ))
                       )}
                     </tbody>
@@ -946,7 +962,7 @@ export default function ScansPage() {
                   <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
                     Showing{" "}
                     <span className="text-slate-900 dark:text-white font-bold">
-                      {scans.length}
+                      {filteredScans.length}
                     </span>{" "}
                     scans
                   </p>

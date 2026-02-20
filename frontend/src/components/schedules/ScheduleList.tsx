@@ -5,7 +5,11 @@ import { useSchedule } from "@/context/ScheduleContext";
 
 import cronstrue from "cronstrue";
 
-export default function ScheduleList() {
+interface ScheduleListProps {
+    searchQuery?: string;
+}
+
+export default function ScheduleList({ searchQuery = "" }: ScheduleListProps) {
     const { schedules, isLoading, deleteSchedule, pauseSchedule, resumeSchedule } = useSchedule();
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -39,13 +43,22 @@ export default function ScheduleList() {
             });
         });
 
-        return Object.values(groups).map(g => ({
+        const allSchedules = Object.values(groups).map(g => ({
             ...g.schedule,
             id: g.ids[0], // Use first ID as primary key for React list
             allIds: g.ids, // Keep track of all IDs in this group
             combinedTools: Array.from(g.tools)
         })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }, [schedules]);
+
+        if (!searchQuery) return allSchedules;
+
+        const query = searchQuery.toLowerCase();
+        return allSchedules.filter(s =>
+            s.name.toLowerCase().includes(query) ||
+            s.target.toLowerCase().includes(query) ||
+            s.combinedTools.some(t => t.toLowerCase().includes(query))
+        );
+    }, [schedules, searchQuery]);
 
     const handleAction = async (ids: string[], actionName: 'pause' | 'resume' | 'delete') => {
         // Use the first ID for loading state

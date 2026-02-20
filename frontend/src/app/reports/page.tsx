@@ -44,6 +44,14 @@ export default function ReportsPage() {
   const [exportFormat, setExportFormat] = useState<"pdf" | "html">("pdf");
   const [vulnSortOrder, setVulnSortOrder] = useState<SortOrder>("desc");
   const [isExporting, setIsExporting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredBatches = useMemo(() => {
+    if (!searchQuery) return batches;
+    return batches.filter(batch =>
+      batch.target.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [batches, searchQuery]);
 
   // 1. Fetch Batch List on Mount
   useEffect(() => {
@@ -264,7 +272,11 @@ export default function ReportsPage() {
       {/* Main Layout */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
         {/* Top Navigation */}
-        <Header searchPlaceholder="Search reports..." />
+        <Header
+          searchPlaceholder="Search reports..."
+          searchValue={searchQuery}
+          onSearch={setSearchQuery}
+        />
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
@@ -298,12 +310,12 @@ export default function ReportsPage() {
                         <span className="material-symbols-outlined animate-spin mb-2">sync</span>
                         Loading history...
                       </div>
-                    ) : batches.length === 0 ? (
+                    ) : filteredBatches.length === 0 ? (
                       <div className="p-8 text-center text-slate-500">
-                        No scan history found. Run a scan first
+                        {searchQuery ? "No reports found matching your search." : "No scan history found. Run a scan first"}
                       </div>
                     ) : (
-                      batches.map((batch) => (
+                      filteredBatches.map((batch) => (
                         <div
                           key={batch.batch_id}
                           onClick={() => {

@@ -15,6 +15,7 @@ export default function SchedulesPage() {
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showAuthDialog, setShowAuthDialog] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
@@ -34,7 +35,12 @@ export default function SchedulesPage() {
         <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-slate-950">
             <Sidebar />
             <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 relative">
-                <Header title="Scheduled Scans" />
+                <Header
+                    title="Scheduled Scans"
+                    searchPlaceholder="Search schedules..."
+                    searchValue={searchQuery}
+                    onSearch={setSearchQuery}
+                />
 
                 <main className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-10 md:px-12 md:py-12 scroll-smooth">
                     <div className="max-w-7xl mx-auto flex flex-col gap-8 pb-20">
@@ -69,7 +75,7 @@ export default function SchedulesPage() {
                         </div>
 
                         {/* List Component */}
-                        <ScheduleList />
+                        <ScheduleList searchQuery={searchQuery} />
                     </div>
                 </main>
             </div>
